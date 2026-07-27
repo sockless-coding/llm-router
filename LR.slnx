@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="LR.Core/LR.Core.csproj" />
+  <Project Path="LR.Providers/LR.Providers.csproj" />
+  <Project Path="LR.Application/LR.Application.csproj" />
+</Solution>

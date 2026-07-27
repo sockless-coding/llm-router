@@ -1,0 +1,71 @@
+@page
+@using LR.Application.Pages.Features.Servers
+@model EditModel
+@{
+    ViewData["Title"] = "Edit Server";
+}
+
+@if (Model.Server is not null)
+{
+    <div class="max-w-lg mx-auto">
+        <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5">
+            <!-- Name -->
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Name</label>
+                <p class="text-lg text-gray-100 font-medium">@Model.Server.Name</p>
+            </div>
+
+            <!-- Backend -->
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Backend</label>
+                <span class="px-2 py-0.5 rounded text-xs font-medium
+                    @if (Model.Server.BackendType == BackendType.Cuda) { <text>bg-neon-cyan/10 text-neon-cyan</text> }
+                    else if (Model.Server.BackendType == BackendType.Vulkan) { <text>bg-neon-magenta/10 text-neon-magenta</text> }">
+                    @Model.Server.BackendType
+                </span>
+            </div>
+
+            <!-- Status -->
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Status</label>
+                <p class="text-gray-200">@Model.Server.Status — @if (Model.Server.IsHealthy) { <text>Healthy</text> } else { <text>Unhealthy</text> }</p>
+            </div>
+
+            <!-- Port -->
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Port</label>
+                <p class="text-gray-200">@Model.Server.Port</p>
+            </div>
+
+            <!-- URL -->
+            @if (!string.IsNullOrEmpty(Model.Server.Url))
+            {
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">URL</label>
+                    <p class="text-neon-cyan">@Model.Server.Url</p>
+                </div>
+            }
+
+            <!-- Actions -->
+            <div class="flex items-center gap-3 pt-2">
+                @if (Model.Server.Status != ServerStatus.Running)
+                {
+                    <button class="px-4 py-2 rounded-lg bg-neon-green/10 text-neon-green border border-neon-green/20 hover:bg-neon-green/20 transition-all text-sm font-medium">
+                        Start
+                    </button>
+                }
+                else
+                {
+                    <button class="px-4 py-2 rounded-lg bg-neon-red/10 text-neon-red border border-neon-red/20 hover:bg-neon-red/20 transition-all text-sm font-medium">
+                        Stop
+                    </button>
+                }
+                <a href="/Features/Servers/Index"
+                   class="px-4 py-2 rounded-lg bg-gray-700/30 text-gray-400 border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
+                    Back
+                </a>
+            </div>
+        </div>
+    </div>
+}
+

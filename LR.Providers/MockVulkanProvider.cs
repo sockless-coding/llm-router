@@ -1,0 +1,41 @@
+using LR.Core.Interfaces;
+using LR.Core.Models;
+
+namespace LR.Providers;
+
+/// <summary>
+/// Mock Vulkan backend provider for testing.
+/// </summary>
+public class MockVulkanProvider : IBackendProvider
+{
+    private bool _isRunning;
+
+    public BackendType SupportedBackend => BackendType.Vulkan;
+
+    public async Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default)
+    {
+        await Task.Delay(500, cancellationToken);
+        _isRunning = true;
+        return true;
+    }
+
+    public async Task StopProcessAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_isRunning) return;
+        await Task.Delay(300, cancellationToken);
+        _isRunning = false;
+    }
+
+    public async Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default)
+    {
+        await Task.Delay(200, cancellationToken);
+        return _isRunning;
+    }
+
+    public async Task<string?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
+    {
+        if (!_isRunning) throw new InvalidOperationException("Server is not running.");
+        await Task.Delay(500, cancellationToken);
+        return $"[Mock Vulkan Response] You sent: {payload}";
+    }
+}

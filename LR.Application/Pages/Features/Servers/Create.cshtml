@@ -1,0 +1,52 @@
+@page
+@using LR.Application.Pages.Features.Servers
+@model ServerCreateModel
+@{
+    ViewData["Title"] = "Create Server";
+}
+
+<div class="max-w-lg mx-auto">
+    <form method="post" class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5">
+        @Html.AntiForgeryToken()
+
+        <!-- Name -->
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Server Name</label>
+            <input asp-for="ViewModel.Name" required placeholder="e.g. cuda-main"
+                   class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500" />
+            <span asp-validation-for="ViewModel.Name" class="text-xs text-neon-red mt-1"></span>
+        </div>
+
+        <!-- Backend Type -->
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Backend</label>
+            <select asp-for="ViewModel.BackendType"
+                    class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all">
+                <option value="Cuda">CUDA</option>
+                <option value="Vulkan">Vulkan</option>
+                <option value="Sycl">SYCL</option>
+                <option value="Cpu">CPU</option>
+            </select>
+        </div>
+
+        <!-- Port -->
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Port <span class="text-gray-500">(optional)</span></label>
+            <input asp-for="ViewModel.Port" type="number" min="1024" max="65535" placeholder="Auto-assigned"
+                   class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500" />
+        </div>
+
+        <!-- Actions -->
+        <div class="flex items-center gap-3 pt-2">
+            <button type="submit"
+                    class="px-6 py-2.5 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium text-sm shadow-neon-cyan">
+                Create Server
+            </button>
+            <a href="/Features/Servers/Index"
+               class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-gray-400 border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+

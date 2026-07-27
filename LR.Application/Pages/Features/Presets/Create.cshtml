@@ -1,0 +1,62 @@
+@page
+@using LR.Application.Pages.Features.Presets
+@model PresetCreateModel
+@{
+    ViewData["Title"] = "Create Preset";
+}
+
+<div class="max-w-lg mx-auto">
+    <form method="post" class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-5">
+        @Html.AntiForgeryToken()
+
+        <!-- Server Instance -->
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Server Instance</label>
+            <select asp-for="ViewModel.ServerInstanceId" asp-items="@(new SelectList(Model.Servers, "Id", "Name"))"
+                    class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all">
+                <option value="">— Select a server —</option>
+            </select>
+        </div>
+
+        <!-- Name -->
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Preset Name</label>
+            <input asp-for="ViewModel.Name" required placeholder="e.g. llama-3-cuda"
+                   class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500" />
+        </div>
+
+        <!-- Model Path -->
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Model Path</label>
+            <input asp-for="ViewModel.ModelPath" required placeholder="/path/to/model.gguf"
+                   class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500" />
+        </div>
+
+        <!-- Context Length -->
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">Context Length</label>
+            <input asp-for="ViewModel.ContextLength" type="number" min="128"
+                   class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all" />
+        </div>
+
+        <!-- GPU Layers -->
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">GPU Layers <span class="text-gray-500">(-1 = all)</span></label>
+            <input asp-for="ViewModel.GpuLayers" type="number"
+                   class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all" />
+        </div>
+
+        <!-- Actions -->
+        <div class="flex items-center gap-3 pt-2">
+            <button type="submit"
+                    class="px-6 py-2.5 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all font-medium text-sm shadow-neon-magenta">
+                Create Preset
+            </button>
+            <a href="/Features/Presets/Index"
+               class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-gray-400 border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+
