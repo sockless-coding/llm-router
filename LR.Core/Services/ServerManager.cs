@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+
+using LR.Core.Data;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 
@@ -6,18 +9,18 @@ namespace LR.Core.Services;
 /// <summary>
 /// Manages the lifecycle of inference server instances.
 /// Coordinates with IBackendProvider for process control and IPresetManager for model switching.
+/// Uses EF Core for persistence; runtime provider references are kept in-memory.
 /// </summary>
 public class ServerManager : IServerManager
 {
+    private readonly LRDbContext _context;
     private readonly IBackendProviderFactory _providerFactory;
-    private readonly IPresetManager _presetManager;
-    private readonly Dictionary<Guid, ServerInstance> _instances = new();
     private readonly Dictionary<Guid, IBackendProvider> _providers = new();
 
-    public ServerManager(IBackendProviderFactory providerFactory, IPresetManager presetManager)
+    public ServerManager(LRDbContext context, IBackendProviderFactory providerFactory)
     {
+        _context = context;
         _providerFactory = providerFactory;
-        _presetManager = presetManager;
     }
 
     public async Task<ServerInstance> CreateInstanceAsync(string name, BackendType backendType, int? port = null)
@@ -27,22 +30,23 @@ public class ServerManager : IServerManager
             Name = name,
             BackendType = backendType,
             Status = ServerStatus.Idle,
-            Port = port ?? GetNextAvailablePort(),
+            Port = port ?? await GetNextAvailablePort(),
         };
 
-        _instances[instance.Id] = instance;
+        _context.ServerInstances.Add(instance);
+        await _context.SaveChangesAsync();
 
-        // Create the backend provider for this instance
+        // Create the backend provider for this instance (runtime-only, not persisted)
         var provider = _providerFactory.Create(backendType);
         if (provider is not null)
             _providers[instance.Id] = provider;
 
-        return await Task.FromResult(instance);
+        return instance;
     }
 
     public async Task<bool> StartAsync(Guid instanceId, CancellationToken cancellationToken = default)
     {
-        var instance = GetInstanceOrThrow(instanceId);
+        var instance = await GetInstanceOrThrow(instanceId);
         var provider = GetProviderOrThrow(instanceId);
 
         if (instance.Status == ServerStatus.Running)
@@ -53,7 +57,7 @@ public class ServerManager : IServerManager
         ModelPreset? preset = null;
         if (instance.ActivePresetId.HasValue)
         {
-            preset = _presetManager.GetById(instance.ActivePresetId.Value);
+            preset = await _context.ModelPresets.FindAsync(instance.ActivePresetId.Value);
         }
 
         bool started;
@@ -74,12 +78,13 @@ public class ServerManager : IServerManager
             instance.IsHealthy = false;
         }
 
-        return await Task.FromResult(started);
+        await _context.SaveChangesAsync();
+        return started;
     }
 
     public async Task StopAsync(Guid instanceId, CancellationToken cancellationToken = default)
     {
-        var instance = GetInstanceOrThrow(instanceId);
+        var instance = await GetInstanceOrThrow(instanceId);
         if (instance.Status != ServerStatus.Running)
             return;
 
@@ -88,12 +93,13 @@ public class ServerManager : IServerManager
         await provider.StopProcessAsync(cancellationToken);
 
         instance.Status = ServerStatus.Idle;
+        await _context.SaveChangesAsync();
     }
 
     public async Task<bool> RestartWithPresetAsync(Guid instanceId, Guid presetId, CancellationToken cancellationToken = default)
     {
-        var instance = GetInstanceOrThrow(instanceId);
-        var preset = _presetManager.GetById(presetId) ?? throw new ArgumentException("Preset not found.", nameof(presetId));
+        var instance = await GetInstanceOrThrow(instanceId);
+        var preset = await _context.ModelPresets.FindAsync(presetId) ?? throw new ArgumentException("Preset not found.", nameof(presetId));
 
         if (instance.Status == ServerStatus.Running)
             await StopAsync(instanceId, cancellationToken);
@@ -102,13 +108,13 @@ public class ServerManager : IServerManager
         return await StartAsync(instanceId, cancellationToken);
     }
 
-    public Task<ServerInstance?> GetHealthAsync(Guid instanceId)
+    public async Task<ServerInstance?> GetHealthAsync(Guid instanceId)
     {
-        if (!_instances.TryGetValue(instanceId, out var instance))
-            return Task.FromResult<ServerInstance?>(null);
+        var instance = await _context.ServerInstances.FindAsync(instanceId);
+        if (instance is null) return null;
 
-        // Deep clone to avoid mutation issues
-        var snapshot = new ServerInstance
+        // Return a snapshot to avoid mutation issues
+        return new ServerInstance
         {
             Id = instance.Id,
             Name = instance.Name,
@@ -119,13 +125,27 @@ public class ServerManager : IServerManager
             Url = instance.Url,
             Port = instance.Port,
         };
+    }
 
-        return Task.FromResult<ServerInstance?>(snapshot);
+    public async Task<IReadOnlyList<ServerInstance>> GetAllInstancesAsync()
+    {
+        var instances = await _context.ServerInstances.ToListAsync();
+        return instances.Select(i => new ServerInstance
+        {
+            Id = i.Id,
+            Name = i.Name,
+            BackendType = i.BackendType,
+            Status = i.Status,
+            IsHealthy = i.IsHealthy,
+            ActivePresetId = i.ActivePresetId,
+            Url = i.Url,
+            Port = i.Port,
+        }).ToList().AsReadOnly();
     }
 
     public IReadOnlyList<ServerInstance> GetAllInstances()
     {
-        return _instances.Values.Select(i => new ServerInstance
+        return _context.ServerInstances.ToList().Select(i => new ServerInstance
         {
             Id = i.Id,
             Name = i.Name,
@@ -140,17 +160,23 @@ public class ServerManager : IServerManager
 
     public async Task RemoveInstanceAsync(Guid instanceId, CancellationToken cancellationToken = default)
     {
-        if (_instances.TryGetValue(instanceId, out var instance) && instance.Status == ServerStatus.Running)
+        var instance = await _context.ServerInstances.FindAsync(instanceId);
+        if (instance is not null && instance.Status == ServerStatus.Running)
             await StopAsync(instanceId, cancellationToken);
 
-        _instances.Remove(instanceId);
+        if (instance is not null)
+        {
+            _context.ServerInstances.Remove(instance);
+            await _context.SaveChangesAsync();
+        }
+
         _providers.Remove(instanceId);
     }
 
-    private ServerInstance GetInstanceOrThrow(Guid instanceId)
+    private async Task<ServerInstance> GetInstanceOrThrow(Guid instanceId)
     {
-        if (!_instances.TryGetValue(instanceId, out var instance))
-            throw new KeyNotFoundException($"Server instance {instanceId} not found.");
+        var instance = await _context.ServerInstances.FindAsync(instanceId)
+            ?? throw new KeyNotFoundException($"Server instance {instanceId} not found.");
         return instance;
     }
 
@@ -180,10 +206,10 @@ public class ServerManager : IServerManager
     /// <summary>
     /// Simple port increment strategy. In production, this should check actual port availability.
     /// </summary>
-    private int GetNextAvailablePort()
+    private async Task<int> GetNextAvailablePort()
     {
         var basePort = 8080;
-        var usedPorts = _instances.Values.Select(i => i.Port).ToList();
+        var usedPorts = await _context.ServerInstances.Select(i => i.Port).ToListAsync();
         for (int p = basePort; ; p++)
         {
             if (!usedPorts.Contains(p))

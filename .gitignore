@@ -77,5 +77,5 @@ Thumbs.db
 # Prompt and local config
 prompt.md
 run.bat
-*appsettings.Development.json
+appsettings.Development.json
 

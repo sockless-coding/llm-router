@@ -23,9 +23,19 @@ public interface IPresetManager
     Task<bool> DeleteAsync(Guid presetId);
 
     /// <summary>
+    /// Gets all presets for a specific server instance (async).
+    /// </summary>
+    Task<IReadOnlyList<ModelPreset>> GetByServerInstanceIdAsync(Guid serverInstanceId);
+
+    /// <summary>
     /// Gets all presets for a specific server instance.
     /// </summary>
     IReadOnlyList<ModelPreset> GetByServerInstanceId(Guid serverInstanceId);
+
+    /// <summary>
+    /// Gets a single preset by ID, or null if not found (async).
+    /// </summary>
+    Task<ModelPreset?> GetByIdAsync(Guid presetId);
 
     /// <summary>
     /// Gets a single preset by ID, or null if not found.

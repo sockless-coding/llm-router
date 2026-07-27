@@ -49,15 +49,34 @@ public class MockLlamaCppProvider : IBackendProvider
         return _isRunning;
     }
 
-    public async Task<string?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
+    public async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
     {
         if (!_isRunning)
             throw new InvalidOperationException("Server is not running.");
 
-        // Simulate inference delay
-        await Task.Delay(500, cancellationToken);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        // Simulate prompt processing delay
+        await Task.Delay(150, cancellationToken);
+        var promptProcessingMs = sw.ElapsedMilliseconds;
 
-        return $"[Mock Response] You sent: {payload}"
-            + "\nThis is a simulated response from the mock Llama.cpp provider.";
+        // Estimate tokens from payload length (roughly 4 chars per token)
+        var promptTokens = Math.Max(1, payload.Length / 4);
+
+        // Simulate generation delay (simulate ~20 output tokens at ~5ms each)
+        await Task.Delay(100, cancellationToken);
+        var genMs = sw.ElapsedMilliseconds - promptProcessingMs;
+
+        sw.Stop();
+
+        return new RouteResponse
+        {
+            Payload = $"[Mock Response] You sent: {payload}\nThis is a simulated response from the mock Llama.cpp provider.",
+            PromptTokensProcessed = promptTokens,
+            GeneratedTokenCount = 20,
+            PromptProcessingMs = promptProcessingMs,
+            GenerationMs = genMs,
+            TotalLatencyMs = sw.ElapsedMilliseconds,
+            FirstTokenLatencyMs = promptProcessingMs + 10,
+        };
     }
 }

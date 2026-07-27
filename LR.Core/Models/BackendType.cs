@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace LR.Core.Models;
 
 /// <summary>

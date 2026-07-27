@@ -32,10 +32,28 @@ public class MockCpuProvider : IBackendProvider
         return _isRunning;
     }
 
-    public async Task<string?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
+    public async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
     {
         if (!_isRunning) throw new InvalidOperationException("Server is not running.");
-        await Task.Delay(500, cancellationToken);
-        return $"[Mock CPU Response] You sent: {payload}";
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await Task.Delay(200, cancellationToken);
+        var promptProcessingMs = sw.ElapsedMilliseconds;
+        var promptTokens = Math.Max(1, payload.Length / 4);
+
+        await Task.Delay(300, cancellationToken);
+        var genMs = sw.ElapsedMilliseconds - promptProcessingMs;
+        sw.Stop();
+
+        return new RouteResponse
+        {
+            Payload = $"[Mock CPU Response] You sent: {payload}",
+            PromptTokensProcessed = promptTokens,
+            GeneratedTokenCount = 15,
+            PromptProcessingMs = promptProcessingMs,
+            GenerationMs = genMs,
+            TotalLatencyMs = sw.ElapsedMilliseconds,
+            FirstTokenLatencyMs = promptProcessingMs + 20,
+        };
     }
 }

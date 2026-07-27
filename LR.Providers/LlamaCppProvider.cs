@@ -37,7 +37,7 @@ public abstract class LlamaCppProvider : IBackendProvider
     public abstract Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default);
     public abstract Task StopProcessAsync(CancellationToken cancellationToken = default);
     public abstract Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default);
-    public abstract Task<string?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);
+    public abstract Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Builds the command-line arguments from a ModelPreset.

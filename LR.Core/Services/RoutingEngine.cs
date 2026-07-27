@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+
+using LR.Core.Data;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 
@@ -6,22 +9,26 @@ namespace LR.Core.Services;
 /// <summary>
 /// Rule-based routing engine that evaluates incoming requests and selects the best server instance.
 /// Rules are evaluated by priority (lowest number first). If no rule matches, falls back to round-robin.
+/// Uses EF Core for rule persistence; runtime state (_roundRobinIndex) is kept in-memory.
 /// </summary>
 public class RoutingEngine : IRoutingEngine
 {
+    private readonly LRDbContext _context;
     private readonly IServerManager _serverManager;
-    private readonly List<RoutingRule> _rules = new();
     private int _roundRobinIndex;
 
-    public RoutingEngine(IServerManager serverManager)
+    public RoutingEngine(LRDbContext context, IServerManager serverManager)
     {
+        _context = context;
         _serverManager = serverManager;
     }
 
     public async Task<ServerInstance?> RouteAsync(RouteRequest request, CancellationToken cancellationToken = default)
     {
-        // 1. Evaluate rules by priority
-        foreach (var rule in _rules.OrderBy(r => r.Priority))
+        // 1. Evaluate rules by priority from database
+        var rules = await _context.RoutingRules.OrderBy(r => r.Priority).ToListAsync();
+
+        foreach (var rule in rules)
         {
             if (!Matches(rule, request))
                 continue;
@@ -32,7 +39,8 @@ public class RoutingEngine : IRoutingEngine
         }
 
         // 2. Fallback: round-robin among healthy running servers
-        var healthyInstances = _serverManager.GetAllInstances()
+        var allInstances = _serverManager.GetAllInstances();
+        var healthyInstances = allInstances
             .Where(s => s.Status == ServerStatus.Running && s.IsHealthy)
             .ToList();
 
@@ -46,18 +54,48 @@ public class RoutingEngine : IRoutingEngine
         return null;
     }
 
-    public void AddRule(RoutingRule rule) => _rules.Add(rule);
-
-    public bool RemoveRule(Guid ruleId)
+    public async Task AddRuleAsync(RoutingRule rule)
     {
-        var index = _rules.FindIndex(r => r.Id == ruleId);
-        if (index < 0)
-            return false;
-        _rules.RemoveAt(index);
+        _context.RoutingRules.Add(rule);
+        await _context.SaveChangesAsync();
+    }
+
+    public void AddRule(RoutingRule rule)
+    {
+        _context.RoutingRules.Add(rule);
+        _context.SaveChanges();
+    }
+
+    public async Task<bool> RemoveRuleAsync(Guid ruleId)
+    {
+        var rule = await _context.RoutingRules.FindAsync(ruleId);
+        if (rule is null) return false;
+
+        _context.RoutingRules.Remove(rule);
+        await _context.SaveChangesAsync();
         return true;
     }
 
-    public IReadOnlyList<RoutingRule> GetRules() => _rules.AsReadOnly();
+    public bool RemoveRule(Guid ruleId)
+    {
+        var rule = _context.RoutingRules.Find(ruleId);
+        if (rule is null) return false;
+
+        _context.RoutingRules.Remove(rule);
+        _context.SaveChanges();
+        return true;
+    }
+
+    public async Task<IReadOnlyList<RoutingRule>> GetRulesAsync()
+    {
+        var rules = await _context.RoutingRules.OrderBy(r => r.Priority).ToListAsync();
+        return rules.AsReadOnly();
+    }
+
+    public IReadOnlyList<RoutingRule> GetRules()
+    {
+        return _context.RoutingRules.OrderBy(r => r.Priority).ToList().AsReadOnly();
+    }
 
     private bool Matches(RoutingRule rule, RouteRequest request)
     {

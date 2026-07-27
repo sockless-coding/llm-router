@@ -32,10 +32,28 @@ public class MockSyclProvider : IBackendProvider
         return _isRunning;
     }
 
-    public async Task<string?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
+    public async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
     {
         if (!_isRunning) throw new InvalidOperationException("Server is not running.");
-        await Task.Delay(500, cancellationToken);
-        return $"[Mock SYCL Response] You sent: {payload}";
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await Task.Delay(130, cancellationToken);
+        var promptProcessingMs = sw.ElapsedMilliseconds;
+        var promptTokens = Math.Max(1, payload.Length / 4);
+
+        await Task.Delay(90, cancellationToken);
+        var genMs = sw.ElapsedMilliseconds - promptProcessingMs;
+        sw.Stop();
+
+        return new RouteResponse
+        {
+            Payload = $"[Mock SYCL Response] You sent: {payload}",
+            PromptTokensProcessed = promptTokens,
+            GeneratedTokenCount = 22,
+            PromptProcessingMs = promptProcessingMs,
+            GenerationMs = genMs,
+            TotalLatencyMs = sw.ElapsedMilliseconds,
+            FirstTokenLatencyMs = promptProcessingMs + 10,
+        };
     }
 }

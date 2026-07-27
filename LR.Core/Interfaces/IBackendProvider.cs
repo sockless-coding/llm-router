@@ -31,7 +31,7 @@ public interface IBackendProvider
     Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Sends an inference request to the running server and returns the response text.
+    /// Sends an inference request to the running server and returns the response with performance metrics.
     /// </summary>
-    Task<string?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);
+    Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);
 }
