@@ -14,6 +14,22 @@
     <form method="post" class="space-y-6">
         @Html.AntiForgeryToken()
 
+        @if (!ViewData.ModelState.IsValid)
+        {
+            <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 space-y-2">
+                <h3 class="text-sm font-semibold text-red-400">Please fix the following errors:</h3>
+                <ul class="list-disc list-inside text-sm text-red-300 space-y-1">
+                    @foreach (var entry in ViewData.ModelState.Values.Where(e => e?.Errors != null && e.Errors.Any()))
+                    {
+                        @foreach (var error in entry.Errors)
+                        {
+                            <li>@error.ErrorMessage</li>
+                        }
+                    }
+                </ul>
+            </div>
+        }
+
         <!-- ==================== IDENTITY ==================== -->
         <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
             <h2 class="text-lg font-semibold text-gray-100">Identity</h2>
@@ -22,23 +38,26 @@
             <div>
                 <label asp-for="ViewModel.ServerInstanceId" class="block text-sm font-medium text-gray-300 mb-1"></label>
                 <select asp-for="ViewModel.ServerInstanceId" asp-items="@(new SelectList(Model.Servers, "Id", "Name"))"
-                        class="@selCls">
+                        class="@selCls @Html.Raw(ViewData.ModelState["ViewModel.ServerInstanceId"]?.Errors?.Any() == true ? "border-red-500/60" : "")">
                     <option value="">— Select a server —</option>
                 </select>
+                <span asp-validation-for="ViewModel.ServerInstanceId" class="text-xs text-red-400"></span>
             </div>
 
             <!-- Name -->
             <div>
                 <label asp-for="ViewModel.Name" class="block text-sm font-medium text-gray-300 mb-1"></label>
                 <input asp-for="ViewModel.Name" required placeholder="e.g. llama-3-cuda"
-                       class="@inpCls" />
+                       class="@inpCls @Html.Raw(ViewData.ModelState["ViewModel.Name"]?.Errors?.Any() == true ? "border-red-500/60" : "")" />
+                <span asp-validation-for="ViewModel.Name" class="text-xs text-red-400"></span>
             </div>
 
             <!-- Model Path -->
             <div>
                 <label asp-for="ViewModel.ModelPath" class="block text-sm font-medium text-gray-300 mb-1"></label>
                 <input asp-for="ViewModel.ModelPath" required placeholder="/path/to/model.gguf"
-                       class="@inpCls" />
+                       class="@inpCls @Html.Raw(ViewData.ModelState["ViewModel.ModelPath"]?.Errors?.Any() == true ? "border-red-500/60" : "")" />
+                <span asp-validation-for="ViewModel.ModelPath" class="text-xs text-red-400"></span>
             </div>
         </div>
 

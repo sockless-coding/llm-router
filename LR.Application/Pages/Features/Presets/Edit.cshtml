@@ -14,6 +14,22 @@
     <form method="post" class="space-y-6">
         @Html.AntiForgeryToken()
 
+        @if (!ViewData.ModelState.IsValid)
+        {
+            <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 space-y-2">
+                <h3 class="text-sm font-semibold text-red-400">Please fix the following errors:</h3>
+                <ul class="list-disc list-inside text-sm text-red-300 space-y-1">
+                    @foreach (var entry in ViewData.ModelState.Values.Where(e => e?.Errors != null && e.Errors.Any()))
+                    {
+                        @foreach (var error in entry.Errors)
+                        {
+                            <li>@error.ErrorMessage</li>
+                        }
+                    }
+                </ul>
+            </div>
+        }
+
         <!-- ==================== IDENTITY ==================== -->
         <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
             <h2 class="text-lg font-semibold text-gray-100">Identity</h2>

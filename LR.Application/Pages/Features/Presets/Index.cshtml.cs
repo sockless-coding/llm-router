@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+
+using LR.Core.Data;
 using LR.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -6,21 +9,28 @@ namespace LR.Application.Pages.Features.Presets;
 
 public class PresetsListModel : PageModel
 {
+    private readonly LRDbContext _context;
     private readonly IPresetManager _presetManager;
     private readonly IServerManager _serverManager;
 
     public IReadOnlyList<Core.Models.ModelPreset> Presets { get; set; } = new List<Core.Models.ModelPreset>();
     public IReadOnlyList<Core.Models.ServerInstance> Servers { get; set; } = new List<Core.Models.ServerInstance>();
 
-    public PresetsListModel(IPresetManager presetManager, IServerManager serverManager)
+    public PresetsListModel(LRDbContext context, IPresetManager presetManager, IServerManager serverManager)
     {
+        _context = context;
         _presetManager = presetManager;
         _serverManager = serverManager;
     }
 
-    public void OnGet()
+    public async Task OnGetAsync([FromQuery] Guid? serverId = null)
     {
-        Presets = _presetManager.GetByServerInstanceId(Guid.Empty); // All presets for now (we'd filter by query param)
+        if (serverId.HasValue && serverId.Value != Guid.Empty)
+            Presets = await _presetManager.GetByServerInstanceIdAsync(serverId.Value);
+        else
+            // No filter — get all presets from DB directly
+            Presets = (await _context.ModelPresets.ToListAsync()).AsReadOnly();
+
         Servers = _serverManager.GetAllInstances();
     }
 

@@ -20,11 +20,11 @@ public class PresetEditModel : PageModel
         _serverManager = serverManager;
     }
 
-    public async Task<IActionResult> OnGetAsync([FromRoute] Guid Id)
+    public async Task<IActionResult> OnGetAsync([FromQuery] Guid Id)
     {
         var preset = await _presetManager.GetByIdAsync(Id);
         if (preset is null)
-            return NotFound();
+            return BadRequest($"Preset with id {Id} not found.");
 
         Servers = _serverManager.GetAllInstances();
         MapToViewModel(preset);
@@ -32,7 +32,7 @@ public class PresetEditModel : PageModel
         return Page();
     }
 
-    public async Task<IActionResult> OnPostAsync([FromRoute] Guid Id)
+    public async Task<IActionResult> OnPostAsync([FromQuery] Guid Id)
     {
         if (!ModelState.IsValid)
         {
