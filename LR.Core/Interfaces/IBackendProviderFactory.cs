@@ -9,8 +9,13 @@ namespace LR.Core.Interfaces;
 public interface IBackendProviderFactory
 {
     /// <summary>
-    /// Creates a new backend provider for the specified backend type.
-    /// Returns null if no provider is registered for that type.
+    /// Registers a factory function for the given server engine.
     /// </summary>
-    IBackendProvider? Create(BackendType backendType);
+    void Register(ServerEngine engine, Func<IBackendProvider> factory);
+
+    /// <summary>
+    /// Creates a new backend provider for the specified server engine.
+    /// Returns null if no provider is registered for that engine.
+    /// </summary>
+    IBackendProvider? Create(ServerEngine engine);
 }

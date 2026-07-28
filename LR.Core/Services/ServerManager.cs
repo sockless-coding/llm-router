@@ -23,21 +23,31 @@ public class ServerManager : IServerManager
         _providerFactory = providerFactory;
     }
 
-    public async Task<ServerInstance> CreateInstanceAsync(string name, BackendType backendType, int? port = null)
+    public async Task<ServerInstance> CreateInstanceAsync(string name, ServerEngine engine, BackendConfigData configData, int? port = null)
     {
         var instance = new ServerInstance
         {
             Name = name,
-            BackendType = backendType,
+            Engine = engine,
             Status = ServerStatus.Idle,
             Port = port ?? await GetNextAvailablePort(),
         };
+
+        // Create the backend config entity alongside the server instance
+        if (engine == ServerEngine.LlamaCpp)
+        {
+            instance.Config = new BackendConfig
+            {
+                LlamaCppExecutableFolderPath = configData.LlamaCppExecutableFolderPath,
+                CompanionAppPath = configData.CompanionAppPath,
+            };
+        }
 
         _context.ServerInstances.Add(instance);
         await _context.SaveChangesAsync();
 
         // Create the backend provider for this instance (runtime-only, not persisted)
-        var provider = _providerFactory.Create(backendType);
+        var provider = _providerFactory.Create(engine);
         if (provider is not null)
             _providers[instance.Id] = provider;
 
@@ -118,7 +128,7 @@ public class ServerManager : IServerManager
         {
             Id = instance.Id,
             Name = instance.Name,
-            BackendType = instance.BackendType,
+            Engine = instance.Engine,
             Status = instance.Status,
             IsHealthy = instance.IsHealthy,
             ActivePresetId = instance.ActivePresetId,
@@ -134,7 +144,7 @@ public class ServerManager : IServerManager
         {
             Id = i.Id,
             Name = i.Name,
-            BackendType = i.BackendType,
+            Engine = i.Engine,
             Status = i.Status,
             IsHealthy = i.IsHealthy,
             ActivePresetId = i.ActivePresetId,
@@ -149,13 +159,25 @@ public class ServerManager : IServerManager
         {
             Id = i.Id,
             Name = i.Name,
-            BackendType = i.BackendType,
+            Engine = i.Engine,
             Status = i.Status,
             IsHealthy = i.IsHealthy,
             ActivePresetId = i.ActivePresetId,
             Url = i.Url,
             Port = i.Port,
         }).ToList().AsReadOnly();
+    }
+
+    public async Task<BackendConfig> UpdateBackendConfigAsync(Guid instanceId, BackendConfigData configData)
+    {
+        var config = await _context.BackendConfigs.FirstOrDefaultAsync(c => c.ServerInstanceId == instanceId)
+            ?? throw new KeyNotFoundException($"Backend config for server {instanceId} not found.");
+
+        config.LlamaCppExecutableFolderPath = configData.LlamaCppExecutableFolderPath;
+        config.CompanionAppPath = configData.CompanionAppPath;
+
+        await _context.SaveChangesAsync();
+        return config;
     }
 
     public async Task RemoveInstanceAsync(Guid instanceId, CancellationToken cancellationToken = default)

@@ -1,38 +1,41 @@
-using LR.Core.Interfaces;
 using LR.Core.Models;
 
 namespace LR.Providers;
 
 /// <summary>
 /// Mock CPU backend provider for testing.
+/// Inherits from LlamaCppProvider since it's a llama.cpp build compiled for CPU.
 /// </summary>
-public class MockCpuProvider : IBackendProvider
+public class MockCpuProvider : LlamaCppProvider
 {
     private bool _isRunning;
 
-    public BackendType SupportedBackend => BackendType.Cpu;
+    public MockCpuProvider(int port = 8080) : base(port)
+    {
+        GpuBackendType = BackendType.Cpu;
+    }
 
-    public async Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default)
+    public override async Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default)
     {
         await Task.Delay(500, cancellationToken);
         _isRunning = true;
         return true;
     }
 
-    public async Task StopProcessAsync(CancellationToken cancellationToken = default)
+    public override async Task StopProcessAsync(CancellationToken cancellationToken = default)
     {
         if (!_isRunning) return;
         await Task.Delay(300, cancellationToken);
         _isRunning = false;
     }
 
-    public async Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default)
+    public override async Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         await Task.Delay(200, cancellationToken);
         return _isRunning;
     }
 
-    public async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
+    public override async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
     {
         if (!_isRunning) throw new InvalidOperationException("Server is not running.");
 

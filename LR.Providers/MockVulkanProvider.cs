@@ -1,38 +1,41 @@
-using LR.Core.Interfaces;
 using LR.Core.Models;
 
 namespace LR.Providers;
 
 /// <summary>
 /// Mock Vulkan backend provider for testing.
+/// Inherits from LlamaCppProvider since it's a llama.cpp build compiled for Vulkan.
 /// </summary>
-public class MockVulkanProvider : IBackendProvider
+public class MockVulkanProvider : LlamaCppProvider
 {
     private bool _isRunning;
 
-    public BackendType SupportedBackend => BackendType.Vulkan;
+    public MockVulkanProvider(int port = 8080) : base(port)
+    {
+        GpuBackendType = BackendType.Vulkan;
+    }
 
-    public async Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default)
+    public override async Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default)
     {
         await Task.Delay(500, cancellationToken);
         _isRunning = true;
         return true;
     }
 
-    public async Task StopProcessAsync(CancellationToken cancellationToken = default)
+    public override async Task StopProcessAsync(CancellationToken cancellationToken = default)
     {
         if (!_isRunning) return;
         await Task.Delay(300, cancellationToken);
         _isRunning = false;
     }
 
-    public async Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default)
+    public override async Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default)
     {
         await Task.Delay(200, cancellationToken);
         return _isRunning;
     }
 
-    public async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
+    public override async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
     {
         if (!_isRunning) throw new InvalidOperationException("Server is not running.");
 

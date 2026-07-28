@@ -4,34 +4,31 @@ using LR.Core.Models;
 namespace LR.Providers;
 
 /// <summary>
-/// Factory that creates the correct IBackendProvider based on BackendType.
+/// Factory that creates the correct IBackendProvider based on ServerEngine.
 /// Uses mock implementations by default; swap in real providers via DI overrides.
 /// </summary>
 public class BackendProviderFactory : IBackendProviderFactory
 {
-    private readonly Dictionary<BackendType, Func<IBackendProvider>> _factories = new();
+    private readonly Dictionary<ServerEngine, Func<IBackendProvider>> _factories = new();
 
     public BackendProviderFactory()
     {
-        // Register default mock providers
-        Register(BackendType.Cuda, () => new MockLlamaCppProvider());
-        Register(BackendType.Vulkan, () => new MockVulkanProvider());
-        Register(BackendType.Sycl, () => new MockSyclProvider());
-        Register(BackendType.Cpu, () => new MockCpuProvider());
+        // Register default mock provider for llama.cpp
+        Register(ServerEngine.LlamaCpp, () => new MockLlamaCppProvider());
     }
 
     /// <summary>
-    /// Registers a factory function for the given backend type.
+    /// Registers a factory function for the given server engine.
     /// Use this to override mock providers with real implementations at runtime.
     /// </summary>
-    public void Register(BackendType backendType, Func<IBackendProvider> factory)
+    public void Register(ServerEngine engine, Func<IBackendProvider> factory)
     {
-        _factories[backendType] = factory;
+        _factories[engine] = factory;
     }
 
-    public IBackendProvider? Create(BackendType backendType)
+    public IBackendProvider? Create(ServerEngine engine)
     {
-        if (_factories.TryGetValue(backendType, out var factory))
+        if (_factories.TryGetValue(engine, out var factory))
             return factory();
 
         return null;

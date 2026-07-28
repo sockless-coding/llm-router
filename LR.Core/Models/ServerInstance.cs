@@ -15,7 +15,10 @@ public class ServerInstance
     [Required, MaxLength(256)]
     public string Name { get; set; } = string.Empty;
 
-    public BackendType BackendType { get; set; }
+    /// <summary>
+    /// The server engine (e.g., llama.cpp, Ollama) this instance runs.
+    /// </summary>
+    public ServerEngine Engine { get; set; }
     public ServerStatus Status { get; set; }
     public bool IsHealthy { get; set; }
 
@@ -46,4 +49,9 @@ public class ServerInstance
     /// </summary>
     [ForeignKey(nameof(ActivePresetId))]
     public ModelPreset? ActivePreset { get; set; }
+
+    /// <summary>
+    /// Navigation: engine-specific configuration for this server instance.
+    /// </summary>
+    public BackendConfig? Config { get; set; }
 }

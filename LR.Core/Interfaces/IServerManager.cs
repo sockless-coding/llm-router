@@ -8,9 +8,9 @@ namespace LR.Core.Interfaces;
 public interface IServerManager
 {
     /// <summary>
-    /// Creates a new server instance and returns it.
+    /// Creates a new server instance with engine-specific configuration and returns it.
     /// </summary>
-    Task<ServerInstance> CreateInstanceAsync(string name, BackendType backendType, int? port = null);
+    Task<ServerInstance> CreateInstanceAsync(string name, ServerEngine engine, BackendConfigData configData, int? port = null);
 
     /// <summary>
     /// Starts the server using its active preset (or without one if none is set).
@@ -36,6 +36,11 @@ public interface IServerManager
     /// Gets all managed server instances.
     /// </summary>
     IReadOnlyList<ServerInstance> GetAllInstances();
+
+    /// <summary>
+    /// Updates the engine-specific backend configuration for a server instance.
+    /// </summary>
+    Task<BackendConfig> UpdateBackendConfigAsync(Guid instanceId, BackendConfigData configData);
 
     /// <summary>
     /// Removes a server instance from management (stops it first if running).

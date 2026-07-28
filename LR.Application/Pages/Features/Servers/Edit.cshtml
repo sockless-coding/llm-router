@@ -7,28 +7,31 @@
 
 @if (Model.Server is not null)
 {
-    <div class="max-w-lg mx-auto">
-        <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5">
+    <form method="post" class="max-w-lg mx-auto">
+        @Html.AntiForgeryToken()
+
+        <!-- Info section -->
+        <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5 mb-4">
+            <h2 class="text-lg font-semibold text-gray-100">Server Details</h2>
+
             <!-- Name -->
             <div>
                 <label class="block text-sm font-medium text-gray-400 mb-1">Name</label>
                 <p class="text-lg text-gray-100 font-medium">@Model.Server.Name</p>
             </div>
 
-            <!-- Backend -->
+            <!-- Engine -->
             <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">Backend</label>
-                <span class="px-2 py-0.5 rounded text-xs font-medium
-                    @if (Model.Server.BackendType == BackendType.Cuda) { <text>bg-neon-cyan/10 text-neon-cyan</text> }
-                    else if (Model.Server.BackendType == BackendType.Vulkan) { <text>bg-neon-magenta/10 text-neon-magenta</text> }">
-                    @Model.Server.BackendType
+                <label class="block text-sm font-medium text-gray-400 mb-1">Server Engine</label>
+                <span class="px-2 py-0.5 rounded text-xs font-medium bg-neon-cyan/10 text-neon-cyan">
+                    @Model.Server.Engine.ToString().Replace("LlamaCpp", "llama.cpp")
                 </span>
             </div>
 
             <!-- Status -->
             <div>
                 <label class="block text-sm font-medium text-gray-400 mb-1">Status</label>
-                <p class="text-gray-200">@Model.Server.Status — @if (Model.Server.IsHealthy) { <text>Healthy</text> } else { <text>Unhealthy</text> }</p>
+                <p class="text-gray-200">@Model.Server.Status - @if (Model.Server.IsHealthy) { <text>Healthy</text> } else { <text>Unhealthy</text> }</p>
             </div>
 
             <!-- Port -->
@@ -45,27 +48,48 @@
                     <p class="text-neon-cyan">@Model.Server.Url</p>
                 </div>
             }
-
-            <!-- Actions -->
-            <div class="flex items-center gap-3 pt-2">
-                @if (Model.Server.Status != ServerStatus.Running)
-                {
-                    <button class="px-4 py-2 rounded-lg bg-neon-green/10 text-neon-green border border-neon-green/20 hover:bg-neon-green/20 transition-all text-sm font-medium">
-                        Start
-                    </button>
-                }
-                else
-                {
-                    <button class="px-4 py-2 rounded-lg bg-neon-red/10 text-neon-red border border-neon-red/20 hover:bg-neon-red/20 transition-all text-sm font-medium">
-                        Stop
-                    </button>
-                }
-                <a href="/Features/Servers/Index"
-                   class="px-4 py-2 rounded-lg bg-gray-700/30 text-gray-400 border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
-                    Back
-                </a>
-            </div>
         </div>
-    </div>
-}
 
+        <!-- Config section -->
+        @if (Model.Server.Engine == ServerEngine.LlamaCpp)
+        {
+            <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5">
+                <h2 class="text-lg font-semibold text-gray-100">llama.cpp Configuration</h2>
+
+                <!-- Executable Folder Path -->
+                <div>
+                    <label asp-for="ViewModel.LlamaCppExecutableFolderPath" class="block text-sm font-medium text-gray-300 mb-1">
+                        Server Folder Path
+                    </label>
+                    <p class="text-xs text-gray-500 mb-2">Path to the folder containing your llama.cpp server executable (e.g., <code>llama-server.exe</code>). Each GPU backend build should be in its own folder.</p>
+                    <input asp-for="ViewModel.LlamaCppExecutableFolderPath" placeholder="C:\\llamacpp\\cuda-build"
+                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
+                    <span asp-validation-for="ViewModel.LlamaCppExecutableFolderPath" class="text-xs text-neon-red mt-1"></span>
+                </div>
+
+                <!-- Companion App Path -->
+                <div>
+                    <label asp-for="ViewModel.CompanionAppPath" class="block text-sm font-medium text-gray-300 mb-1">
+                        Companion App Path <span class="text-gray-500">(optional)</span>
+                    </label>
+                    <p class="text-xs text-gray-500 mb-2">Path to a companion application that should run alongside the server. For example, the SYCL VRAM keeper on Windows when no display is connected.</p>
+                    <input asp-for="ViewModel.CompanionAppPath" placeholder="C:\\tools\\sycl-vram-keeper.exe"
+                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
+                    <span asp-validation-for="ViewModel.CompanionAppPath" class="text-xs text-neon-red mt-1"></span>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex items-center gap-3 pt-2">
+                    <button type="submit"
+                            class="px-6 py-2.5 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium text-sm shadow-neon-cyan">
+                        Save Changes
+                    </button>
+                    <a href="/Features/Servers/Index"
+                       class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-gray-400 border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
+                        Back
+                    </a>
+                </div>
+            </div>
+        }
+    </form>
+}

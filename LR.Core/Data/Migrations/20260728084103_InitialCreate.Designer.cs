@@ -8,10 +8,10 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace LR.Core.Data.Migrations
+namespace LR.Core.Migrations
 {
     [DbContext(typeof(LRDbContext))]
-    [Migration("20260727202501_InitialCreate")]
+    [Migration("20260728084103_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -19,6 +19,38 @@ namespace LR.Core.Data.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
+
+            modelBuilder.Entity("LR.Core.Models.BackendConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CompanionAppPath")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtraSettings")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("GpuBackendType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LlamaCppExecutableFolderPath")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ServerInstanceId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServerInstanceId")
+                        .IsUnique();
+
+                    b.ToTable("BackendConfigs", (string)null);
+                });
 
             modelBuilder.Entity("LR.Core.Models.ModelPreset", b =>
                 {
@@ -89,7 +121,8 @@ namespace LR.Core.Data.Migrations
                     b.Property<Guid>("ServerInstanceId")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("Timestamp")
+                    b.Property<string>("Timestamp")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<double>("TotalLatencyMs")
@@ -142,7 +175,7 @@ namespace LR.Core.Data.Migrations
                     b.Property<Guid?>("ActivePresetId")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("BackendType")
+                    b.Property<int>("Engine")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsHealthy")
@@ -171,6 +204,17 @@ namespace LR.Core.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("ServerInstances", (string)null);
+                });
+
+            modelBuilder.Entity("LR.Core.Models.BackendConfig", b =>
+                {
+                    b.HasOne("LR.Core.Models.ServerInstance", "ServerInstance")
+                        .WithOne("Config")
+                        .HasForeignKey("LR.Core.Models.BackendConfig", "ServerInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ServerInstance");
                 });
 
             modelBuilder.Entity("LR.Core.Models.ModelPreset", b =>
@@ -225,6 +269,8 @@ namespace LR.Core.Data.Migrations
 
             modelBuilder.Entity("LR.Core.Models.ServerInstance", b =>
                 {
+                    b.Navigation("Config");
+
                     b.Navigation("Presets");
                 });
 #pragma warning restore 612, 618

@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace LR.Core.Data.Migrations
+namespace LR.Core.Migrations
 {
     /// <inheritdoc />
     public partial class InitialCreate : Migration
@@ -11,6 +11,22 @@ namespace LR.Core.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.CreateTable(
+                name: "BackendConfigs",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
+                    ServerInstanceId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    LlamaCppExecutableFolderPath = table.Column<string>(type: "TEXT", maxLength: 1024, nullable: true),
+                    GpuBackendType = table.Column<int>(type: "INTEGER", nullable: true),
+                    CompanionAppPath = table.Column<string>(type: "TEXT", maxLength: 1024, nullable: true),
+                    ExtraSettings = table.Column<string>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_BackendConfigs", x => x.Id);
+                });
+
             migrationBuilder.CreateTable(
                 name: "ModelPresets",
                 columns: table => new
@@ -34,7 +50,7 @@ namespace LR.Core.Data.Migrations
                 {
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
-                    BackendType = table.Column<int>(type: "INTEGER", nullable: false),
+                    Engine = table.Column<int>(type: "INTEGER", nullable: false),
                     Status = table.Column<int>(type: "INTEGER", nullable: false),
                     IsHealthy = table.Column<bool>(type: "INTEGER", nullable: false),
                     ActivePresetId = table.Column<Guid>(type: "TEXT", nullable: true),
@@ -59,7 +75,7 @@ namespace LR.Core.Data.Migrations
                     Id = table.Column<Guid>(type: "TEXT", nullable: false),
                     ServerInstanceId = table.Column<Guid>(type: "TEXT", nullable: false),
                     PresetId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    Timestamp = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    Timestamp = table.Column<string>(type: "TEXT", nullable: false),
                     PromptTokensProcessed = table.Column<int>(type: "INTEGER", nullable: false),
                     PromptProcessingMs = table.Column<double>(type: "REAL", nullable: false),
                     GeneratedTokenCount = table.Column<int>(type: "INTEGER", nullable: false),
@@ -109,6 +125,12 @@ namespace LR.Core.Data.Migrations
                 });
 
             migrationBuilder.CreateIndex(
+                name: "IX_BackendConfigs_ServerInstanceId",
+                table: "BackendConfigs",
+                column: "ServerInstanceId",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_ModelPresets_ServerInstanceId",
                 table: "ModelPresets",
                 column: "ServerInstanceId");
@@ -140,6 +162,14 @@ namespace LR.Core.Data.Migrations
                 unique: true);
 
             migrationBuilder.AddForeignKey(
+                name: "FK_BackendConfigs_ServerInstances_ServerInstanceId",
+                table: "BackendConfigs",
+                column: "ServerInstanceId",
+                principalTable: "ServerInstances",
+                principalColumn: "Id",
+                onDelete: ReferentialAction.Cascade);
+
+            migrationBuilder.AddForeignKey(
                 name: "FK_ModelPresets_ServerInstances_ServerInstanceId",
                 table: "ModelPresets",
                 column: "ServerInstanceId",
@@ -154,6 +184,9 @@ namespace LR.Core.Data.Migrations
             migrationBuilder.DropForeignKey(
                 name: "FK_ModelPresets_ServerInstances_ServerInstanceId",
                 table: "ModelPresets");
+
+            migrationBuilder.DropTable(
+                name: "BackendConfigs");
 
             migrationBuilder.DropTable(
                 name: "ModelStatistics");

@@ -29,7 +29,7 @@ builder.Services.AddSingleton<IBackendProviderFactory>(sp =>
 {
     var factory = new BackendProviderFactory();
     // Override with real providers here when ready:
-    // factory.Register(BackendType.Cuda, () => new CudaLlamaCppProvider());
+    // factory.Register(ServerEngine.LlamaCpp, () => new RealLlamaCppProvider());
     return factory;
 });
 

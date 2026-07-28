@@ -9,9 +9,9 @@ namespace LR.Core.Interfaces;
 public interface IBackendProvider
 {
     /// <summary>
-    /// The backend type this provider supports.
+    /// The server engine this provider supports (e.g., llama.cpp, Ollama).
     /// </summary>
-    BackendType SupportedBackend { get; }
+    ServerEngine Engine { get; }
 
     /// <summary>
     /// Starts the inference server process with the given preset configuration.
