@@ -1,8 +1,8 @@
 @page
 @using LR.Application.Pages.Features.Presets
-@model PresetCreateModel
+@model PresetEditModel
 @{
-    ViewData["Title"] = "Create Preset";
+    ViewData["Title"] = "Edit Preset";
 }
 
 @* Helper: input class *@
@@ -648,7 +648,7 @@
         <div class="flex items-center gap-3">
             <button type="submit"
                     class="px-6 py-2.5 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all font-medium text-sm shadow-neon-magenta">
-                Create Preset
+                Save Changes
             </button>
             <a href="/Features/Presets/Index"
                class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-gray-400 border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">

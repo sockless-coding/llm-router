@@ -220,7 +220,7 @@ public class ServerManager : IServerManager
             ServerInstanceId = instance.Id,
             Name = "default",
             ModelPath = string.Empty,
-            ContextLength = 4096,
+            ContextSize = 4096,
             GpuLayers = -1,
         };
     }

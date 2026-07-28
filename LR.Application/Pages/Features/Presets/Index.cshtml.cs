@@ -1,4 +1,5 @@
 using LR.Core.Interfaces;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace LR.Application.Pages.Features.Presets;
@@ -21,6 +22,14 @@ public class PresetsListModel : PageModel
     {
         Presets = _presetManager.GetByServerInstanceId(Guid.Empty); // All presets for now (we'd filter by query param)
         Servers = _serverManager.GetAllInstances();
+    }
+
+    public async Task<IActionResult> OnPostDeleteAsync([FromQuery] Guid id)
+    {
+        var ok = await _presetManager.DeleteAsync(id);
+        if (!ok)
+            return BadRequest("Preset not found.");
+        return new OkResult();
     }
 }
 

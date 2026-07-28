@@ -33,7 +33,7 @@ public class StatisticsService : IStatisticsService
             TotalLatencyMs = response.TotalLatencyMs,
             FirstTokenLatencyMs = response.FirstTokenLatencyMs,
             ContextLengthUsed = response.PromptTokensProcessed + response.GeneratedTokenCount,
-            ContextMaxLength = preset?.ContextLength ?? 0,
+            ContextMaxLength = preset?.ContextSize ?? 0,
         };
 
         _context.ModelStatistics.Add(stat);

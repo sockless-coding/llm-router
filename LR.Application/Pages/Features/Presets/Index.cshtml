@@ -5,6 +5,12 @@
     ViewData["Title"] = "Presets";
 }
 
+@functions {
+    string Truncate(string? s, int max)
+        => (s?.Length ?? 0) > max ? s[..(max - 3)] + "..." : (s ?? "");
+}
+
+<form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
 <div class="flex items-center justify-between mb-6">
     <p class="text-gray-400">Manage model presets for your server instances.</p>
     <a href="/Features/Presets/Create" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all text-sm font-medium">
@@ -28,13 +34,36 @@ else
         {
             <div class="bg-cyber-card rounded-xl p-5 border border-neon-magenta/10 hover:border-neon-magenta/30 transition-all">
                 <h3 class="text-base font-semibold text-gray-100 mb-3">@preset.Name</h3>
-                <div class="space-y-2 text-sm">
-                    <p><span class="text-gray-400">Model:</span> @preset.ModelPath</p>
-                    <p><span class="text-gray-400">Context Length:</span> @preset.ContextLength</p>
-                    <p><span class="text-gray-400">GPU Layers:</span> @preset.GpuLayers</p>
+                <div class="space-y-1 text-sm">
+                    <p><span class="text-gray-400">Model:</span> @Truncate(preset.ModelPath, 80)</p>
+                    <p><span class="text-gray-400">Context Size:</span> @(preset.ContextSize?.ToString() ?? "auto")</p>
+                    <p><span class="text-gray-400">GPU Layers:</span> @(preset.GpuLayers?.ToString() ?? "auto")</p>
+                </div>
+                <div class="flex items-center gap-2 pt-3 mt-3 border-t border-gray-700/50">
+                    <a href="/Features/Presets/Edit?Id=@preset.Id"
+                       class="text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium">
+                        Edit
+                    </a>
+                    <button type="button" onclick="deletePreset('@preset.Id', '@preset.Name')"
+                            class="text-xs px-3 py-1.5 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all font-medium">
+                        Delete
+                    </button>
                 </div>
             </div>
         }
     </div>
 }
+
+<script>
+async function deletePreset(id, name) {
+    if (!confirm(`Delete preset "${name}"? This cannot be undone.`)) return;
+    const token = document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+    try {
+        const resp = await fetch(`/Features/Presets/Delete?id=${id}`, { method: 'POST', headers: { 'RequestVerificationToken': token } });
+        if (resp.ok) location.reload();
+    } catch (e) {
+        alert('Delete failed.');
+    }
+}
+</script>
 
