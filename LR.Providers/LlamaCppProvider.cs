@@ -71,9 +71,26 @@ public abstract class LlamaCppProvider : IBackendProvider
     /// </summary>
     protected string? CompanionAppPath { get; set; }
 
+    /// <summary>
+    /// Shell command to initialize the environment before starting server processes.
+    /// For example, "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 for SYCL backends on Windows.
+    /// </summary>
+    protected string? EnvironmentSetupCommand { get; set; }
+
     public LlamaCppProvider(int port = 8080)
     {
         Port = port;
+    }
+
+    /// <summary>
+    /// Applies engine-specific configuration from the backend config data.
+    /// Override to add provider-specific configuration handling.
+    /// </summary>
+    public virtual void Configure(BackendConfigData configData)
+    {
+        ExecutableFolderPath = configData.LlamaCppExecutableFolderPath;
+        CompanionAppPath = configData.CompanionAppPath;
+        EnvironmentSetupCommand = configData.EnvironmentSetupCommand;
     }
 
     public abstract Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default);
@@ -253,6 +270,59 @@ public abstract class LlamaCppProvider : IBackendProvider
     }
 
     /// <summary>
+    /// Initializes the environment by running the configured setup command.
+    /// For example, runs "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 for SYCL backends.
+    /// 
+    /// This method creates a temporary batch script that first runs the setup command,
+    /// then launches the target executable. This ensures environment variables set by
+    /// the init script (like oneAPI's setvars.bat) are inherited by subsequent processes.
+    /// </summary>
+    protected virtual async Task InitializeEnvironmentAsync(string executablePath, ProcessStartInfo startInfo, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(EnvironmentSetupCommand))
+            return;
+
+        // Build a temporary batch script that initializes the environment then runs the target executable.
+        // This ensures env vars set by scripts like oneAPI's setvars.bat are inherited.
+        string tempBatchPath = Path.Combine(Path.GetTempPath(), $"llm-router-init-{Guid.NewGuid():N}.bat");
+
+        try
+        {
+            var lines = new List<string>
+            {
+                "@echo off",
+                // Run the environment setup command (e.g., setvars.bat intel64)
+                EnvironmentSetupCommand,
+                // Launch the target executable and pass through its exit code
+                $"call \"{executablePath}\" {startInfo.Arguments ?? string.Empty}",
+            };
+
+            await File.WriteAllLinesAsync(tempBatchPath, lines, ct);
+
+            startInfo.FileName = "cmd.exe";
+            startInfo.Arguments = "/c \"" + tempBatchPath + "\"";
+            // When using cmd.exe /c with a batch file, UseShellExecute must be false for redirection to work.
+            startInfo.UseShellExecute = false;
+        }
+        catch
+        {
+            // If we can't create the temp script, fall through without environment setup.
+            // The process will still launch, just without initialized env vars.
+        }
+    }
+
+    /// <summary>
+    /// Cleans up temporary batch scripts created by InitializeEnvironmentAsync.
+    /// </summary>
+    protected void CleanupTempBatch(string? tempPath)
+    {
+        if (!string.IsNullOrEmpty(tempPath) && File.Exists(tempPath))
+        {
+            try { File.Delete(tempPath); } catch { /* best effort */ }
+        }
+    }
+
+    /// <summary>
     /// Starts the companion application if one is configured.
     /// Override for backend-specific companion app behavior (e.g., SYCL VRAM keeper on Windows).
     /// </summary>
@@ -263,17 +333,20 @@ public abstract class LlamaCppProvider : IBackendProvider
 
         try
         {
-            _companionProcess = new Process
+            var startInfo = new ProcessStartInfo
             {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = CompanionAppPath,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                }
+                FileName = CompanionAppPath,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
             };
+
+            // If environment setup is configured, wrap the companion app launch in a script
+            // that first initializes the environment (e.g., oneAPI setvars.bat)
+            await InitializeEnvironmentAsync(CompanionAppPath, startInfo, ct);
+
+            _companionProcess = new Process { StartInfo = startInfo };
             _companionProcess.Start();
         }
         catch

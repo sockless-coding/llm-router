@@ -42,6 +42,15 @@ public class BackendConfig
     public string? CompanionAppPath { get; set; }
 
     /// <summary>
+    /// Shell command to initialize the environment before starting server processes.
+    /// For example, "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 for SYCL backends on Windows.
+    /// This command is executed via cmd.exe /c so that .bat files and environment setup scripts work correctly,
+    /// and the resulting environment variables are inherited by subsequent server/companion processes.
+    /// </summary>
+    [MaxLength(2048)]
+    public string? EnvironmentSetupCommand { get; set; }
+
+    /// <summary>
     /// Free-form key-value settings for engine-specific configuration.
     /// Stored as JSON in the database.
     /// </summary>

@@ -41,6 +41,7 @@ public class EditModel : PageModel
 
         ViewModel.LlamaCppExecutableFolderPath = Server.Config?.LlamaCppExecutableFolderPath ?? string.Empty;
         ViewModel.CompanionAppPath = Server.Config?.CompanionAppPath ?? string.Empty;
+        ViewModel.EnvironmentSetupCommand = Server.Config?.EnvironmentSetupCommand ?? string.Empty;
 
         return Page();
     }
@@ -71,6 +72,7 @@ public class EditModel : PageModel
         {
             LlamaCppExecutableFolderPath = string.IsNullOrWhiteSpace(ViewModel.LlamaCppExecutableFolderPath) ? null : ViewModel.LlamaCppExecutableFolderPath,
             CompanionAppPath = string.IsNullOrWhiteSpace(ViewModel.CompanionAppPath) ? null : ViewModel.CompanionAppPath,
+            EnvironmentSetupCommand = string.IsNullOrWhiteSpace(ViewModel.EnvironmentSetupCommand) ? null : ViewModel.EnvironmentSetupCommand,
         };
 
         await _serverManager.UpdateBackendConfigAsync(Id, configData);
@@ -88,4 +90,5 @@ public class EditViewModel
 {
     public string? LlamaCppExecutableFolderPath { get; set; }
     public string? CompanionAppPath { get; set; }
+    public string? EnvironmentSetupCommand { get; set; }
 }

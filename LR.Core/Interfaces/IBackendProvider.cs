@@ -34,4 +34,10 @@ public interface IBackendProvider
     /// Sends an inference request to the running server and returns the response with performance metrics.
     /// </summary>
     Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Configures the provider with engine-specific settings (paths, environment setup, etc.).
+    /// Called by ServerManager before starting the process. Override to apply configuration.
+    /// </summary>
+    void Configure(BackendConfigData configData);
 }

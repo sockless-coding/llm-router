@@ -60,10 +60,12 @@ public class ServerCreateModel : PageModel
         {
             LlamaCppExecutableFolderPath = ViewModel.LlamaCppExecutableFolderPath,
             CompanionAppPath = string.IsNullOrWhiteSpace(ViewModel.CompanionAppPath) ? null : ViewModel.CompanionAppPath,
+            EnvironmentSetupCommand = string.IsNullOrWhiteSpace(ViewModel.EnvironmentSetupCommand) ? null : ViewModel.EnvironmentSetupCommand,
         };
 
         await _serverManager.CreateInstanceAsync(ViewModel.Name, engine, configData, ViewModel.Port);
 
+        TempData["SuccessMessage"] = $"Server \"{ViewModel.Name}\" created successfully.";
         return RedirectToPage("Index");
     }
 }
@@ -77,6 +79,7 @@ public class ServerCreateViewModel
     // --- llama.cpp-specific configuration ---
     public string? LlamaCppExecutableFolderPath { get; set; }
     public string? CompanionAppPath { get; set; }
+    public string? EnvironmentSetupCommand { get; set; }
 }
 
 public class EngineOption

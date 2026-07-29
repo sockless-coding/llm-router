@@ -40,6 +40,7 @@ public class ServerManager : IServerManager
             {
                 LlamaCppExecutableFolderPath = configData.LlamaCppExecutableFolderPath,
                 CompanionAppPath = configData.CompanionAppPath,
+                EnvironmentSetupCommand = configData.EnvironmentSetupCommand,
             };
         }
 
@@ -49,18 +50,40 @@ public class ServerManager : IServerManager
         // Create the backend provider for this instance (runtime-only, not persisted)
         var provider = _providerFactory.Create(engine);
         if (provider is not null)
+        {
+            // Configure the provider with backend-specific settings
+            provider.Configure(configData);
+
             _providers[instance.Id] = provider;
+        }
 
         return instance;
     }
 
     public async Task<bool> StartAsync(Guid instanceId, CancellationToken cancellationToken = default)
     {
-        var instance = await GetInstanceOrThrow(instanceId);
+        var instance = await _context.ServerInstances
+            .Include(s => s.Config)
+            .FirstOrDefaultAsync(s => s.Id == instanceId)
+            ?? throw new KeyNotFoundException($"Server instance {instanceId} not found.");
+
         var provider = GetProviderOrThrow(instanceId);
 
         if (instance.Status == ServerStatus.Running)
             return true;
+
+        // Re-configure the provider with the latest config from the database
+        // in case it was updated while the server was stopped
+        if (instance.Config is not null)
+        {
+            var configData = new BackendConfigData
+            {
+                LlamaCppExecutableFolderPath = instance.Config.LlamaCppExecutableFolderPath,
+                CompanionAppPath = instance.Config.CompanionAppPath,
+                EnvironmentSetupCommand = instance.Config.EnvironmentSetupCommand,
+            };
+            provider.Configure(configData);
+        }
 
         instance.Status = ServerStatus.Stopping; // Transition state during start
 
@@ -175,6 +198,7 @@ public class ServerManager : IServerManager
 
         config.LlamaCppExecutableFolderPath = configData.LlamaCppExecutableFolderPath;
         config.CompanionAppPath = configData.CompanionAppPath;
+        config.EnvironmentSetupCommand = configData.EnvironmentSetupCommand;
 
         await _context.SaveChangesAsync();
         return config;

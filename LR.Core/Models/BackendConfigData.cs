@@ -16,4 +16,10 @@ public class BackendConfigData
     /// For example, the SYCL VRAM keeper app on Windows when no display is connected.
     /// </summary>
     public string? CompanionAppPath { get; set; }
+
+    /// <summary>
+    /// Shell command to initialize the environment before starting server processes.
+    /// For example, "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 for SYCL backends on Windows.
+    /// </summary>
+    public string? EnvironmentSetupCommand { get; set; }
 }
