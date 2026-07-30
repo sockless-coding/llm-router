@@ -59,7 +59,7 @@ async function deletePreset(id, name) {
     if (!confirm(`Delete preset "${name}"? This cannot be undone.`)) return;
     const token = document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
     try {
-        const resp = await fetch(`/Features/Presets/Delete?id=${id}`, { method: 'POST', headers: { 'RequestVerificationToken': token } });
+        const resp = await fetch(`/Features/Presets/Index?handler=Delete&id=${id}`, { method: 'POST', headers: { 'RequestVerificationToken': token } });
         if (resp.ok) location.reload();
     } catch (e) {
         alert('Delete failed.');

@@ -6,6 +6,7 @@ using LR.Core.Models;
 using LR.Core.Services;
 using LR.Providers;
 using LR.Application.Services;
+using LR.Application.Pages.Api;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -71,66 +72,58 @@ using (var scope = app.Services.CreateScope())
 app.UseStaticFiles();
 app.MapRazorPages();
 
+// --- Health endpoint for agents ---
+app.MapGet("/health", async (IServerManager serverManager) =>
+{
+    return Results.Json(new
+    {
+        status = "ok"
+    });
+    var instances = await serverManager.GetAllInstancesAsync();
+    var hasHealthyServer = instances.Any(s => s.Status == ServerStatus.Running && s.IsHealthy);
+
+    string status;
+    if (!instances.Any())
+        status = "degraded";
+    else if (hasHealthyServer)
+        status = "healthy";
+    else
+        status = "unhealthy";
+
+    return Results.Json(new
+    {
+        gateway = "up",
+        status,
+        servers = instances.Select(s => new
+        {
+            s.Name,
+            s.Status,
+            healthy = s.IsHealthy
+        })
+    });
+});
+
 // Map stats API endpoints (Razor Pages return JSON via JsonResult)
 // These are accessible at /api/stats/* routes
 
 // --- Protocol API Endpoints ---
-// Determine which protocols to enable (empty = all enabled)
 var enabledProtocols = gatewaySettings.EnabledProtocols.Length > 0
     ? new HashSet<ApiProtocol>(gatewaySettings.EnabledProtocols)
     : new HashSet<ApiProtocol> { ApiProtocol.OpenAI, ApiProtocol.Claude, ApiProtocol.Ollama };
 
-// OpenAI-compatible endpoints: POST /v1/chat/completions, GET /v1/models
 if (enabledProtocols.Contains(ApiProtocol.OpenAI))
 {
-    app.MapPost("/v1/chat/completions", async (
-            LR.Application.Pages.Api.OpenAiHandler handler,
-            HttpRequest httpRequest,
-            HttpResponse httpResponse,
-            CancellationToken ct) =>
-        {
-            return await handler.HandleChatCompletionAsync(httpRequest, httpResponse, ct);
-        });
-
-    app.MapGet("/v1/models", async (
-            LR.Application.Pages.Api.OpenAiHandler handler) =>
-        {
-            var result = await handler.HandleListModelsAsync();
-            return Microsoft.AspNetCore.Http.Results.Json(result);
-        });
+    app.MapOpenAiEndpoints();
 }
 
-// Claude-compatible endpoints: POST /v1/messages
 if (enabledProtocols.Contains(ApiProtocol.Claude))
 {
-    app.MapPost("/v1/messages", async (
-            LR.Application.Pages.Api.ClaudeHandler handler,
-            HttpRequest httpRequest,
-            HttpResponse httpResponse,
-            CancellationToken ct) =>
-        {
-            return await handler.HandleChatCompletionAsync(httpRequest, httpResponse, ct);
-        });
+    app.MapClaudeEndpoints();
 }
 
-// Ollama-compatible endpoints: POST /api/chat, GET /api/tags
 if (enabledProtocols.Contains(ApiProtocol.Ollama))
 {
-    app.MapPost("/api/chat", async (
-            LR.Application.Pages.Api.OllamaHandler handler,
-            HttpRequest httpRequest,
-            HttpResponse httpResponse,
-            CancellationToken ct) =>
-        {
-            return await handler.HandleChatCompletionAsync(httpRequest, httpResponse, ct);
-        });
-
-    app.MapGet("/api/tags", async (
-            LR.Application.Pages.Api.OllamaHandler handler) =>
-        {
-            var result = await handler.HandleListModelsAsync();
-            return Microsoft.AspNetCore.Http.Results.Json(result);
-        });
+    app.MapOllamaEndpoints();
 }
 
 app.Run();

@@ -133,8 +133,11 @@ public class StatisticsService : IStatisticsService
         if (to.HasValue)
             query = query.Where(s => s.Timestamp <= to.Value);
 
-        double? avg = await query.AverageAsync(s => s.TotalLatencyMs) as double?;
-        return avg.HasValue ? avg.Value : 0.0;
+        // AverageAsync throws on empty sequence, so check first
+        bool any = await query.AnyAsync();
+        if (!any) return 0.0;
+
+        return await query.AverageAsync(s => s.TotalLatencyMs);
     }
     /// <inheritdoc />
     public async Task<IReadOnlyList<ModelPreset>> GetPresetsForContextUsageAsync(DateTimeOffset from, DateTimeOffset to)

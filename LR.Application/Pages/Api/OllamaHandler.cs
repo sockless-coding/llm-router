@@ -53,6 +53,87 @@ public class OllamaHandler : IProtocolHandler
         return new { models };
     }
 
+    public async Task<object> HandleShowModelAsync(string modelName)
+    {
+        var presets = await _presetManager.GetAllPresetsAsync();
+        var preset = presets.FirstOrDefault(p => p.Name == modelName);
+        if (preset is null)
+            return Microsoft.AspNetCore.Http.Results.NotFound($"Model '{modelName}' not found");
+
+        // Build a Modelfile-like representation from the preset configuration
+        var modelfileLines = new List<string>
+        {
+            $"# Modelfile for {preset.Name}",
+            "",
+            $"FROM \"{preset.ModelPath}\""
+        };
+
+        if (preset.ContextSize.HasValue && preset.ContextSize.Value > 0)
+            modelfileLines.Add($"PARAMETER num_ctx {preset.ContextSize}");
+        if (preset.GpuLayers.HasValue)
+            modelfileLines.Add($"PARAMETER gpu_layers {preset.GpuLayers}");
+        if (preset.Temperature.HasValue)
+            modelfileLines.Add($"PARAMETER temperature {preset.Temperature}");
+        if (preset.TopK.HasValue && preset.TopK.Value > 0)
+            modelfileLines.Add($"PARAMETER top_k {preset.TopK}");
+        if (preset.TopP.HasValue)
+            modelfileLines.Add($"PARAMETER top_p {preset.TopP}");
+        if (preset.MinP.HasValue)
+            modelfileLines.Add($"PARAMETER min_p {preset.MinP}");
+        if (preset.RepeatPenalty.HasValue && preset.RepeatPenalty.Value != 1.0f)
+            modelfileLines.Add($"PARAMETER repeat_penalty {preset.RepeatPenalty}");
+        if (preset.Threads.HasValue)
+            modelfileLines.Add($"PARAMETER num_thread {preset.Threads}");
+        if (preset.BatchSize.HasValue)
+            modelfileLines.Add($"PARAMETER batch_size {preset.BatchSize}");
+
+        var parameters = new Dictionary<string, string>();
+        if (preset.ContextSize.HasValue && preset.ContextSize.Value > 0)
+            parameters["num_ctx"] = preset.ContextSize.Value.ToString();
+        if (preset.GpuLayers.HasValue)
+            parameters["gpu_layers"] = preset.GpuLayers.Value.ToString();
+        if (preset.Temperature.HasValue)
+            parameters["temperature"] = preset.Temperature.Value.ToString("G");
+        if (preset.TopK.HasValue && preset.TopK.Value > 0)
+            parameters["top_k"] = preset.TopK.Value.ToString();
+        if (preset.TopP.HasValue)
+            parameters["top_p"] = preset.TopP.Value.ToString("G");
+        if (preset.MinP.HasValue)
+            parameters["min_p"] = preset.MinP.Value.ToString("G");
+        if (preset.RepeatPenalty.HasValue && preset.RepeatPenalty.Value != 1.0f)
+            parameters["repeat_penalty"] = preset.RepeatPenalty.Value.ToString("G");
+        if (preset.Threads.HasValue)
+            parameters["num_thread"] = preset.Threads.Value.ToString();
+        if (preset.BatchSize.HasValue)
+            parameters["batch_size"] = preset.BatchSize.Value.ToString();
+
+        // Infer quantization from model path filename
+        var fileName = Path.GetFileName(preset.ModelPath).ToLowerInvariant();
+        string? quantLevel = null;
+        if (fileName.Contains("q4_k_m") || fileName.Contains("q4_0")) quantLevel = "Q4_K_M";
+        else if (fileName.Contains("q5_k_m")) quantLevel = "Q5_K_M";
+        else if (fileName.Contains("q8_0")) quantLevel = "Q8_0";
+        else if (fileName.Contains("f16") || fileName.Contains("f32")) quantLevel = "F16";
+
+        return new ShowResponse
+        {
+            Modelfile = string.Join('\n', modelfileLines),
+            Parameters = parameters.Count > 0 ? JsonSerializer.Serialize(parameters) : null,
+            Projectors = null,
+            Details = new ShowDetails
+            {
+                Format = "gguf",
+                Family = "llama",
+                Families = ["llama"],
+                ParameterSize = null, // Not available from preset alone
+                QuantizationLevel = quantLevel
+            },
+            Examine = null,
+            Template = null
+        };
+    }
+
+
     public async Task<IResult> HandleChatCompletionAsync(HttpRequest httpRequest, HttpResponse httpResponse, CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(httpRequest.Body);
