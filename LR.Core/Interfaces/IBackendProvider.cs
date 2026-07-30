@@ -36,6 +36,13 @@ public interface IBackendProvider
     Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Sends a streaming inference request. Returns token chunks as they are generated.
+    /// Each yielded string is a single text delta/token from the model.
+    /// After all tokens are yielded, the final yield contains the RouteResponse metadata.
+    /// </summary>
+    IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(string payload, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Configures the provider with engine-specific settings (paths, environment setup, etc.).
     /// Called by ServerManager before starting the process. Override to apply configuration.
     /// </summary>

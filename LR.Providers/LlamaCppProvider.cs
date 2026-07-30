@@ -99,6 +99,12 @@ public abstract class LlamaCppProvider : IBackendProvider
     public abstract Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Sends a streaming inference request. Returns token chunks as they are generated.
+    /// </summary>
+    public abstract IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(
+        string payload, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Builds the command-line arguments from a ModelPreset.
     /// Override to add backend-specific flags.
     /// </summary>

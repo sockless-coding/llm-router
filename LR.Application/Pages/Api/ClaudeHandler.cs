@@ -1,0 +1,236 @@
+using System.Text;
+using System.Text.Json;
+
+using Microsoft.AspNetCore.Mvc;
+
+using LR.Core.Interfaces;
+using LR.Core.Models;
+using LR.Core.Models.Claude;
+
+namespace LR.Application.Pages.Api;
+
+/// <summary>
+/// Claude Messages API handler.
+/// Maps /v1/messages endpoint.
+/// </summary>
+public class ClaudeHandler : IProtocolHandler
+{
+    private readonly IServerManager _serverManager;
+    private readonly IPresetManager _presetManager;
+    private readonly IRoutingEngine _routingEngine;
+    private readonly IRequestQueueService _queue;
+    private readonly IStatisticsService _statisticsService;
+
+    public ApiProtocol Protocol => ApiProtocol.Claude;
+    public string PathPrefix => "/v1";
+
+    public ClaudeHandler(
+        IServerManager serverManager,
+        IPresetManager presetManager,
+        IRoutingEngine routingEngine,
+        IRequestQueueService queue,
+        IStatisticsService statisticsService)
+    {
+        _serverManager = serverManager;
+        _presetManager = presetManager;
+        _routingEngine = routingEngine;
+        _queue = queue;
+        _statisticsService = statisticsService;
+    }
+
+    public Task<object> HandleListModelsAsync()
+    {
+        // Claude doesn't have a separate models endpoint - model info is returned in message responses.
+        return Task.FromResult<object>(new { });
+    }
+
+    public async Task<IResult> HandleChatCompletionAsync(HttpRequest httpRequest, HttpResponse httpResponse, CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(httpRequest.Body);
+        var body = await reader.ReadToEndAsync(cancellationToken);
+        var request = JsonSerializer.Deserialize<CreateMessageRequest>(body);
+        if (request is null) return Microsoft.AspNetCore.Http.Results.BadRequest("Invalid JSON in request body");
+
+        // Build internal RouteRequest from the Claude request
+        var routeRequest = BuildRouteRequest(request);
+
+        // Try to find a server immediately
+        var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        if (server is not null && !server.IsBusy)
+        {
+            if (request.Stream)
+            {
+                httpResponse.Headers.ContentType = "text/event-stream";
+                httpResponse.Headers.CacheControl = "no-cache";
+
+                var provider = _serverManager.GetProvider(server.Id);
+                if (provider is null)
+                    return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
+
+                server.IsBusy = true;
+                try
+                {
+                    var messageId = $"msg_{Guid.NewGuid():N}";
+
+                    // message_start event
+                    await httpResponse.WriteAsync($"event: message_start\ndata: {JsonSerializer.Serialize(new MessageStartData
+                    {
+                        Type = "message_start",
+                        Message = new MessageEnvelope
+                        {
+                            Id = messageId,
+                            Type = "message",
+                            Role = "assistant",
+                            Content = new List<object>(),
+                            Model = request.Model
+                        }
+                    })}\n\n", cancellationToken);
+                    await httpResponse.Body.FlushAsync(cancellationToken);
+
+                    // content_block_start event
+                    await httpResponse.WriteAsync($"event: content_block_start\ndata: {JsonSerializer.Serialize(new ContentBlockStartData
+                    {
+                        Type = "content_block_start",
+                        Index = 0,
+                        ContentBlock = new ContentBlock { Type = "text", Text = string.Empty }
+                    })}\n\n", cancellationToken);
+                    await httpResponse.Body.FlushAsync(cancellationToken);
+
+                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
+                    {
+                        if (cancellationToken.IsCancellationRequested) break;
+
+                        if (chunk.IsFinal && chunk.Response is not null)
+                        {
+                            // message_delta event with stop reason
+                            await httpResponse.WriteAsync($"event: message_delta\ndata: {JsonSerializer.Serialize(new MessageDeltaData
+                            {
+                                Type = "message_delta",
+                                Delta = new DeltaMessageDelta
+                                {
+                                    StopReason = "end_turn",
+                                    StopSequence = null
+                                }
+                            })}\n\n", cancellationToken);
+
+                            // message_stop event
+                            await httpResponse.WriteAsync($"event: message_stop\ndata: {JsonSerializer.Serialize(new MessageStopData
+                            {
+                                Type = "message_stop"
+                            })}\n\n", cancellationToken);
+
+                            // Record statistics from final response
+                            try
+                            {
+                                var presetId = routeRequest.PresetId ?? server.ActivePresetId;
+                                var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
+                                await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
+                            }
+                            catch { /* Stats recording failure shouldn't block the response */ }
+                        }
+                        else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                        {
+                            // content_block_delta event
+                            await httpResponse.WriteAsync($"event: content_block_delta\ndata: {JsonSerializer.Serialize(new ContentBlockDeltaData
+                            {
+                                Type = "content_block_delta",
+                                Index = 0,
+                                Delta = new DeltaContentBlockDelta
+                                {
+                                    Type = "text_delta",
+                                    Text = chunk.TextDelta
+                                }
+                            })}\n\n", cancellationToken);
+                        }
+
+                        await httpResponse.Body.FlushAsync(cancellationToken);
+                    }
+                }
+                finally
+                {
+                    server.IsBusy = false;
+                }
+
+                return Microsoft.AspNetCore.Http.Results.Ok();
+            }
+
+            var result = await ProcessOnServer(server, request, routeRequest, cancellationToken);
+            return Microsoft.AspNetCore.Http.Results.Json(result);
+        }
+
+        // Queue the request
+        var response = await _queue.EnqueueAsync(routeRequest, cancellationToken);
+
+        // Convert RouteResponse back to Claude format
+        return Microsoft.AspNetCore.Http.Results.Json(BuildMessageResponse(request.Model, response));
+    }
+
+    private async Task<object> ProcessOnServer(
+        ServerInstance server,
+        CreateMessageRequest chatRequest,
+        RouteRequest routeRequest,
+        CancellationToken cancellationToken)
+    {
+        server.IsBusy = true;
+
+        try
+        {
+            var provider = _serverManager.GetProvider(server.Id);
+            if (provider is null)
+                throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
+
+            // Send request to the backend
+            var response = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+            if (response == null)
+                throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
+
+            // Record statistics
+            try
+            {
+                var presetId = routeRequest.PresetId ?? server.ActivePresetId;
+                var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
+                await _statisticsService.RecordRequestAsync(server, preset, response);
+            }
+            catch { /* Stats recording failure shouldn't block the response */ }
+
+            return BuildMessageResponse(chatRequest.Model, response);
+        }
+        finally
+        {
+            server.IsBusy = false;
+        }
+    }
+
+    private RouteRequest BuildRouteRequest(CreateMessageRequest request)
+    {
+        // Find preset matching the model name
+        var presets = _presetManager.GetAllPresets();
+        var preset = presets.FirstOrDefault(p => p.Name == request.Model);
+
+        return new RouteRequest
+        {
+            ModelName = request.Model,
+            PresetId = preset?.Id,
+            Payload = JsonSerializer.Serialize(request)
+        };
+    }
+
+    private CreateMessageResponse BuildMessageResponse(string model, RouteResponse response)
+    {
+        return new CreateMessageResponse
+        {
+            Id = $"msg_{Guid.NewGuid():N}",
+            Model = model,
+            Content = new List<ContentBlock>
+            {
+                new ContentBlock { Type = "text", Text = response.Payload }
+            },
+            StopReason = "end_turn",
+            Usage = new LR.Core.Models.Claude.Usage
+            {
+                InputTokens = response.PromptTokensProcessed,
+                OutputTokens = response.GeneratedTokenCount
+            }
+        };
+    }
+}

@@ -34,14 +34,14 @@ public class RoutingEngine : IRoutingEngine
                 continue;
 
             var instance = await GetInstanceAsync(rule.TargetServerInstanceId, cancellationToken);
-            if (instance is not null && instance.Status == ServerStatus.Running && instance.IsHealthy)
+            if (instance is not null && instance.Status == ServerStatus.Running && instance.IsHealthy && !instance.IsBusy)
                 return instance;
         }
 
-        // 2. Fallback: round-robin among healthy running servers
+        // 2. Fallback: round-robin among healthy running and available (not busy) servers
         var allInstances = _serverManager.GetAllInstances();
         var healthyInstances = allInstances
-            .Where(s => s.Status == ServerStatus.Running && s.IsHealthy)
+            .Where(s => s.Status == ServerStatus.Running && s.IsHealthy && !s.IsBusy)
             .ToList();
 
         if (healthyInstances.Count > 0)

@@ -59,4 +59,38 @@ public class MockSyclProvider : LlamaCppProvider
             FirstTokenLatencyMs = promptProcessingMs + 10,
         };
     }
+
+    public override async IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(
+        string payload, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (!_isRunning) throw new InvalidOperationException("Server is not running.");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await Task.Delay(130, cancellationToken);
+        var promptProcessingMs = sw.ElapsedMilliseconds;
+        var promptTokens = Math.Max(1, payload.Length / 4);
+
+        foreach (var word in new[] { "Hello", ",", " this", " is", " a", " SYCL", " response" })
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            yield return new RouteStreamChunk { TextDelta = word + " " };
+            await Task.Delay(35, cancellationToken);
+        }
+
+        var genMs = sw.ElapsedMilliseconds - promptProcessingMs;
+        sw.Stop();
+        yield return new RouteStreamChunk
+        {
+            IsFinal = true,
+            Response = new RouteResponse
+            {
+                Payload = "Hello, this is a SYCL response",
+                PromptTokensProcessed = promptTokens,
+                GeneratedTokenCount = 7,
+                PromptProcessingMs = promptProcessingMs,
+                GenerationMs = genMs,
+                TotalLatencyMs = sw.ElapsedMilliseconds,
+                FirstTokenLatencyMs = promptProcessingMs + 10,
+            }
+        };
+    }
 }

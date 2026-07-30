@@ -1,6 +1,29 @@
 namespace LR.Core.Models;
 
 /// <summary>
+/// A single chunk from a streaming inference request.
+/// If IsFinal is true, Response contains the complete RouteResponse metadata.
+/// Otherwise, TextDelta contains the incremental text token.
+/// </summary>
+public class RouteStreamChunk
+{
+    /// <summary>
+    /// The incremental text content (token) for this chunk. Empty if IsFinal.
+    /// </summary>
+    public string TextDelta { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True if this is the final chunk containing full response metadata.
+    /// </summary>
+    public bool IsFinal { get; set; }
+
+    /// <summary>
+    /// The complete route response (only populated when IsFinal is true).
+    /// </summary>
+    public RouteResponse? Response { get; set; }
+}
+
+/// <summary>
 /// Wraps an inference response payload together with performance metadata returned by the backend provider.
 /// </summary>
 public class RouteResponse

@@ -18,6 +18,23 @@ public class PresetManager : IPresetManager
         _context = context;
     }
 
+    /// <summary>
+    /// Gets all presets across all server instances.
+    /// </summary>
+    public IReadOnlyList<ModelPreset> GetAllPresets()
+    {
+        return _context.ModelPresets.ToList().AsReadOnly();
+    }
+
+    /// <summary>
+    /// Gets all presets across all server instances (async).
+    /// </summary>
+    public async Task<IReadOnlyList<ModelPreset>> GetAllPresetsAsync()
+    {
+        var list = await _context.ModelPresets.ToListAsync();
+        return new List<ModelPreset>(list).AsReadOnly();
+    }
+
     public async Task<ModelPreset> CreateAsync(ModelPreset preset)
     {
         if (preset.Id == Guid.Empty)

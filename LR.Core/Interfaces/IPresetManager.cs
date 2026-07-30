@@ -41,4 +41,14 @@ public interface IPresetManager
     /// Gets a single preset by ID, or null if not found.
     /// </summary>
     ModelPreset? GetById(Guid presetId);
+
+    /// <summary>
+    /// Gets all presets across all server instances (async).
+    /// </summary>
+    Task<IReadOnlyList<ModelPreset>> GetAllPresetsAsync();
+
+    /// <summary>
+    /// Gets all presets across all server instances.
+    /// </summary>
+    IReadOnlyList<ModelPreset> GetAllPresets();
 }

@@ -219,6 +219,11 @@ public class ServerManager : IServerManager
         _providers.Remove(instanceId);
     }
 
+    public IBackendProvider? GetProvider(Guid instanceId)
+    {
+        return _providers.TryGetValue(instanceId, out var provider) ? provider : null;
+    }
+
     private async Task<ServerInstance> GetInstanceOrThrow(Guid instanceId)
     {
         var instance = await _context.ServerInstances.FindAsync(instanceId)

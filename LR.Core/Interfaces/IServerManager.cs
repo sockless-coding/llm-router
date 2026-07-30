@@ -33,9 +33,14 @@ public interface IServerManager
     Task<ServerInstance?> GetHealthAsync(Guid instanceId);
 
     /// <summary>
-    /// Gets all managed server instances.
+    /// Gets all managed server instances (sync).
     /// </summary>
     IReadOnlyList<ServerInstance> GetAllInstances();
+
+    /// <summary>
+    /// Gets all managed server instances (async — preferred for SQLite to avoid deadlocks).
+    /// </summary>
+    Task<IReadOnlyList<ServerInstance>> GetAllInstancesAsync();
 
     /// <summary>
     /// Updates the engine-specific backend configuration for a server instance.
@@ -46,4 +51,10 @@ public interface IServerManager
     /// Removes a server instance from management (stops it first if running).
     /// </summary>
     Task RemoveInstanceAsync(Guid instanceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the backend provider for a specific server instance.
+    /// Returns null if no provider is registered for this instance.
+    /// </summary>
+    IBackendProvider? GetProvider(Guid instanceId);
 }

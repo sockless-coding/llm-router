@@ -23,6 +23,12 @@ public class ServerInstance
     public bool IsHealthy { get; set; }
 
     /// <summary>
+    /// Whether this server is currently processing a request (runtime-only, not persisted).
+    /// </summary>
+    [NotMapped]
+    public bool IsBusy { get; set; }
+
+    /// <summary>
     /// The ID of the currently active preset, if any.
     /// </summary>
     public Guid? ActivePresetId { get; set; }

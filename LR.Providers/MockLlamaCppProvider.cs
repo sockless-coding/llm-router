@@ -82,4 +82,49 @@ public class MockLlamaCppProvider : LlamaCppProvider
             FirstTokenLatencyMs = promptProcessingMs + 10,
         };
     }
+
+    public override async IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(
+        string payload, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (!_isRunning)
+            throw new InvalidOperationException("Server is not running.");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        // Simulate prompt processing delay (TTFT)
+        await Task.Delay(150, cancellationToken);
+        var promptProcessingMs = sw.ElapsedMilliseconds;
+
+        // Estimate tokens from payload length (roughly 4 chars per token)
+        var promptTokens = Math.Max(1, payload.Length / 4);
+
+        // Simulate streaming generation (~20 output tokens at ~5ms each)
+        var words = new[] { "Hello", ",", " this", " is", " a", " simulated", " response", " from", " the",
+                            "mock", " Llama.cpp", " provider", "." };
+
+        foreach (var word in words)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            yield return new RouteStreamChunk { TextDelta = word + " " };
+            await Task.Delay(50, cancellationToken);
+        }
+
+        var genMs = sw.ElapsedMilliseconds - promptProcessingMs;
+        sw.Stop();
+
+        // Final chunk with metadata
+        yield return new RouteStreamChunk
+        {
+            IsFinal = true,
+            Response = new RouteResponse
+            {
+                Payload = string.Join("", words.Select(w => w + " ")),
+                PromptTokensProcessed = promptTokens,
+                GeneratedTokenCount = words.Length,
+                PromptProcessingMs = promptProcessingMs,
+                GenerationMs = genMs,
+                TotalLatencyMs = sw.ElapsedMilliseconds,
+                FirstTokenLatencyMs = promptProcessingMs + 10,
+            }
+        };
+    }
 }
