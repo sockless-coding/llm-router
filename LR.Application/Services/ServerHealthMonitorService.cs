@@ -36,18 +36,38 @@ public class ServerHealthMonitorService : BackgroundService
                 using var scope = _scopeFactory.CreateScope();
                 var serverManager = scope.ServiceProvider.GetRequiredService<IServerManager>();
 
-                var instances = serverManager.GetAllInstances();
+                var instances = await serverManager.GetAllInstancesAsync();
 
                 foreach (var instance in instances.Where(i => i.Status == Core.Models.ServerStatus.Running))
                 {
-                    var health = await serverManager.GetHealthAsync(instance.Id);
-                    if (health is null)
-                        continue;
+                    try
+                    {
+                        // Call the real provider health check
+                        var provider = serverManager.GetProvider(instance.Id);
+                        bool isHealthy;
+                        if (provider is not null)
+                        {
+                            isHealthy = await provider.HealthCheckAsync(stoppingToken);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No provider registered for instance {Id} ({Name}), marking unhealthy.",
+                                instance.Id, instance.Name);
+                            isHealthy = false;
+                        }
 
-                    // Health check is already reflected in the ServerInstance snapshot.
-                    // In production, this would call IBackendProvider.HealthCheckAsync directly.
-                    _logger.LogDebug("Health check: {Name} - Status={Status}, Healthy={Healthy}",
-                        health.Name, health.Status, health.IsHealthy);
+                        // Persist the health status via ServerManager (uses DbContext)
+                        await serverManager.UpdateHealthAsync(instance.Id, isHealthy);
+
+                        _logger.LogDebug("Health check: {Name} - Status={Status}, Healthy={Healthy}",
+                            instance.Name, instance.Status, isHealthy);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Health check failed for instance {Id} ({Name}), marking unhealthy.",
+                            instance.Id, instance.Name);
+                        await serverManager.UpdateHealthAsync(instance.Id, false);
+                    }
                 }
             }
             catch (Exception ex)

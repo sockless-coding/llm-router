@@ -40,8 +40,9 @@ public abstract class LlamaCppProvider : IBackendProvider
 
     /// <summary>
     /// The port this instance is listening on.
+    /// Set by ServerManager during StartProcessAsync via the port parameter.
     /// </summary>
-    protected int Port { get; private set; }
+    protected int Port { get; set; }
 
     /// <summary>
     /// Base URL of the running server (set after StartProcessAsync).
@@ -93,7 +94,12 @@ public abstract class LlamaCppProvider : IBackendProvider
         EnvironmentSetupCommand = configData.EnvironmentSetupCommand;
     }
 
-    public abstract Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default);
+    public virtual void StartPort(int? port)
+    {
+        if (port.HasValue) Port = port.Value;
+    }
+
+    public abstract Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, CancellationToken cancellationToken = default);
     public abstract Task StopProcessAsync(CancellationToken cancellationToken = default);
     public abstract Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default);
     public abstract Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);

@@ -15,12 +15,13 @@ public class ServerManager : IServerManager
 {
     private readonly LRDbContext _context;
     private readonly IBackendProviderFactory _providerFactory;
-    private readonly Dictionary<Guid, IBackendProvider> _providers = new();
+    private readonly ProviderRegistry _registry;
 
-    public ServerManager(LRDbContext context, IBackendProviderFactory providerFactory)
+    public ServerManager(LRDbContext context, IBackendProviderFactory providerFactory, ProviderRegistry registry)
     {
         _context = context;
         _providerFactory = providerFactory;
+        _registry = registry;
     }
 
     public async Task<ServerInstance> CreateInstanceAsync(string name, ServerEngine engine, BackendConfigData configData, int? port = null)
@@ -54,7 +55,7 @@ public class ServerManager : IServerManager
             // Configure the provider with backend-specific settings
             provider.Configure(configData);
 
-            _providers[instance.Id] = provider;
+            _registry.Register(instance.Id, provider);
         }
 
         return instance;
@@ -67,7 +68,7 @@ public class ServerManager : IServerManager
             .FirstOrDefaultAsync(s => s.Id == instanceId)
             ?? throw new KeyNotFoundException($"Server instance {instanceId} not found.");
 
-        var provider = GetProviderOrThrow(instanceId);
+        var provider = GetOrCreateProvider(instance);
 
         if (instance.Status == ServerStatus.Running)
             return true;
@@ -85,7 +86,7 @@ public class ServerManager : IServerManager
             provider.Configure(configData);
         }
 
-        instance.Status = ServerStatus.Stopping; // Transition state during start
+        instance.Status = ServerStatus.Starting;
 
         ModelPreset? preset = null;
         if (instance.ActivePresetId.HasValue)
@@ -95,9 +96,9 @@ public class ServerManager : IServerManager
 
         bool started;
         if (preset is not null)
-            started = await provider.StartProcessAsync(preset, cancellationToken);
+            started = await provider.StartProcessAsync(preset, instance.Port, cancellationToken);
         else
-            started = await provider.StartProcessAsync(CreateDefaultPreset(instance), cancellationToken);
+            started = await provider.StartProcessAsync(CreateDefaultPreset(instance), instance.Port, cancellationToken);
 
         if (started)
         {
@@ -122,7 +123,7 @@ public class ServerManager : IServerManager
             return;
 
         instance.Status = ServerStatus.Stopping;
-        var provider = GetProviderOrThrow(instanceId);
+        var provider = GetOrCreateProvider(instance);
         await provider.StopProcessAsync(cancellationToken);
 
         instance.Status = ServerStatus.Idle;
@@ -216,12 +217,22 @@ public class ServerManager : IServerManager
             await _context.SaveChangesAsync();
         }
 
-        _providers.Remove(instanceId);
+        _registry.Remove(instanceId);
     }
 
     public IBackendProvider? GetProvider(Guid instanceId)
     {
-        return _providers.TryGetValue(instanceId, out var provider) ? provider : null;
+        return _registry.TryGet(instanceId, out var provider) ? provider : null;
+    }
+
+    public async Task UpdateHealthAsync(Guid instanceId, bool isHealthy)
+    {
+        var instance = await _context.ServerInstances.FindAsync(instanceId);
+        if (instance is not null)
+        {
+            instance.IsHealthy = isHealthy;
+            await _context.SaveChangesAsync();
+        }
     }
 
     private async Task<ServerInstance> GetInstanceOrThrow(Guid instanceId)
@@ -231,10 +242,20 @@ public class ServerManager : IServerManager
         return instance;
     }
 
-    private IBackendProvider GetProviderOrThrow(Guid instanceId)
+    private IBackendProvider GetOrCreateProvider(ServerInstance instance)
     {
-        if (!_providers.TryGetValue(instanceId, out var provider))
-            throw new InvalidOperationException($"No backend provider registered for instance {instanceId}.");
+        // Check registry first (fast path — already registered from CreateInstanceAsync or previous call)
+        if (_registry.TryGet(instance.Id, out var provider))
+            return provider;
+
+        // Lazy registration: create and register a provider for the instance's engine.
+        // This handles cases where the app was restarted and existing DB instances
+        // don't have in-memory providers yet.
+        provider = _providerFactory.Create(instance.Engine);
+        if (provider is null)
+            throw new InvalidOperationException($"No backend provider available for engine {instance.Engine} on instance {instance.Id}.");
+
+        _registry.Register(instance.Id, provider);
         return provider;
     }
 

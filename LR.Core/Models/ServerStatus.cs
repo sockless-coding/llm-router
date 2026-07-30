@@ -8,7 +8,8 @@ namespace LR.Core.Models;
 public enum ServerStatus
 {
     Idle = 0,
-    Running = 1,
-    Stopping = 2,
-    Error = 3,
+    Starting = 1,
+    Running = 2,
+    Stopping = 3,
+    Error = 4,
 }

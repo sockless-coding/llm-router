@@ -15,8 +15,10 @@ public class MockVulkanProvider : LlamaCppProvider
         GpuBackendType = BackendType.Vulkan;
     }
 
-    public override async Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default)
+    public override async Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, CancellationToken cancellationToken = default)
     {
+        Port = port ?? Port;
+        Port = port ?? Port;
         await Task.Delay(500, cancellationToken);
         _isRunning = true;
         return true;

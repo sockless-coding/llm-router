@@ -19,6 +19,9 @@ Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
 var connectionString = $"Data Source={dbPath}";
 builder.Services.AddDbContext<LRDbContext>(options => options.UseSqlite(connectionString));
 
+// Provider registry (Singleton — holds runtime IBackendProvider references across scopes)
+builder.Services.AddSingleton<ProviderRegistry>();
+
 // Core services (Scoped — need DbContext access per request)
 builder.Services.AddScoped<IServerManager, ServerManager>();
 builder.Services.AddScoped<IPresetManager, PresetManager>();

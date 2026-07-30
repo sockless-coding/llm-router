@@ -57,4 +57,9 @@ public interface IServerManager
     /// Returns null if no provider is registered for this instance.
     /// </summary>
     IBackendProvider? GetProvider(Guid instanceId);
+
+    /// <summary>
+    /// Updates the health status of a server instance (used by the health monitor).
+    /// </summary>
+    Task UpdateHealthAsync(Guid instanceId, bool isHealthy);
 }

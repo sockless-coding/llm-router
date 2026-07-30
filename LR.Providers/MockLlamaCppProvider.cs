@@ -18,10 +18,13 @@ public class MockLlamaCppProvider : LlamaCppProvider
         _healthCheckDelayMs = healthCheckDelayMs;
     }
 
-    public override async Task<bool> StartProcessAsync(ModelPreset preset, CancellationToken cancellationToken = default)
+    public override async Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, CancellationToken cancellationToken = default)
     {
         if (_isRunning)
             return true;
+
+        // Apply the port from the server instance if provided
+        Port = port ?? Port;
 
         // Simulate startup delay
         await Task.Delay(_startDelayMs, cancellationToken);

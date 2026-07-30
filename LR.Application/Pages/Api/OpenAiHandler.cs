@@ -63,6 +63,16 @@ public class OpenAiHandler : IProtocolHandler
 
         // Try to find a server immediately
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        if (server is null)
+        {
+            // No available servers — check if any are running at all for a better error message
+            var instances = await _serverManager.GetAllInstancesAsync();
+            bool anyRunning = instances.Any(s => s.Status == Core.Models.ServerStatus.Running);
+            if (!anyRunning)
+                return Microsoft.AspNetCore.Http.Results.Problem("No inference servers are currently running. Start a server before sending requests.", statusCode: 503);
+            return Microsoft.AspNetCore.Http.Results.Problem("All inference servers are busy or unhealthy. Try again later.", statusCode: 503);
+        }
+
         if (server is not null && !server.IsBusy)
         {
             if (request.Stream)
