@@ -43,6 +43,9 @@ public class EditModel : PageModel
         ViewModel.CompanionAppPath = Server.Config?.CompanionAppPath ?? string.Empty;
         ViewModel.EnvironmentSetupCommand = Server.Config?.EnvironmentSetupCommand ?? string.Empty;
 
+        // Get the start command for display
+        ViewModel.StartCommand = await _serverManager.GetStartCommandAsync(Id);
+
         return Page();
     }
 
@@ -91,4 +94,5 @@ public class EditViewModel
     public string? LlamaCppExecutableFolderPath { get; set; }
     public string? CompanionAppPath { get; set; }
     public string? EnvironmentSetupCommand { get; set; }
+    public string? StartCommand { get; set; }
 }

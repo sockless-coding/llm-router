@@ -56,6 +56,13 @@ public interface IServerManager
     /// Gets the backend provider for a specific server instance.
     /// Returns null if no provider is registered for this instance.
     /// </summary>
+    /// <summary>
+    /// Returns the full start command string for a server instance (executable + arguments),
+    /// without actually launching the process. Uses the active preset if set.
+    /// Returns null if no provider is available or no valid preset is configured.
+    /// </summary>
+    Task<string?> GetStartCommandAsync(Guid instanceId);
+
     IBackendProvider? GetProvider(Guid instanceId);
 
     /// <summary>

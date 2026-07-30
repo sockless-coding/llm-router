@@ -86,19 +86,25 @@ public class ServerManager : IServerManager
             provider.Configure(configData);
         }
 
-        instance.Status = ServerStatus.Starting;
-
         ModelPreset? preset = null;
         if (instance.ActivePresetId.HasValue)
         {
             preset = await _context.ModelPresets.FindAsync(instance.ActivePresetId.Value);
         }
 
-        bool started;
-        if (preset is not null)
-            started = await provider.StartProcessAsync(preset, instance.Port, cancellationToken);
-        else
-            started = await provider.StartProcessAsync(CreateDefaultPreset(instance), instance.Port, cancellationToken);
+        // Validate that we have a valid preset with a model path before starting
+        if (preset is null || string.IsNullOrWhiteSpace(preset.ModelPath))
+        {
+            instance.Status = ServerStatus.Error;
+            instance.IsHealthy = false;
+            await _context.SaveChangesAsync();
+            throw new InvalidOperationException(
+                "Cannot start server without a valid model path. Please set an active preset with a ModelPath first.");
+        }
+
+        instance.Status = ServerStatus.Starting;
+
+        bool started = await provider.StartProcessAsync(preset, instance.Port, cancellationToken);
 
         if (started)
         {
@@ -220,6 +226,40 @@ public class ServerManager : IServerManager
         _registry.Remove(instanceId);
     }
 
+    public async Task<string?> GetStartCommandAsync(Guid instanceId)
+    {
+        var instance = await _context.ServerInstances
+            .Include(s => s.Config)
+            .FirstOrDefaultAsync(s => s.Id == instanceId);
+
+        if (instance is null) return null;
+
+        // Re-configure provider with latest config
+        var provider = GetOrCreateProvider(instance);
+        if (instance.Config is not null)
+        {
+            var configData = new BackendConfigData
+            {
+                LlamaCppExecutableFolderPath = instance.Config.LlamaCppExecutableFolderPath,
+                CompanionAppPath = instance.Config.CompanionAppPath,
+                EnvironmentSetupCommand = instance.Config.EnvironmentSetupCommand,
+            };
+            provider.Configure(configData);
+        }
+
+        // Get active preset
+        ModelPreset? preset = null;
+        if (instance.ActivePresetId.HasValue)
+        {
+            preset = await _context.ModelPresets.FindAsync(instance.ActivePresetId.Value);
+        }
+
+        if (preset is null || string.IsNullOrWhiteSpace(preset.ModelPath))
+            return null;
+
+        return provider.GetStartCommand(preset, instance.Port);
+    }
+
     public IBackendProvider? GetProvider(Guid instanceId)
     {
         return _registry.TryGet(instanceId, out var provider) ? provider : null;
@@ -257,22 +297,6 @@ public class ServerManager : IServerManager
 
         _registry.Register(instance.Id, provider);
         return provider;
-    }
-
-    /// <summary>
-    /// Creates a minimal preset when no active preset is set (used by StartAsync as fallback).
-    /// </summary>
-    private ModelPreset CreateDefaultPreset(ServerInstance instance)
-    {
-        return new ModelPreset
-        {
-            Id = Guid.NewGuid(),
-            ServerInstanceId = instance.Id,
-            Name = "default",
-            ModelPath = string.Empty,
-            ContextSize = 4096,
-            GpuLayers = -1,
-        };
     }
 
     /// <summary>

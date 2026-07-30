@@ -48,4 +48,11 @@ public interface IBackendProvider
     /// Called by ServerManager before starting the process. Override to apply configuration.
     /// </summary>
     void Configure(BackendConfigData configData);
+
+    /// <summary>
+    /// Returns the full command-line string that would be used to start this server,
+    /// without actually launching the process. Useful for debugging and UI display.
+    /// Returns null if no executable path is configured or the preset is invalid.
+    /// </summary>
+    string? GetStartCommand(ModelPreset preset, int? port = null);
 }

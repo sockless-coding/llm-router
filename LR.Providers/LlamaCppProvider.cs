@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
@@ -6,10 +8,10 @@ using LR.Core.Models;
 namespace LR.Providers;
 
 /// <summary>
-/// Abstract base class for llama.cpp-based backend providers.
-/// Defines the contract and common utilities for real llama.cpp implementations.
+/// Concrete implementation of a llama.cpp-based backend provider.
+/// Handles all GPU backends (CUDA, Vulkan, SYCL, CPU) via configuration.
 /// </summary>
-public abstract class LlamaCppProvider : IBackendProvider
+public class LlamaCppProvider : IBackendProvider, IDisposable
 {
     public ServerEngine Engine => ServerEngine.LlamaCpp;
 
@@ -78,9 +80,26 @@ public abstract class LlamaCppProvider : IBackendProvider
     /// </summary>
     protected string? EnvironmentSetupCommand { get; set; }
 
+    /// <summary>
+    /// HTTP client for communicating with the llama.cpp server.
+    /// </summary>
+    private readonly HttpClient _httpClient;
+
+    /// <summary>
+    /// Timeout in milliseconds to wait for the server to become healthy after starting.
+    /// </summary>
+    private const int StartupHealthCheckTimeoutMs = 60_000;
+
+    /// <summary>
+    /// Interval between health check polls during startup.
+    /// </summary>
+    private const int HealthCheckPollIntervalMs = 1000;
+
     public LlamaCppProvider(int port = 8080)
     {
         Port = port;
+        _httpClient = new HttpClient();
+        _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
     /// <summary>
@@ -99,16 +118,267 @@ public abstract class LlamaCppProvider : IBackendProvider
         if (port.HasValue) Port = port.Value;
     }
 
-    public abstract Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, CancellationToken cancellationToken = default);
-    public abstract Task StopProcessAsync(CancellationToken cancellationToken = default);
-    public abstract Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default);
-    public abstract Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);
+    public async Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(ServerExecutablePath))
+            throw new InvalidOperationException($"Server executable path is not set. ExecutableFolderPath: '{ExecutableFolderPath}'");
+
+        if (!File.Exists(ServerExecutablePath))
+            throw new FileNotFoundException($"Server executable not found at: {ServerExecutablePath}");
+
+        // Update port if provided
+        if (port.HasValue) Port = port.Value;
+
+        // Auto-detect GPU backend type from folder name
+        GpuBackendType = DetectGpuBackendType(ExecutableFolderPath);
+
+        var args = BuildArgs(preset);
+        string argString = string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = ServerExecutablePath,
+            Arguments = argString,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = ExecutableFolderPath,
+        };
+
+        // Apply environment setup if configured (e.g., oneAPI setvars.bat)
+        await InitializeEnvironmentAsync(ServerExecutablePath, startInfo, cancellationToken);
+
+        try
+        {
+            // Start companion app first (e.g., SYCL VRAM keeper)
+            await StartCompanionAppAsync(cancellationToken);
+
+            // Start the main server process
+            _serverProcess = new Process { StartInfo = startInfo };
+            _serverProcess.Start();
+
+            // Collect stderr for diagnostics if startup fails
+            var errorLines = new System.Collections.Generic.List<string>();
+            _ = Task.Run(async () => {
+                try
+                {
+                    while (_serverProcess != null)
+                    {
+                        var line = await _serverProcess.StandardError.ReadLineAsync();
+                        if (line == null) break;
+                        lock (errorLines) errorLines.Add(line);
+                    }
+                }
+                catch { /* process exited or stream closed */ }
+            }, cancellationToken);
+
+            // Poll health check until server is ready or timeout
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < StartupHealthCheckTimeoutMs)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (_serverProcess.HasExited)
+                {
+                    string earlyExitSnippet;
+                    lock (errorLines)
+                        earlyExitSnippet = string.Join("\n", errorLines.TakeLast(10));
+
+                    var msg = $"Server process exited prematurely with code {_serverProcess.ExitCode}. " +
+                        (string.IsNullOrEmpty(earlyExitSnippet) ? "" : $"Stderr: {earlyExitSnippet}");
+                    throw new InvalidOperationException(msg);
+                }
+
+                try
+                {
+                    bool healthy = await HealthCheckAsync(cancellationToken);
+                    if (healthy)
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // Server not ready yet, continue polling
+                }
+
+                await Task.Delay(HealthCheckPollIntervalMs, cancellationToken);
+            }
+
+            // Timeout — kill the process and fail with diagnostics
+            string stderrSnippet;
+            lock (errorLines)
+                stderrSnippet = string.Join("\n", errorLines.TakeLast(10));
+
+            throw new InvalidOperationException(
+                $"Server failed to become healthy within {StartupHealthCheckTimeoutMs / 1000}s. " +
+                (string.IsNullOrEmpty(stderrSnippet) ? "No stderr output captured." : $"Recent stderr: {stderrSnippet}"));
+        }
+        catch
+        {
+            await StopServerProcessAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task StopProcessAsync(CancellationToken cancellationToken = default)
+    {
+        await StopServerProcessAsync(cancellationToken);
+        await StopCompanionAppAsync(cancellationToken);
+    }
+
+    public async Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(ServerUrl)) return false;
+
+            _httpClient.Timeout = TimeSpan.FromSeconds(5);
+            var response = await _httpClient.GetAsync($"{ServerUrl}/health", cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(ServerUrl)) return null;
+
+            var response = await _httpClient.PostAsJsonAsync(
+                $"{ServerUrl}/v1/chat/completions",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload),
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                throw new HttpRequestException($"Chat completion failed: {response.StatusCode} - {errorBody}");
+            }
+
+            var jsonDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            return ParseRouteResponse(jsonDoc.RootElement);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
+        {
+            throw new InvalidOperationException($"Failed to send request to {ServerUrl}: {ex.Message}", ex);
+        }
+    }
 
     /// <summary>
     /// Sends a streaming inference request. Returns token chunks as they are generated.
     /// </summary>
-    public abstract IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(
-        string payload, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default);
+    public async IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(
+        string payload, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(ServerUrl)) yield break;
+
+        Stream? stream = null;
+        StreamReader? reader = null;
+
+        try
+        {
+            var requestContent = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync(
+                $"{ServerUrl}/v1/chat/completions?stream=true",
+                requestContent,
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                throw new HttpRequestException($"Streaming completion failed: {response.StatusCode} - {errorBody}");
+            }
+
+            stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            reader = new StreamReader(stream);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
+        {
+            throw new InvalidOperationException($"Failed to send streaming request to {ServerUrl}: {ex.Message}", ex);
+        }
+
+        string? accumulatedText = null;
+        bool completed = false;
+
+        while (!completed && !cancellationToken.IsCancellationRequested)
+        {
+            string? line = await reader.ReadLineAsync();
+            if (line is null || string.IsNullOrWhiteSpace(line)) continue;
+
+            // llama.cpp SSE format: "data: {json}"
+            if (!line.StartsWith("data:")) continue;
+
+            string data = line.Substring(5).Trim();
+            if (string.IsNullOrEmpty(data) || data == "[DONE]") continue;
+
+            RouteStreamChunk? chunk = null;
+            try
+            {
+                using var jsonDoc = JsonDocument.Parse(data);
+                var root = jsonDoc.RootElement;
+
+                // Extract text delta from choices[0].delta.content
+                string? textDelta = null;
+                if (root.TryGetProperty("choices", out JsonElement choices) && choices.GetArrayLength() > 0)
+                {
+                    var firstChoice = choices[0];
+                    if (firstChoice.TryGetProperty("delta", out JsonElement delta))
+                    {
+                        textDelta = delta.TryGetProperty("content", out JsonElement content)
+                            ? content.GetString()
+                            : null;
+                    }
+
+                    // Check for finish_reason to detect end of stream
+                    string? finishReason = firstChoice.TryGetProperty("finish_reason", out JsonElement fr)
+                        ? fr.GetString()
+                        : null;
+
+                    if (!string.IsNullOrEmpty(textDelta))
+                    {
+                        accumulatedText += textDelta;
+                        chunk = new RouteStreamChunk { TextDelta = textDelta, IsFinal = false };
+                    }
+
+                    // If finish_reason is set and we have usage data, send final chunk
+                    if (finishReason != null)
+                    {
+                        var routeResponse = BuildRouteResponseFromStream(accumulatedText ?? string.Empty, root);
+                        chunk = new RouteStreamChunk { IsFinal = true, Response = routeResponse };
+                        completed = true;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // Skip malformed SSE data lines
+                continue;
+            }
+
+            if (chunk != null)
+                yield return chunk;
+        }
+
+        // If stream ended without a proper finish_reason, send final chunk with what we have
+        if (!completed && !string.IsNullOrEmpty(accumulatedText))
+        {
+            yield return new RouteStreamChunk { IsFinal = true, Response = new RouteResponse { Payload = accumulatedText } };
+        }
+    }
 
     /// <summary>
     /// Builds the command-line arguments from a ModelPreset.
@@ -235,6 +505,21 @@ public abstract class LlamaCppProvider : IBackendProvider
         return args;
     }
 
+    public virtual string? GetStartCommand(ModelPreset preset, int? port = null)
+    {
+        if (string.IsNullOrEmpty(ServerExecutablePath) || !File.Exists(ServerExecutablePath))
+            return null;
+
+        var args = BuildArgs(preset);
+        string argString = string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+
+        // If environment setup is configured, the actual command goes through cmd.exe + batch script
+        if (!string.IsNullOrEmpty(EnvironmentSetupCommand))
+            return $"cmd.exe /c \"call \"\"{EnvironmentSetupCommand}\"\" && call \"\"{ServerExecutablePath}\"\" {argString}\"";
+
+        return $"\"{ServerExecutablePath}\" {argString}";
+    }
+
     private static void AddArgIfSet(List<string> args, string name, string? value)
     {
         if (!string.IsNullOrEmpty(value))
@@ -272,13 +557,109 @@ public abstract class LlamaCppProvider : IBackendProvider
     }
 
     /// <summary>
-    /// Sends a request to the llama.cpp server's completion endpoint.
-    /// Override for backend-specific API differences.
+    /// Auto-detects the GPU backend type from the executable folder path name.
     /// </summary>
-    protected virtual async Task<string?> SendCompletionAsync(string payload, CancellationToken ct = default)
+    private static BackendType DetectGpuBackendType(string? folderPath)
     {
-        // TODO: Implement HTTP client call to ServerUrl/v1/completions
-        throw new NotImplementedException("Not implemented in base class. Override in concrete provider.");
+        if (string.IsNullOrEmpty(folderPath)) return BackendType.Unknown;
+
+        string lower = folderPath.ToLowerInvariant();
+        if (lower.Contains("cuda")) return BackendType.Cuda;
+        if (lower.Contains("vulkan")) return BackendType.Vulkan;
+        if (lower.Contains("sycl") || lower.Contains("oneapi")) return BackendType.Sycl;
+
+        return BackendType.Unknown;
+    }
+
+    /// <summary>
+    /// Parses a non-streaming llama.cpp OpenAI-compatible response into a RouteResponse.
+    /// </summary>
+    private static RouteResponse ParseRouteResponse(JsonElement root)
+    {
+        var response = new RouteResponse();
+
+        // Extract content from choices[0].message.content
+        if (root.TryGetProperty("choices", out JsonElement choices) && choices.GetArrayLength() > 0)
+        {
+            var firstChoice = choices[0];
+            if (firstChoice.TryGetProperty("message", out JsonElement message))
+            {
+                response.Payload = message.TryGetProperty("content", out JsonElement content)
+                    ? content.GetString() ?? string.Empty
+                    : string.Empty;
+            }
+        }
+
+        // Extract usage data
+        if (root.TryGetProperty("usage", out JsonElement usage))
+        {
+            response.PromptTokensProcessed = GetInt32(usage, "prompt_tokens") ?? 0;
+            response.GeneratedTokenCount = GetInt32(usage, "completion_tokens") ?? 0;
+        }
+
+        // Extract timing data (llama.cpp may include these in the top-level or under usage)
+        if (root.TryGetProperty("timing", out JsonElement timing))
+        {
+            response.PromptProcessingMs = GetDouble(timing, "prompt_ms") ?? 0;
+            response.GenerationMs = GetDouble(timing, "predicted_ms") ?? 0;
+        }
+
+        // Some llama.cpp versions put timings in usage
+        if (root.TryGetProperty("usage", out JsonElement usageTiming))
+        {
+            if (response.PromptProcessingMs == 0)
+                response.PromptProcessingMs = GetDouble(usageTiming, "prompt_n" is not null ? "prompt_ms" : "time_prompt_ms") ?? 0;
+            if (response.GenerationMs == 0)
+                response.GenerationMs = GetDouble(usageTiming, "predicted_ms") ?? GetDouble(usageTiming, "time_generation_ms") ?? 0;
+        }
+
+        // First token latency from timing if available
+        if (root.TryGetProperty("timing", out JsonElement timingFirst))
+        {
+            response.FirstTokenLatencyMs = GetDouble(timingFirst, "predicted_n_first_token_ms") ?? 0;
+        }
+
+        response.TotalLatencyMs = response.PromptProcessingMs + response.GenerationMs;
+
+        return response;
+    }
+
+    /// <summary>
+    /// Builds a RouteResponse from streaming metadata.
+    /// </summary>
+    private static RouteResponse BuildRouteResponseFromStream(string accumulatedText, JsonElement root)
+    {
+        var response = new RouteResponse { Payload = accumulatedText };
+
+        if (root.TryGetProperty("usage", out JsonElement usage))
+        {
+            response.PromptTokensProcessed = GetInt32(usage, "prompt_tokens") ?? 0;
+            response.GeneratedTokenCount = GetInt32(usage, "completion_tokens") ?? 0;
+        }
+
+        return response;
+    }
+
+    private static int? GetInt32(JsonElement element, string propertyName)
+    {
+        if (element.TryGetProperty(propertyName, out JsonElement value) && value.ValueKind == JsonValueKind.Number)
+            return value.GetInt32();
+        return null;
+    }
+
+    private static double? GetDouble(JsonElement element, string propertyName)
+    {
+        if (element.TryGetProperty(propertyName, out JsonElement value) && value.ValueKind == JsonValueKind.Number)
+            return value.GetDouble();
+        return null;
+    }
+
+    /// <summary>
+    /// Disposes the HTTP client.
+    /// </summary>
+    public void Dispose()
+    {
+        _httpClient.Dispose();
     }
 
     /// <summary>

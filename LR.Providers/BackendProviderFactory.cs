@@ -5,7 +5,7 @@ namespace LR.Providers;
 
 /// <summary>
 /// Factory that creates the correct IBackendProvider based on ServerEngine.
-/// Uses mock implementations by default; swap in real providers via DI overrides.
+/// Uses LlamaCppProvider by default; register custom providers via Register().
 /// </summary>
 public class BackendProviderFactory : IBackendProviderFactory
 {
@@ -13,13 +13,13 @@ public class BackendProviderFactory : IBackendProviderFactory
 
     public BackendProviderFactory()
     {
-        // Register default mock provider for llama.cpp
-        Register(ServerEngine.LlamaCpp, () => new MockLlamaCppProvider());
+        // Register default real provider for llama.cpp
+        Register(ServerEngine.LlamaCpp, () => new LlamaCppProvider());
     }
 
     /// <summary>
     /// Registers a factory function for the given server engine.
-    /// Use this to override mock providers with real implementations at runtime.
+    /// Use this to override with custom implementations at runtime.
     /// </summary>
     public void Register(ServerEngine engine, Func<IBackendProvider> factory)
     {
