@@ -32,14 +32,53 @@ else
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         @foreach (var preset in Model.Presets)
         {
+            var server = Model.Servers.FirstOrDefault(s => s.Id == preset.ServerInstanceId);
+            bool isRunning = server?.Status == ServerStatus.Running;
+            bool isActivePreset = server != null && server.ActivePresetId == preset.Id;
+
             <div class="bg-cyber-card rounded-xl p-5 border border-neon-magenta/10 hover:border-neon-magenta/30 transition-all">
-                <h3 class="text-base font-semibold text-gray-100 mb-3">@preset.Name</h3>
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-base font-semibold text-gray-100">@preset.Name</h3>
+                    @if (server != null)
+                    {
+                        <span class="flex items-center gap-1.5 text-xs" title="@server.Name — @(server.Status)">
+                            <span class="w-2 h-2 rounded-full
+                                @if (server.Status == ServerStatus.Running) { <text>bg-neon-green</text> }
+                                else if (server.Status == ServerStatus.Starting || server.Status == ServerStatus.Stopping) { <text>bg-yellow-500 animate-pulse</text> }
+                                else if (server.Status == ServerStatus.Error) { <text>bg-neon-red</text> }
+                                else { <text>bg-gray-400</text> }"></span>
+                            @server.Name
+                        </span>
+                    }
+                </div>
+
+                @if (isActivePreset && isRunning)
+                {
+                    <span class="inline-block mb-3 text-xs px-2 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20">Active &amp; Running</span>
+                }
+
                 <div class="space-y-1 text-sm">
                     <p><span class="text-gray-400">Model:</span> @Truncate(preset.ModelPath, 80)</p>
                     <p><span class="text-gray-400">Context Size:</span> @(preset.ContextSize?.ToString() ?? "auto")</p>
                     <p><span class="text-gray-400">GPU Layers:</span> @(preset.GpuLayers?.ToString() ?? "auto")</p>
                 </div>
+
                 <div class="flex items-center gap-2 pt-3 mt-3 border-t border-gray-700/50">
+                    @if (isRunning && isActivePreset)
+                    {
+                        <span class="text-xs px-3 py-1.5 rounded-md bg-neon-green/10 text-neon-green font-medium cursor-default">Running</span>
+                    }
+                    else if (!isRunning || !isActivePreset)
+                    {
+                        var isStartingStopping = server?.Status == ServerStatus.Starting || server?.Status == ServerStatus.Stopping;
+                        <button type="button"
+                                onclick="@if (!isStartingStopping) { <text>startPreset('@preset.Id', '@preset.Name')</text> }"
+                                class="text-xs px-3 py-1.5 rounded-md bg-neon-green/10 text-neon-green hover:bg-neon-green/20 transition-all font-medium"
+                                disabled="@isStartingStopping">
+                            @(isRunning && !isActivePreset ? "Restart with this preset" : isStartingStopping ? "Processing..." : "Start")
+                        </button>
+                    }
+
                     <a href="/Features/Presets/Edit?Id=@preset.Id"
                        class="text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium">
                         Edit
@@ -55,6 +94,26 @@ else
 }
 
 <script>
+async function startPreset(presetId, name) {
+    const token = document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+    try {
+        const formData = new FormData();
+        formData.append('PresetId', presetId);
+        formData.append('Command', 'Start');
+        formData.append('__RequestVerificationToken', token);
+
+        const resp = await fetch('/Features/Presets/Actions', { method: 'POST', body: formData });
+        const result = await resp.json();
+        if (resp.ok) {
+            location.reload();
+        } else {
+            alert(result.message || 'Failed to start preset.');
+        }
+    } catch (e) {
+        alert('Start failed: ' + e.message);
+    }
+}
+
 async function deletePreset(id, name) {
     if (!confirm(`Delete preset "${name}"? This cannot be undone.`)) return;
     const token = document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';

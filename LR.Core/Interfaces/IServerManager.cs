@@ -28,6 +28,20 @@ public interface IServerManager
     Task<bool> RestartWithPresetAsync(Guid instanceId, Guid presetId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Sets the given preset as active and starts the server if it's idle.
+    /// Unlike RestartWithPresetAsync, this does NOT stop a running server first —
+    /// it only works on Idle/Errored servers (activates the preset then boots up).
+    /// </summary>
+    Task<bool> StartWithPresetAsync(Guid instanceId, Guid presetId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Safely attempts to auto-start an idle server that has a valid active preset configured.
+    /// Returns true if the server is already running or was successfully started.
+    /// Returns false if the server cannot be started (no preset, starting/stopping state, etc.).
+    /// </summary>
+    Task<bool> TryAutoStartAsync(Guid instanceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the health status of a specific server instance.
     /// </summary>
     Task<ServerInstance?> GetHealthAsync(Guid instanceId);

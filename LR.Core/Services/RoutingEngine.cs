@@ -34,8 +34,20 @@ public class RoutingEngine : IRoutingEngine
                 continue;
 
             var instance = await GetInstanceAsync(rule.TargetServerInstanceId, cancellationToken);
-            if (instance is not null && instance.Status == ServerStatus.Running && instance.IsHealthy && !instance.IsBusy)
+            if (instance is null)
+                continue;
+
+            // Server matches the rule and is ready — return it immediately
+            if (instance.Status == ServerStatus.Running && instance.IsHealthy && !instance.IsBusy)
                 return instance;
+
+            // Server matches but is idle/errored — try to auto-start it
+            if (await _serverManager.TryAutoStartAsync(rule.TargetServerInstanceId, cancellationToken))
+            {
+                var startedInstance = await GetInstanceAsync(rule.TargetServerInstanceId, cancellationToken);
+                if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
+                    return startedInstance;
+            }
         }
 
         // 2. Fallback: round-robin among healthy running and available (not busy) servers
@@ -49,6 +61,74 @@ public class RoutingEngine : IRoutingEngine
             var instance = healthyInstances[_roundRobinIndex % healthyInstances.Count];
             _roundRobinIndex++;
             return instance;
+        }
+
+        // 3. No running server found — try to auto-start an idle one that matches the request by PresetId
+        if (request.PresetId.HasValue)
+        {
+            var preset = await _context.ModelPresets.FindAsync(request.PresetId.Value);
+            if (preset is not null)
+            {
+                var instance = await GetInstanceAsync(preset.ServerInstanceId, cancellationToken);
+                if (instance is not null && instance.Status != ServerStatus.Running)
+                {
+                    // Set this preset as active before starting
+                    if (instance.ActivePresetId != request.PresetId.Value)
+                    {
+                        instance.ActivePresetId = request.PresetId.Value;
+                        await _context.SaveChangesAsync();
+                    }
+
+                    if (await _serverManager.TryAutoStartAsync(preset.ServerInstanceId, cancellationToken))
+                    {
+                        var startedInstance = await GetInstanceAsync(preset.ServerInstanceId, cancellationToken);
+                        if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
+                            return startedInstance;
+                    }
+                }
+            }
+        }
+
+        // 4. Try by model name — find any server with a matching preset
+        if (!string.IsNullOrWhiteSpace(request.ModelName))
+        {
+            var matchingPreset = await _context.ModelPresets
+                .FirstOrDefaultAsync(p => p.Name == request.ModelName, cancellationToken);
+
+            if (matchingPreset is not null)
+            {
+                var instance = await GetInstanceAsync(matchingPreset.ServerInstanceId, cancellationToken);
+                if (instance is not null && instance.Status != ServerStatus.Running)
+                {
+                    if (instance.ActivePresetId != matchingPreset.Id)
+                    {
+                        instance.ActivePresetId = matchingPreset.Id;
+                        await _context.SaveChangesAsync();
+                    }
+
+                    if (await _serverManager.TryAutoStartAsync(matchingPreset.ServerInstanceId, cancellationToken))
+                    {
+                        var startedInstance = await GetInstanceAsync(matchingPreset.ServerInstanceId, cancellationToken);
+                        if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
+                            return startedInstance;
+                    }
+                }
+            }
+        }
+
+        // 5. Last resort: try to auto-start any idle server with a valid preset
+        var idleInstances = allInstances
+            .Where(s => s.Status == ServerStatus.Idle || s.Status == ServerStatus.Error)
+            .ToList();
+
+        foreach (var instance in idleInstances)
+        {
+            if (await _serverManager.TryAutoStartAsync(instance.Id, cancellationToken))
+            {
+                var startedInstance = await GetInstanceAsync(instance.Id, cancellationToken);
+                if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
+                    return startedInstance;
+            }
         }
 
         return null;

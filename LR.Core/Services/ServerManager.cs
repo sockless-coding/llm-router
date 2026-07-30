@@ -148,6 +148,51 @@ public class ServerManager : IServerManager
         return await StartAsync(instanceId, cancellationToken);
     }
 
+    public async Task<bool> StartWithPresetAsync(Guid instanceId, Guid presetId, CancellationToken cancellationToken = default)
+    {
+        var instance = await GetInstanceOrThrow(instanceId);
+        if (instance.Status != ServerStatus.Idle && instance.Status != ServerStatus.Error)
+            throw new InvalidOperationException($"Cannot start server '{instance.Name}' — current status is {instance.Status}. Stop it first.");
+
+        var preset = await _context.ModelPresets.FindAsync(presetId)
+            ?? throw new ArgumentException("Preset not found.", nameof(presetId));
+
+        instance.ActivePresetId = presetId;
+        await _context.SaveChangesAsync();
+
+        return await StartAsync(instanceId, cancellationToken);
+    }
+
+    public async Task<bool> TryAutoStartAsync(Guid instanceId, CancellationToken cancellationToken = default)
+    {
+        var instance = await GetInstanceOrThrow(instanceId);
+
+        // Already running — nothing to do
+        if (instance.Status == ServerStatus.Running)
+            return true;
+
+        // Don't interrupt in-flight operations
+        if (instance.Status == ServerStatus.Starting || instance.Status == ServerStatus.Stopping)
+            return false;
+
+        // Must have a valid active preset to auto-start
+        if (!instance.ActivePresetId.HasValue)
+            return false;
+
+        var preset = await _context.ModelPresets.FindAsync(instance.ActivePresetId.Value);
+        if (preset is null || string.IsNullOrWhiteSpace(preset.ModelPath))
+            return false;
+
+        try
+        {
+            return await StartAsync(instanceId, cancellationToken);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public async Task<ServerInstance?> GetHealthAsync(Guid instanceId)
     {
         var instance = await _context.ServerInstances.FindAsync(instanceId);
