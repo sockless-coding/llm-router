@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Models.Ollama;
+using LR.Core.Models.OpenAI;
 
 namespace LR.Application.Pages.Api;
 
@@ -173,6 +174,7 @@ public class OllamaHandler : IProtocolHandler
                                 CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
                                 Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = string.Empty },
                                 Done = true,
+                                DoneReason = "stop",
                                 PromptEvalCount = chunk.Response.PromptTokensProcessed,
                                 EvalCount = chunk.Response.GeneratedTokenCount,
                                 TotalDuration = (long)chunk.Response.TotalLatencyMs * 1_000_000L
@@ -256,17 +258,286 @@ public class OllamaHandler : IProtocolHandler
         }
     }
 
-    private RouteRequest BuildRouteRequest(ChatRequest request)
+    /// <summary>
+    /// Handle /api/generate endpoint — text generation with a single prompt.
+    /// Converts the generate request to an internal chat-style request for routing.
+    /// </summary>
+    public async Task<IResult> HandleGenerateCompletionAsync(HttpRequest httpRequest, HttpResponse httpResponse, CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(httpRequest.Body);
+        var body = await reader.ReadToEndAsync(cancellationToken);
+        var request = JsonSerializer.Deserialize<GenerateRequest>(body);
+        if (request is null) return Microsoft.AspNetCore.Http.Results.BadRequest("Invalid JSON in request body");
+
+        // Convert generate request to chat-style internal request
+        var routeRequest = BuildRouteRequestFromGenerate(request);
+
+        // Try to find a server immediately
+        var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        if (server is not null && !server.IsBusy)
+        {
+            if (request.Stream)
+            {
+                httpResponse.Headers.ContentType = "application/x-ndjson";
+                httpResponse.Headers.CacheControl = "no-cache";
+
+                var provider = _serverManager.GetProvider(server.Id);
+                if (provider is null)
+                    return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
+
+                server.IsBusy = true;
+                try
+                {
+                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
+                    {
+                        if (cancellationToken.IsCancellationRequested) break;
+
+                        if (chunk.IsFinal && chunk.Response is not null)
+                        {
+                            // Final chunk with done=true and metadata
+                            await httpResponse.WriteAsync(JsonSerializer.Serialize(new GenerateResponse
+                            {
+                                Model = request.Model,
+                                CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                                Response = string.Empty,
+                                Done = true,
+                                DoneReason = "stop",
+                                PromptEvalCount = chunk.Response.PromptTokensProcessed,
+                                EvalCount = chunk.Response.GeneratedTokenCount,
+                                TotalDuration = (long)chunk.Response.TotalLatencyMs * 1_000_000L
+                            }) + "\n", cancellationToken);
+
+                            // Record statistics from final response
+                            try
+                            {
+                                var presetId = routeRequest.PresetId ?? server.ActivePresetId;
+                                var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
+                                await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
+                            }
+                            catch { /* Stats recording failure shouldn't block the response */ }
+                        }
+                        else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                        {
+                            await httpResponse.WriteAsync(JsonSerializer.Serialize(new GenerateResponse
+                            {
+                                Model = request.Model,
+                                CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                                Response = chunk.TextDelta,
+                                Done = false
+                            }) + "\n", cancellationToken);
+                        }
+
+                        await httpResponse.Body.FlushAsync(cancellationToken);
+                    }
+                }
+                finally
+                {
+                    server.IsBusy = false;
+                }
+
+                return Microsoft.AspNetCore.Http.Results.Ok();
+            }
+
+            // Non-streaming: process on server and return full response
+            server.IsBusy = true;
+            try
+            {
+                var provider = _serverManager.GetProvider(server.Id);
+                if (provider is null)
+                    return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
+
+                var result = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+                if (result == null)
+                    return Microsoft.AspNetCore.Http.Results.Problem("Backend returned no response", statusCode: 502);
+
+                // Record statistics
+                try
+                {
+                    var presetId = routeRequest.PresetId ?? server.ActivePresetId;
+                    var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
+                    await _statisticsService.RecordRequestAsync(server, preset, result);
+                }
+                catch { /* Stats recording failure shouldn't block the response */ }
+
+                return Microsoft.AspNetCore.Http.Results.Json(new GenerateResponse
+                {
+                    Model = request.Model,
+                    CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                    Response = result.Payload,
+                    Done = true,
+                    DoneReason = "stop",
+                    PromptEvalCount = result.PromptTokensProcessed,
+                    EvalCount = result.GeneratedTokenCount,
+                    TotalDuration = (long)result.TotalLatencyMs * 1_000_000L
+                });
+            }
+            finally
+            {
+                server.IsBusy = false;
+            }
+        }
+
+        // Queue the request
+        var response = await _queue.EnqueueAsync(routeRequest, cancellationToken);
+
+        return Microsoft.AspNetCore.Http.Results.Json(new GenerateResponse
+        {
+            Model = request.Model,
+            CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+            Response = response.Payload,
+            Done = true,
+            DoneReason = "stop",
+            PromptEvalCount = response.PromptTokensProcessed,
+            EvalCount = response.GeneratedTokenCount,
+            TotalDuration = (long)response.TotalLatencyMs * 1_000_000L
+        });
+    }
+
+    /// <summary>
+    /// Handle /api/embed endpoint — generate embeddings from a model.
+    /// </summary>
+    public async Task<object> HandleEmbeddingsAsync(EmbedRequest request)
+    {
+        // Normalize input to a list of strings
+        var inputs = new List<string>();
+        if (request.Input is string singleInput)
+            inputs.Add(singleInput);
+        else if (request.Input is JsonElement jsonElem && jsonElem.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in jsonElem.EnumerateArray())
+                inputs.Add(item.GetString() ?? string.Empty);
+        }
+
+        // Find a running server for the requested model
+        var presets = await _presetManager.GetAllPresetsAsync();
+        var preset = presets.FirstOrDefault(p => p.Name == request.Model);
+        if (preset is null)
+            return Microsoft.AspNetCore.Http.Results.NotFound($"Model '{request.Model}' not found");
+
+        // For now, return a placeholder embedding response.
+        // A real implementation would send the embeddings request to the backend provider.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var dummyEmbeddings = inputs.Select(_ => Enumerable.Range(0, 384).Select(_ => (double)(new Random().NextDouble() * 2 - 1)).ToList()).ToList();
+        sw.Stop();
+
+        return new EmbedResponse
+        {
+            Model = request.Model,
+            Embeddings = dummyEmbeddings,
+            TotalDuration = (long)sw.Elapsed.TotalMilliseconds * 1_000_000L,
+            PromptEvalCount = inputs.Sum(s => s.Length / 4)
+        };
+    }
+
+    /// <summary>
+    /// Handle /api/ps endpoint — list models currently loaded in memory.
+    /// </summary>
+    public async Task<object> HandlePsAsync()
+    {
+        var instances = _serverManager.GetAllInstances();
+        var runningModels = new List<PsModelInfo>();
+
+        foreach (var instance in instances)
+        {
+            if (instance.Status != ServerStatus.Running || !instance.IsHealthy)
+                continue;
+
+            var presetId = instance.ActivePresetId;
+            string? quantLevel = null;
+            if (presetId.HasValue)
+            {
+                var preset = _presetManager.GetById(presetId.Value);
+                if (preset is not null)
+                {
+                    var fileName = Path.GetFileName(preset.ModelPath).ToLowerInvariant();
+                    if (fileName.Contains("q4_k_m") || fileName.Contains("q4_0")) quantLevel = "Q4_K_M";
+                    else if (fileName.Contains("q5_k_m")) quantLevel = "Q5_K_M";
+                    else if (fileName.Contains("q8_0")) quantLevel = "Q8_0";
+                    else if (fileName.Contains("f16") || fileName.Contains("f32")) quantLevel = "F16";
+                }
+            }
+
+            runningModels.Add(new PsModelInfo
+            {
+                Name = instance.Name,
+                Model = instance.Name,
+                Size = 0L, // Not tracked at this level
+                Digest = string.Empty,
+                Details = new PsModelDetails
+                {
+                    Format = "gguf",
+                    Family = "llama",
+                    Families = ["llama"],
+                    QuantizationLevel = quantLevel
+                },
+                ExpiresAt = null // Models stay loaded while server is running
+            });
+        }
+
+        return new { models = runningModels };
+    }
+
+    private RouteRequest BuildRouteRequest(ChatRequest ollamaRequest)
     {
         // Find preset matching the model name
         var presets = _presetManager.GetAllPresets();
-        var preset = presets.FirstOrDefault(p => p.Name == request.Model);
+        var preset = presets.FirstOrDefault(p => p.Name == ollamaRequest.Model);
+
+        // Convert Ollama ChatRequest to OpenAI-compatible format for backend providers
+        var openAiRequest = new ChatCompletionRequest
+        {
+            Model = ollamaRequest.Model,
+            Stream = ollamaRequest.Stream,
+            Temperature = ollamaRequest.Options?.Temperature,
+            TopP = ollamaRequest.Options?.TopP,
+            MaxTokens = ollamaRequest.Options?.NumPredict,
+            Stop = ollamaRequest.Options?.Stop,
+            Messages = ollamaRequest.Messages.Select(m => new LR.Core.Models.OpenAI.ChatMessage
+            {
+                Role = m.Role,
+                Content = m.Content
+            }).ToList()
+        };
 
         return new RouteRequest
         {
-            ModelName = request.Model,
+            ModelName = ollamaRequest.Model,
             PresetId = preset?.Id,
-            Payload = JsonSerializer.Serialize(request)
+            Payload = JsonSerializer.Serialize(openAiRequest)
+        };
+    }
+
+    /// <summary>
+    /// Build a RouteRequest from an Ollama GenerateRequest by converting it to chat-style.
+    /// </summary>
+    private RouteRequest BuildRouteRequestFromGenerate(GenerateRequest generateRequest)
+    {
+        // Find preset matching the model name
+        var presets = _presetManager.GetAllPresets();
+        var preset = presets.FirstOrDefault(p => p.Name == generateRequest.Model);
+
+        // Convert generate request to OpenAI chat format (single user message with prompt)
+        var messages = new List<LR.Core.Models.OpenAI.ChatMessage>();
+        if (!string.IsNullOrEmpty(generateRequest.System))
+            messages.Add(new LR.Core.Models.OpenAI.ChatMessage { Role = "system", Content = generateRequest.System });
+        messages.Add(new LR.Core.Models.OpenAI.ChatMessage { Role = "user", Content = generateRequest.Prompt });
+
+        var openAiRequest = new ChatCompletionRequest
+        {
+            Model = generateRequest.Model,
+            Stream = generateRequest.Stream,
+            Temperature = generateRequest.Options?.Temperature,
+            TopP = generateRequest.Options?.TopP,
+            MaxTokens = generateRequest.Options?.NumPredict,
+            Stop = generateRequest.Options?.Stop,
+            Messages = messages
+        };
+
+        return new RouteRequest
+        {
+            ModelName = generateRequest.Model,
+            PresetId = preset?.Id,
+            Payload = JsonSerializer.Serialize(openAiRequest)
         };
     }
 
@@ -278,6 +549,7 @@ public class OllamaHandler : IProtocolHandler
             CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = response.Payload },
             Done = true,
+            DoneReason = "stop",
             PromptEvalCount = response.PromptTokensProcessed,
             EvalCount = response.GeneratedTokenCount,
             TotalDuration = (long)response.TotalLatencyMs * 1_000_000L // nanoseconds

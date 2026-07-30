@@ -3,9 +3,9 @@ using System.Text.Json.Serialization;
 namespace LR.Core.Models.Ollama;
 
 /// <summary>
-/// Non-streaming response for Ollama chat API.
+/// Response for Ollama /api/generate endpoint.
 /// </summary>
-public class ChatResponse
+public class GenerateResponse
 {
     [JsonPropertyName("model")]
     public string Model { get; set; } = string.Empty;
@@ -13,11 +13,20 @@ public class ChatResponse
     [JsonPropertyName("created_at")]
     public string CreatedAt { get; set; } = string.Empty;
 
-    [JsonPropertyName("message")]
-    public ChatMessage Message { get; set; } = new();
+    /// <summary>
+    /// The generated text (or empty if streaming).
+    /// </summary>
+    [JsonPropertyName("response")]
+    public string Response { get; set; } = string.Empty;
 
     [JsonPropertyName("done")]
     public bool Done { get; set; }
+
+    /// <summary>
+    /// Reason why generation stopped (e.g., "stop", "unload").
+    /// </summary>
+    [JsonPropertyName("done_reason")]
+    public string? DoneReason { get; set; }
 
     [JsonPropertyName("total_duration")]
     public long TotalDuration { get; set; }
@@ -36,10 +45,5 @@ public class ChatResponse
 
     [JsonPropertyName("eval_duration")]
     public long EvalDuration { get; set; }
-
-    /// <summary>
-    /// Reason why the generation stopped (e.g., "stop", "load", "unload").
-    /// </summary>
-    [JsonPropertyName("done_reason")]
-    public string? DoneReason { get; set; }
 }
+
