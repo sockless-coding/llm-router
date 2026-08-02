@@ -59,13 +59,48 @@ public class ServerHealthMonitorService : BackgroundService
                         // Persist the health status via ServerManager (uses DbContext)
                         await serverManager.UpdateHealthAsync(instance.Id, isHealthy);
 
+                        if (!isHealthy)
+                        {
+                            var errorMsg = $"Health check failed for {instance.Name}. Server may be unresponsive.";
+
+                            // Persist error state via DbContext directly
+                            var db = scope.ServiceProvider.GetRequiredService<LR.Core.Data.LRDbContext>();
+                            instance.LastErrorMessage = errorMsg;
+                            instance.LastErrorTime = DateTime.UtcNow;
+                            db.ServerInstances.Update(instance);
+                            await db.SaveChangesAsync();
+
+                            var logService = scope.ServiceProvider.GetService<IServerLogService>();
+                            if (logService != null)
+                            {
+                                await logService.LogAsync(instance, ServerLogLevel.Warning,
+                                    $"Health check failed. Server is running but not responding to health checks.");
+                            }
+                        }
+
                         _logger.LogDebug("Health check: {Name} - Status={Status}, Healthy={Healthy}",
                             instance.Name, instance.Status, isHealthy);
                     }
                     catch (Exception ex)
                     {
+                        var errorMsg = $"Health check exception: {ex.Message}";
                         _logger.LogWarning(ex, "Health check failed for instance {Id} ({Name}), marking unhealthy.",
                             instance.Id, instance.Name);
+
+                        // Persist error state via DbContext directly
+                        var db = scope.ServiceProvider.GetRequiredService<LR.Core.Data.LRDbContext>();
+                        instance.LastErrorMessage = errorMsg;
+                        instance.LastErrorTime = DateTime.UtcNow;
+                        db.ServerInstances.Update(instance);
+                        await db.SaveChangesAsync();
+
+                        var logService = scope.ServiceProvider.GetService<IServerLogService>();
+                        if (logService != null)
+                        {
+                            await logService.LogAsync(instance, ServerLogLevel.Error,
+                                $"Health check failed with exception: {ex.Message}");
+                        }
+
                         await serverManager.UpdateHealthAsync(instance.Id, false);
                     }
                 }

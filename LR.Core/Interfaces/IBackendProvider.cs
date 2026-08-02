@@ -50,6 +50,12 @@ public interface IBackendProvider
     void Configure(BackendConfigData configData);
 
     /// <summary>
+    /// Sets the server instance reference for logging and crash detection purposes.
+    /// Called by ServerManager after creating or lazily registering a provider.
+    /// </summary>
+    void SetServerInstance(ServerInstance? instance);
+
+    /// <summary>
     /// Returns the full command-line string that would be used to start this server,
     /// without actually launching the process. Useful for debugging and UI display.
     /// Returns null if no executable path is configured or the preset is invalid.

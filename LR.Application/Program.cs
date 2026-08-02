@@ -28,10 +28,14 @@ builder.Services.AddScoped<IPresetManager, PresetManager>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IRoutingEngine, RoutingEngine>();
 
+// Logging & auto-restart services (Scoped — need DbContext access per request)
+builder.Services.AddScoped<IServerLogService, LR.Core.Services.ServerLogService>();
+builder.Services.AddScoped<IAutoRestartService, AutoRestartService>();
+
 // Backend provider factory (mock by default)
 builder.Services.AddSingleton<IBackendProviderFactory>(sp =>
 {
-    var factory = new BackendProviderFactory();
+    var factory = new BackendProviderFactory(sp);
     // Override with real providers here when ready:
     // factory.Register(ServerEngine.LlamaCpp, () => new RealLlamaCppProvider());
     return factory;

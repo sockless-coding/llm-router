@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 using LR.Core.Data;
 using LR.Core.Interfaces;
@@ -16,12 +17,18 @@ public class ServerManager : IServerManager
     private readonly LRDbContext _context;
     private readonly IBackendProviderFactory _providerFactory;
     private readonly ProviderRegistry _registry;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public ServerManager(LRDbContext context, IBackendProviderFactory providerFactory, ProviderRegistry registry)
+    public ServerManager(
+        LRDbContext context,
+        IBackendProviderFactory providerFactory,
+        ProviderRegistry registry,
+        IServiceScopeFactory scopeFactory)
     {
         _context = context;
         _providerFactory = providerFactory;
         _registry = registry;
+        _scopeFactory = scopeFactory;
     }
 
     public async Task<ServerInstance> CreateInstanceAsync(string name, ServerEngine engine, BackendConfigData configData, int? port = null)
@@ -54,6 +61,9 @@ public class ServerManager : IServerManager
         {
             // Configure the provider with backend-specific settings
             provider.Configure(configData);
+
+            // Set server instance reference so provider can log to DB and detect crashes
+            provider.SetServerInstance(instance);
 
             _registry.Register(instance.Id, provider);
         }
@@ -103,19 +113,37 @@ public class ServerManager : IServerManager
         }
 
         instance.Status = ServerStatus.Starting;
+        await LogLifecycleEvent(instance, ServerLogLevel.Info,
+            $"Starting server '{instance.Name}' on port {instance.Port}...");
 
-        bool started = await provider.StartProcessAsync(preset, instance.Port, cancellationToken);
-
-        if (started)
+        bool started = false;
+        try
         {
-            instance.Status = ServerStatus.Running;
-            instance.Url = $"http://localhost:{instance.Port}";
-            instance.IsHealthy = true;
+            started = await provider.StartProcessAsync(preset, instance.Port, cancellationToken);
+
+            if (started)
+            {
+                instance.Status = ServerStatus.Running;
+                instance.Url = $"http://localhost:{instance.Port}";
+                instance.IsHealthy = true;
+                await LogLifecycleEvent(instance, ServerLogLevel.Info,
+                    $"Server '{instance.Name}' started successfully on {instance.Url}.");
+            }
+            else
+            {
+                instance.Status = ServerStatus.Error;
+                instance.IsHealthy = false;
+                await LogLifecycleEvent(instance, ServerLogLevel.Error,
+                    $"Server '{instance.Name}' failed to start.");
+            }
         }
-        else
+        catch (Exception ex)
         {
             instance.Status = ServerStatus.Error;
             instance.IsHealthy = false;
+            await LogLifecycleEvent(instance, ServerLogLevel.Error,
+                $"Server '{instance.Name}' crashed during startup: {ex.Message}");
+            throw;
         }
 
         await _context.SaveChangesAsync();
@@ -129,10 +157,25 @@ public class ServerManager : IServerManager
             return;
 
         instance.Status = ServerStatus.Stopping;
-        var provider = GetOrCreateProvider(instance);
-        await provider.StopProcessAsync(cancellationToken);
+        await LogLifecycleEvent(instance, ServerLogLevel.Info,
+            $"Stopping server '{instance.Name}'...");
 
-        instance.Status = ServerStatus.Idle;
+        var provider = GetOrCreateProvider(instance);
+        try
+        {
+            await provider.StopProcessAsync(cancellationToken);
+            instance.Status = ServerStatus.Idle;
+            await LogLifecycleEvent(instance, ServerLogLevel.Info,
+                $"Server '{instance.Name}' stopped successfully.");
+        }
+        catch (Exception ex)
+        {
+            instance.Status = ServerStatus.Error;
+            await LogLifecycleEvent(instance, ServerLogLevel.Error,
+                $"Error stopping server '{instance.Name}': {ex.Message}");
+            throw;
+        }
+
         await _context.SaveChangesAsync();
     }
 
@@ -340,6 +383,9 @@ public class ServerManager : IServerManager
         if (provider is null)
             throw new InvalidOperationException($"No backend provider available for engine {instance.Engine} on instance {instance.Id}.");
 
+        // Set server instance reference so provider can log to DB and detect crashes
+        provider.SetServerInstance(instance);
+
         _registry.Register(instance.Id, provider);
         return provider;
     }
@@ -355,6 +401,25 @@ public class ServerManager : IServerManager
         {
             if (!usedPorts.Contains(p))
                 return p;
+        }
+    }
+
+    /// <summary>
+    /// Logs a lifecycle event to the database via scoped resolution of IServerLogService.
+    /// This ensures start/stop/crash events are always persisted regardless of provider state.
+    /// </summary>
+    private async Task LogLifecycleEvent(ServerInstance instance, ServerLogLevel level, string message)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var logService = scope.ServiceProvider.GetRequiredService<IServerLogService>();
+            await logService.LogAsync(instance, level, message);
+        }
+        catch (Exception ex)
+        {
+            // Don't let logging failures break server lifecycle operations
+            System.Diagnostics.Debug.WriteLine($"Failed to persist lifecycle event: {ex.Message}");
         }
     }
 }

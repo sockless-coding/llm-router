@@ -13,6 +13,7 @@ public class LRDbContext : DbContext
     public DbSet<Models.ModelPreset> ModelPresets => Set<Models.ModelPreset>();
     public DbSet<Models.RoutingRule> RoutingRules => Set<Models.RoutingRule>();
     public DbSet<Models.ModelStatistics> ModelStatistics => Set<Models.ModelStatistics>();
+    public DbSet<Models.ServerLog> ServerLogs => Set<Models.ServerLog>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -34,6 +35,16 @@ public class LRDbContext : DbContext
                 .HasForeignKey(p => p.ServerInstanceId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // Cascade delete: deleting a server cascades to its logs
+            entity.HasMany(s => s.Logs)
+                .WithOne(l => l.ServerInstance)
+                .HasForeignKey(l => l.ServerInstanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Cascade delete: deleting a server cascades to its logs
+            entity.HasMany(s => s.Logs)
+                .WithOne(l => l.ServerInstance)
+                .HasForeignKey(l => l.ServerInstanceId)
+                .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(s => s.ActivePreset)
                 .WithMany()
                 .HasForeignKey(s => s.ActivePresetId)
@@ -73,6 +84,13 @@ public class LRDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(r => r.TargetServerInstanceId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ServerLog configurations
+        modelBuilder.Entity<Models.ServerLog>(entity =>
+        {
+            entity.ToTable("ServerLogs");
+            entity.HasIndex(e => new { e.ServerInstanceId, e.Timestamp });
         });
 
         // ModelStatistics configurations

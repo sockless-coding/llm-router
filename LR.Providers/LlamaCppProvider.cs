@@ -2,6 +2,9 @@ using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
 using LR.Core.Interfaces;
 using LR.Core.Models;
 
@@ -86,6 +89,21 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     private readonly HttpClient _httpClient;
 
     /// <summary>
+    /// Logger for this provider instance.
+    /// </summary>
+    private readonly ILogger<LlamaCppProvider> _logger;
+
+    /// <summary>
+    /// Factory for creating scoped service instances (used to resolve IServerLogService safely from a singleton).
+    /// </summary>
+    private readonly IServiceScopeFactory _scopeFactory;
+
+    /// <summary>
+    /// The server instance this provider is managing (set during startup for logging purposes).
+    /// </summary>
+    private ServerInstance? _serverInstance;
+
+    /// <summary>
     /// Timeout in milliseconds to wait for the server to become healthy after starting.
     /// </summary>
     private const int StartupHealthCheckTimeoutMs = 60_000;
@@ -95,11 +113,22 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     /// </summary>
     private const int HealthCheckPollIntervalMs = 1000;
 
-    public LlamaCppProvider(int port = 8080)
+    public LlamaCppProvider(
+        ILogger<LlamaCppProvider> logger,
+        IServiceScopeFactory scopeFactory)
     {
-        Port = port;
+        _logger = logger;
+        _scopeFactory = scopeFactory;
         _httpClient = new HttpClient();
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
+    }
+
+    /// <summary>
+    /// Sets the server instance reference for logging purposes.
+    /// </summary>
+    public void SetServerInstance(ServerInstance? instance)
+    {
+        _serverInstance = instance;
     }
 
     /// <summary>
@@ -146,6 +175,10 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
             WorkingDirectory = ExecutableFolderPath,
         };
 
+        _logger.LogInformation("Starting llama.cpp server at {ServerUrl} with args: {Args}", ServerUrl, argString);
+        await LogProviderMessage(ServerLogLevel.Info,
+            $"Starting server on port {Port}. Args: {argString.Substring(0, Math.Min(argString.Length, 200))}{(argString.Length > 200 ? "..." : "")}");
+
         // Apply environment setup if configured (e.g., oneAPI setvars.bat)
         await InitializeEnvironmentAsync(ServerExecutablePath, startInfo, cancellationToken);
 
@@ -156,9 +189,35 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
 
             // Start the main server process
             _serverProcess = new Process { StartInfo = startInfo };
-            _serverProcess.Start();
 
-            // Collect stderr for diagnostics if startup fails
+            // Subscribe to process exit event for immediate crash detection
+            _serverProcess.EnableRaisingEvents = true;
+            _serverProcess.Exited += async (sender, e) =>
+            {
+                var exitCode = ((Process)sender!).ExitCode;
+                _logger.LogWarning("Server process exited with code {ExitCode}", exitCode);
+                await LogProviderMessage(ServerLogLevel.Warning,
+                    $"Server process exited unexpectedly with code {exitCode}.");
+
+                // Trigger auto-restart — resolve IAutoRestartService from a scope to avoid
+                // injecting a scoped service into this singleton provider
+                if (_serverInstance != null)
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var autoRestartService = scope.ServiceProvider.GetService<IAutoRestartService>();
+                        if (autoRestartService != null)
+                            await autoRestartService.AttemptRestartAsync(_serverInstance);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Auto-restart failed for server {ServerId}", _serverInstance.Id);
+                    }
+                }
+            };
+
+            _serverProcess.Start();
             var errorLines = new System.Collections.Generic.List<string>();
             _ = Task.Run(async () => {
                 try
@@ -195,6 +254,9 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                     bool healthy = await HealthCheckAsync(cancellationToken);
                     if (healthy)
                     {
+                        _logger.LogInformation("Server started successfully at {ServerUrl} in {ElapsedMs}ms", ServerUrl, stopwatch.ElapsedMilliseconds);
+                        await LogProviderMessage(ServerLogLevel.Info,
+                            $"Server started successfully on {ServerUrl} ({stopwatch.ElapsedMilliseconds}ms).");
                         return true;
                     }
                 }
@@ -211,6 +273,10 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
             lock (errorLines)
                 stderrSnippet = string.Join("\n", errorLines.TakeLast(10));
 
+            _logger.LogError("Server failed to become healthy within {TimeoutMs}ms. Stderr: {Stderr}", StartupHealthCheckTimeoutMs, stderrSnippet);
+            await LogProviderMessage(ServerLogLevel.Error,
+                $"Server failed to start within {StartupHealthCheckTimeoutMs / 1000}s.{(string.IsNullOrEmpty(stderrSnippet) ? " No stderr captured." : $" Recent stderr:\n{stderrSnippet}")}");
+
             throw new InvalidOperationException(
                 $"Server failed to become healthy within {StartupHealthCheckTimeoutMs / 1000}s. " +
                 (string.IsNullOrEmpty(stderrSnippet) ? "No stderr output captured." : $"Recent stderr: {stderrSnippet}"));
@@ -224,6 +290,17 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
 
     public async Task StopProcessAsync(CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Stopping server at {ServerUrl}", ServerUrl);
+        await LogProviderMessage(ServerLogLevel.Info, "Server stop initiated.");
+
+        if (_serverProcess?.HasExited == false)
+        {
+            var exitCode = _serverProcess.ExitCode;
+            _logger.LogInformation("Server process exited with code {ExitCode}", exitCode);
+            await LogProviderMessage(ServerLogLevel.Info,
+                $"Server process exited with code {exitCode}.");
+        }
+
         await StopServerProcessAsync(cancellationToken);
         await StopCompanionAppAsync(cancellationToken);
     }
@@ -270,7 +347,53 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
         {
-            throw new InvalidOperationException($"Failed to send request to {ServerUrl}: {ex.Message}", ex);
+            _logger.LogError(ex, "Request failed to {ServerUrl}", ServerUrl);
+            await LogProviderMessage(ServerLogLevel.Error,
+                $"Request failed: {ex.Message}");
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Logs a message to both the console (via ILogger) and the database (via IServerLogService).
+    /// Uses IServiceScopeFactory to resolve IServerLogService in a new scope, avoiding
+    /// the captured-dependency anti-pattern of injecting scoped services into singletons.
+    /// </summary>
+    private async Task LogProviderMessage(ServerLogLevel level, string message)
+    {
+        // Log to console via ILogger (always works)
+        var logLevel = level switch
+        {
+            ServerLogLevel.Info => Microsoft.Extensions.Logging.LogLevel.Information,
+            ServerLogLevel.Warning => Microsoft.Extensions.Logging.LogLevel.Warning,
+            ServerLogLevel.Error => Microsoft.Extensions.Logging.LogLevel.Error,
+            _ => Microsoft.Extensions.Logging.LogLevel.Information,
+        };
+
+        if (_serverInstance != null)
+        {
+            _logger.Log(logLevel, "[{ServerId}] {Message}", _serverInstance.Id, message);
+        }
+        else
+        {
+            _logger.Log(logLevel, message);
+        }
+
+        // Persist to database via scoped resolution of IServerLogService
+        if (_serverInstance != null)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var logService = scope.ServiceProvider.GetRequiredService<IServerLogService>();
+                await logService.LogAsync(_serverInstance, level, message);
+            }
+            catch (Exception ex)
+            {
+                // Don't let logging failures break provider operations
+                _logger.LogError(ex, "Failed to persist log message to database for server {ServerId}", _serverInstance?.Id);
+            }
         }
     }
 
@@ -308,6 +431,10 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
         {
+            _logger.LogError(ex, "Streaming request failed to {ServerUrl}", ServerUrl);
+            await LogProviderMessage(ServerLogLevel.Error,
+                $"Streaming request failed: {ex.Message}");
+
             throw new InvalidOperationException($"Failed to send streaming request to {ServerUrl}: {ex.Message}", ex);
         }
 

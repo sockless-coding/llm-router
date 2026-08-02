@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+
 using LR.Core.Interfaces;
 using LR.Core.Models;
 
@@ -9,12 +11,14 @@ namespace LR.Providers;
 /// </summary>
 public class BackendProviderFactory : IBackendProviderFactory
 {
-    private readonly Dictionary<ServerEngine, Func<IBackendProvider>> _factories = new();
+    private readonly Dictionary<ServerEngine, Func<IServiceProvider, IBackendProvider>> _factories = new();
+    private readonly IServiceProvider _serviceProvider;
 
-    public BackendProviderFactory()
+    public BackendProviderFactory(IServiceProvider serviceProvider)
     {
-        // Register default real provider for llama.cpp
-        Register(ServerEngine.LlamaCpp, () => new LlamaCppProvider());
+        _serviceProvider = serviceProvider;
+        // Register default real provider for llama.cpp via DI (supports ILogger + IServerLogService injection)
+        _factories[ServerEngine.LlamaCpp] = sp => (IBackendProvider)ActivatorUtilities.CreateInstance(sp, typeof(LlamaCppProvider));
     }
 
     /// <summary>
@@ -23,13 +27,14 @@ public class BackendProviderFactory : IBackendProviderFactory
     /// </summary>
     public void Register(ServerEngine engine, Func<IBackendProvider> factory)
     {
-        _factories[engine] = factory;
+        // Wrap the old-style factory to accept IServiceProvider (ignoring it)
+        _factories[engine] = sp => factory();
     }
 
     public IBackendProvider? Create(ServerEngine engine)
     {
         if (_factories.TryGetValue(engine, out var factory))
-            return factory();
+            return factory(_serviceProvider);
 
         return null;
     }

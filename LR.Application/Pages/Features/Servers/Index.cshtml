@@ -34,22 +34,38 @@
             {
                 @foreach (var server in Model.Servers)
                 {
-                    <tr class="border-b border-gray-700/30 hover:bg-white/[0.02] transition-colors" id="server-row-@server.Id">
-                        <td class="px-6 py-4 text-gray-100 font-medium">@server.Name</td>
+                    <tr class="border-b border-gray-700/30 hover:bg-white/[0.02] transition-colors @if (server.Status == ServerStatus.Error) { <text>border-l-2 border-l-neon-red</text> }" id="server-row-@server.Id">
+                        <td class="px-6 py-4">
+                            <div class="flex items-center gap-2">
+                                <span class="text-gray-100 font-medium">@server.Name</span>
+                                @if (server.LastErrorMessage != null)
+                                {
+                                    <span class="cursor-help text-neon-red" title="Last error: @(server.LastErrorMessage)\n@(server.LastErrorTime?.ToString("yyyy-MM-dd HH:mm:ss"))">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                                    </span>
+                                }
+                            </div>
+                        </td>
                         <td class="px-6 py-4">
                             <span class="px-2 py-0.5 rounded text-xs font-medium bg-neon-cyan/10 text-neon-cyan">
                                 @server.Engine.ToString().Replace("LlamaCpp", "llama.cpp")
                             </span>
                         </td>
                         <td class="px-6 py-4">
-                            <span class="flex items-center gap-2" id="status-@server.Id">
-                                <span class="w-2 h-2 rounded-full
-                                    @if (server.Status == ServerStatus.Running) { <text>bg-neon-green</text> }
-                                    else if (server.Status == ServerStatus.Starting || server.Status == ServerStatus.Stopping) { <text>bg-yellow-500 animate-pulse</text> }
-                                    else if (server.Status == ServerStatus.Error) { <text>bg-neon-red</text> }
-                                    else { <text>bg-gray-400</text> }"></span>
-                                @server.Status
-                            </span>
+                            <div>
+                                <span class="flex items-center gap-2" id="status-@server.Id">
+                                    <span class="w-2 h-2 rounded-full
+                                        @if (server.Status == ServerStatus.Running) { <text>bg-neon-green</text> }
+                                        else if (server.Status == ServerStatus.Starting || server.Status == ServerStatus.Stopping) { <text>bg-yellow-500 animate-pulse</text> }
+                                        else if (server.Status == ServerStatus.Error) { <text>bg-neon-red</text> }
+                                        else { <text>bg-gray-400</text> }"></span>
+                                    @server.Status
+                                </span>
+                                @if (server.RestartCount > 0)
+                                {
+                                    <div class="text-xs text-yellow-500 mt-1">Restarted @server.RestartCount/@server.MaxRestarts times</div>
+                                }
+                            </div>
                         </td>
                         <td class="px-6 py-4 text-gray-300">@server.Port</td>
                         <td class="px-6 py-4 text-right">
@@ -61,6 +77,10 @@
                                 </button>
                             }
                             <a href="/Features/Servers/Edit?Id=@server.Id" class="text-neon-cyan hover:text-neon-cyan/80 transition-colors mr-3">Edit</a>
+                            <a href="/Features/Servers/Detail?id=@server.Id" class="text-gray-400 hover:text-neon-cyan transition-colors mr-3 inline-flex items-center gap-1" title="View logs">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                                Logs
+                            </a>
                             <button type="button" onclick="toggleCommand('@server.Id')"
                                     class="text-gray-500 hover:text-neon-cyan transition-colors inline-flex items-center gap-1" title="Show start command">
                                 <svg id="cmd-icon-@server.Id" class="w-4 h-4 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
