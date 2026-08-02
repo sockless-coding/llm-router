@@ -76,6 +76,21 @@
                                     Stop
                                 </button>
                             }
+                            else if (server.Status != ServerStatus.Starting)
+                            {
+                                <button onclick="startServer('@server.Id')" id="btn-start-@server.Id"
+                                        class="text-neon-green hover:text-neon-green/80 transition-colors mr-3 inline-flex items-center gap-1" title="Start server">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                    Start
+                                </button>
+                            }
+                            else if (server.Status == ServerStatus.Starting)
+                            {
+                                <span class="text-yellow-500 mr-3 inline-flex items-center gap-1">
+                                    <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                    Starting
+                                </span>
+                            }
                             <a href="/Features/Servers/Edit?Id=@server.Id" class="text-neon-cyan hover:text-neon-cyan/80 transition-colors mr-3">Edit</a>
                             <a href="/Features/Servers/Detail?id=@server.Id" class="text-gray-400 hover:text-neon-cyan transition-colors mr-3 inline-flex items-center gap-1" title="View logs">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
@@ -93,24 +108,128 @@
     </table>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
 <script>
-async function stopServer(instanceId) {
-    try {
-        const response = await fetch('/Features/Servers/Actions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ InstanceId: instanceId, Command: 'Stop' })
+(function() {
+    // SignalR connection (shared across page)
+    let signalRConnection = null;
+
+    function connectSignalR() {
+        if (signalRConnection && signalRConnection.state === signalR.HubConnectionState.Connected) return;
+
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl('/serverHub', { transport: signalR.HttpTransportType.WebSockets })
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on('ReceiveStartupProgress', (instanceId, eventType, message, elapsedSeconds) => {
+            handleStartupProgress(instanceId, eventType, message, elapsedSeconds);
         });
-        const result = await response.json();
-        if (result.success) {
-            location.reload();
-        } else {
-            alert('Failed to stop server: ' + result.message);
-        }
-    } catch (err) {
-        alert('Error stopping server: ' + err.message);
+
+        connection.start().then(() => {
+            console.log('[SignalR] Connected to serverHub');
+        }).catch(err => {
+            console.warn('[SignalR] Connection failed:', err.message);
+        });
+
+        signalRConnection = connection;
     }
-}
+
+    // Map event type enum values: 0=Starting, 1=ProcessStarted, 2=HealthChecking, 3=Healthy, 4=Error
+    function handleStartupProgress(instanceId, eventType, message, elapsedSeconds) {
+        const statusEl = document.getElementById('status-' + instanceId);
+
+        switch (eventType) {
+            case 0: // Starting
+                if (statusEl) {
+                    statusEl.innerHTML = '<span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>Starting</span><div class="text-xs text-yellow-400 mt-1">' + escapeHtml(message) + '</div>';
+                }
+                break;
+            case 1: // Process Started
+                if (statusEl) {
+                    statusEl.innerHTML = '<span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>Process started</span><div class="text-xs text-yellow-400 mt-1">' + escapeHtml(message) + '</div>';
+                }
+                break;
+            case 2: // Health Checking
+                if (statusEl) {
+                    statusEl.innerHTML = '<span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>Health checking...</span><div class="text-xs text-yellow-400 mt-1">' + escapeHtml(message) + '</div>';
+                }
+                break;
+            case 3: // Healthy / Ready
+                if (statusEl) {
+                    statusEl.innerHTML = '<span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-neon-green"></span>Running</span>';
+                }
+                // Swap Start button for Stop button in the actions column
+                const startBtn = document.getElementById('btn-start-' + instanceId);
+                if (startBtn) {
+                    const parentTd = startBtn.closest('td');
+                    if (parentTd) {
+                        const stopSvg = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>';
+                        const stopBtn = document.createElement('button');
+                        stopBtn.onclick = () => window.stopServer(instanceId);
+                        stopBtn.className = 'text-neon-red hover:text-neon-red/80 transition-colors mr-3 inline-flex items-center gap-1';
+                        stopBtn.title = 'Stop server';
+                        stopBtn.innerHTML = stopSvg + ' Stop';
+                        parentTd.insertBefore(stopBtn, startBtn);
+                        startBtn.remove();
+                    }
+                }
+                break;
+            case 4: // Error
+                if (statusEl) {
+                    statusEl.innerHTML = '<span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-neon-red"></span>Error</span><div class="text-xs text-neon-red mt-1">' + escapeHtml(message) + '</div>';
+                }
+                break;
+        }
+    }
+
+    window.startServer = async function(instanceId) {
+        const btn = document.getElementById('btn-start-' + instanceId);
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Starting';
+        }
+
+        try {
+            const response = await fetch('/Features/Servers/Actions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ InstanceId: instanceId, Command: 'Start' })
+            });
+            const result = await response.json();
+            if (!result.success) {
+                alert('Failed to start server: ' + result.message);
+                location.reload();
+            }
+            // Success — the backend returns immediately.
+            // SignalR will update the status and swap Start→Stop when healthy.
+        } catch (err) {
+            alert('Error starting server: ' + err.message);
+            location.reload();
+        }
+    };
+
+    window.stopServer = async function(instanceId) {
+        try {
+            const response = await fetch('/Features/Servers/Actions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ InstanceId: instanceId, Command: 'Stop' })
+            });
+            const result = await response.json();
+            if (result.success) {
+                location.reload();
+            } else {
+                alert('Failed to stop server: ' + result.message);
+            }
+        } catch (err) {
+            alert('Error stopping server: ' + err.message);
+        }
+    };
+
+    // Connect SignalR on page load
+    connectSignalR();
+})();
 
 let expandedCommands = {};
 

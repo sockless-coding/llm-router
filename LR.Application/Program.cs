@@ -13,6 +13,9 @@ var builder = WebApplication.CreateBuilder(args);
 // Razor Pages with vertical slice structure
 builder.Services.AddRazorPages();
 
+// SignalR for real-time server lifecycle events
+builder.Services.AddSignalR();
+
 // --- EF Core / SQLite persistence ---
 var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data", "lr.db");
 Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
@@ -27,6 +30,9 @@ builder.Services.AddScoped<IServerManager, ServerManager>();
 builder.Services.AddScoped<IPresetManager, PresetManager>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IRoutingEngine, RoutingEngine>();
+
+// SignalR progress publisher (bridges LR.Core and LR.Application)
+builder.Services.AddScoped<LR.Core.Interfaces.ISignalRProgressPublisher, SignalRProgressPublisher>();
 
 // Logging & auto-restart services (Scoped — need DbContext access per request)
 builder.Services.AddScoped<IServerLogService, LR.Core.Services.ServerLogService>();
@@ -78,6 +84,9 @@ using (var scope = app.Services.CreateScope())
 
 app.UseStaticFiles();
 app.MapRazorPages();
+
+// SignalR hub for server lifecycle events
+app.MapHub<LR.Application.Hubs.ServerHub>("/serverHub");
 
 // --- Health endpoint for agents ---
 app.MapGet("/health", async (IServerManager serverManager) =>

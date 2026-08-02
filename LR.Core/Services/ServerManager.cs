@@ -18,17 +18,20 @@ public class ServerManager : IServerManager
     private readonly IBackendProviderFactory _providerFactory;
     private readonly ProviderRegistry _registry;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ISignalRProgressPublisher _progressPublisher;
 
     public ServerManager(
         LRDbContext context,
         IBackendProviderFactory providerFactory,
         ProviderRegistry registry,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        ISignalRProgressPublisher progressPublisher)
     {
         _context = context;
         _providerFactory = providerFactory;
         _registry = registry;
         _scopeFactory = scopeFactory;
+        _progressPublisher = progressPublisher;
     }
 
     public async Task<ServerInstance> CreateInstanceAsync(string name, ServerEngine engine, BackendConfigData configData, int? port = null)
@@ -78,10 +81,10 @@ public class ServerManager : IServerManager
             .FirstOrDefaultAsync(s => s.Id == instanceId)
             ?? throw new KeyNotFoundException($"Server instance {instanceId} not found.");
 
-        var provider = GetOrCreateProvider(instance);
-
         if (instance.Status == ServerStatus.Running)
             return true;
+
+        var provider = GetOrCreateProvider(instance);
 
         // Re-configure the provider with the latest config from the database
         // in case it was updated while the server was stopped
@@ -112,42 +115,108 @@ public class ServerManager : IServerManager
                 "Cannot start server without a valid model path. Please set an active preset with a ModelPath first.");
         }
 
+        // Set status to Starting and persist immediately — then offload to background task
         instance.Status = ServerStatus.Starting;
         await LogLifecycleEvent(instance, ServerLogLevel.Info,
             $"Starting server '{instance.Name}' on port {instance.Port}...");
 
-        bool started = false;
-        try
+        var progressEvent = new StartupProgressEvent
         {
-            started = await provider.StartProcessAsync(preset, instance.Port, cancellationToken);
+            InstanceId = instance.Id,
+            EventType = StartupEventType.Starting,
+            Message = $"Server '{instance.Name}' is starting...",
+            ElapsedSeconds = 0
+        };
+        await BroadcastStartupProgress(progressEvent);
 
-            if (started)
-            {
-                instance.Status = ServerStatus.Running;
-                instance.Url = $"http://localhost:{instance.Port}";
-                instance.IsHealthy = true;
-                await LogLifecycleEvent(instance, ServerLogLevel.Info,
-                    $"Server '{instance.Name}' started successfully on {instance.Url}.");
-            }
-            else
-            {
-                instance.Status = ServerStatus.Error;
-                instance.IsHealthy = false;
-                await LogLifecycleEvent(instance, ServerLogLevel.Error,
-                    $"Server '{instance.Name}' failed to start.");
-            }
-        }
-        catch (Exception ex)
+        // Offload the actual startup to a background task so the API returns immediately
+        var scopeFactory = _scopeFactory;
+        _ = Task.Run(async () =>
         {
-            instance.Status = ServerStatus.Error;
-            instance.IsHealthy = false;
-            await LogLifecycleEvent(instance, ServerLogLevel.Error,
-                $"Server '{instance.Name}' crashed during startup: {ex.Message}");
-            throw;
-        }
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
 
-        await _context.SaveChangesAsync();
-        return started;
+                bool started = await provider.StartProcessAsync(
+                    preset!, instance.Port,
+                    onProgress: async (e) =>
+                    {
+                        e.InstanceId = instance.Id; // ensure correct ID
+                        if (e.EventType == StartupEventType.Healthy)
+                        {
+                            var inst = await context.ServerInstances.FindAsync(instance.Id);
+                            if (inst != null)
+                            {
+                                inst.Status = ServerStatus.Running;
+                                inst.Url = $"http://localhost:{instance.Port}";
+                                inst.IsHealthy = true;
+                                await LogLifecycleEvent(inst, ServerLogLevel.Info,
+                                    $"Server '{inst.Name}' started successfully on {inst.Url}.");
+                            }
+                        }
+                        else if (e.EventType == StartupEventType.Error)
+                        {
+                            var inst = await context.ServerInstances.FindAsync(instance.Id);
+                            if (inst != null)
+                            {
+                                inst.Status = ServerStatus.Error;
+                                inst.IsHealthy = false;
+                                await LogLifecycleEvent(inst, ServerLogLevel.Error,
+                                    $"Server '{inst.Name}' failed to start: {e.Message}");
+                            }
+                        }
+                        await context.SaveChangesAsync();
+                        await BroadcastStartupProgress(e);
+                    },
+                    cancellationToken);
+
+                if (!started)
+                {
+                    var inst = await context.ServerInstances.FindAsync(instance.Id);
+                    if (inst != null)
+                    {
+                        inst.Status = ServerStatus.Error;
+                        inst.IsHealthy = false;
+                        await LogLifecycleEvent(inst, ServerLogLevel.Error,
+                            $"Server '{inst.Name}' failed to start.");
+                    }
+                    await context.SaveChangesAsync();
+
+                    await BroadcastStartupProgress(new StartupProgressEvent
+                    {
+                        InstanceId = instance.Id,
+                        EventType = StartupEventType.Error,
+                        Message = $"Server '{instance.Name}' failed to start."
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                using var scope2 = scopeFactory.CreateScope();
+                var context2 = scope2.ServiceProvider.GetRequiredService<LRDbContext>();
+
+                var inst = await context2.ServerInstances.FindAsync(instance.Id);
+                if (inst != null)
+                {
+                    inst.Status = ServerStatus.Error;
+                    inst.IsHealthy = false;
+                    await LogLifecycleEvent(inst, ServerLogLevel.Error,
+                        $"Server '{inst.Name}' crashed during startup: {ex.Message}");
+                }
+                await context2.SaveChangesAsync();
+
+                await BroadcastStartupProgress(new StartupProgressEvent
+                {
+                    InstanceId = instance.Id,
+                    EventType = StartupEventType.Error,
+                    Message = ex.Message
+                });
+            }
+        }, cancellationToken);
+
+        // Return immediately — startup is in progress
+        return true;
     }
 
     public async Task StopAsync(Guid instanceId, CancellationToken cancellationToken = default)
@@ -346,6 +415,21 @@ public class ServerManager : IServerManager
             return null;
 
         return provider.GetStartCommand(preset, instance.Port);
+    }
+
+    /// <summary>
+    /// Broadcasts a startup progress event to all connected SignalR clients.
+    /// </summary>
+    private async Task BroadcastStartupProgress(StartupProgressEvent @event)
+    {
+        try
+        {
+            await _progressPublisher.PublishAsync(@event);
+        }
+        catch
+        {
+            // Ignore SignalR broadcast failures — don't let them break startup
+        }
     }
 
     public IBackendProvider? GetProvider(Guid instanceId)

@@ -16,9 +16,10 @@ public interface IBackendProvider
     /// <summary>
     /// Starts the inference server process with the given preset configuration.
     /// The optional port parameter overrides the provider's configured port for this start operation.
+    /// The onProgress callback is invoked at key startup milestones (process started, health check polling, healthy).
     /// Returns true if the server started successfully.
     /// </summary>
-    Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, CancellationToken cancellationToken = default);
+    Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, Func<StartupProgressEvent, Task>? onProgress = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Stops the running inference server process gracefully.

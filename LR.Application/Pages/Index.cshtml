@@ -63,22 +63,16 @@
 
     @foreach (var server in Model.Servers)
     {
-        <div class="bg-cyber-card rounded-xl p-5 border border-neon-cyan/10 hover:border-neon-cyan/30 transition-all">
+        <div class="bg-cyber-card rounded-xl p-5 border border-neon-cyan/10 hover:border-neon-cyan/30 transition-all" data-server-id="@server.Id">
             <!-- Header -->
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-3">
-                    @if (server.Status == ServerStatus.Running)
-                    {
-                        <span class="w-3 h-3 rounded-full bg-neon-green animate-pulse shadow-neon-green"></span>
-                    }
-                    else if (server.Status == ServerStatus.Error)
-                    {
-                        <span class="w-3 h-3 rounded-full bg-neon-red animate-pulse shadow-neon-red"></span>
-                    }
-                    else
-                    {
-                        <span class="w-3 h-3 rounded-full bg-gray-500"></span>
-                    }
+                    <span id="status-dot-@server.Id"
+                          class="w-3 h-3 rounded-full
+                              @if (server.Status == ServerStatus.Running) { <text>bg-neon-green animate-pulse shadow-neon-green</text> }
+                              else if (server.Status == ServerStatus.Error) { <text>bg-neon-red animate-pulse shadow-neon-red</text> }
+                              else if (server.Status == ServerStatus.Starting || server.Status == ServerStatus.Stopping) { <text>bg-yellow-500 animate-pulse</text> }
+                              else { <text>bg-gray-500</text> }"></span>
                     <h3 class="text-lg font-semibold text-gray-100">@server.Name</h3>
                 </div>
                 <span class="px-2 py-1 rounded-md text-xs font-medium uppercase tracking-wider bg-neon-cyan/10 text-neon-cyan">
@@ -90,7 +84,7 @@
             <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
                 <div>
                     <p class="text-gray-500 text-xs">Status</p>
-                    <p class="text-gray-200 font-medium mt-1">@server.Status</p>
+                    <p id="status-text-@server.Id" class="text-gray-200 font-medium mt-1">@server.Status</p>
                 </div>
                 <div>
                     <p class="text-gray-500 text-xs">Port</p>
@@ -98,18 +92,23 @@
                 </div>
             </div>
 
+            <!-- Progress message (hidden by default) -->
+            <div id="progress-msg-@server.Id" class="mb-3 text-xs text-yellow-400 hidden"></div>
+
             <!-- Actions -->
             <div class="flex items-center gap-2">
                 @if (server.Status != ServerStatus.Running)
                 {
-                    <button class="px-3 py-1.5 rounded-lg bg-neon-green/10 text-neon-green border border-neon-green/20 hover:bg-neon-green/20 transition-all text-xs font-medium">
-                        Start
+                    <button onclick="startServer('@server.Id')" id="btn-start-@server.Id"
+                            class="px-3 py-1.5 rounded-lg bg-neon-green/10 text-neon-green border border-neon-green/20 hover:bg-neon-green/20 transition-all text-xs font-medium flex items-center gap-1">
+                        <span>Start</span>
                     </button>
                 }
                 else
                 {
-                    <button class="px-3 py-1.5 rounded-lg bg-neon-red/10 text-neon-red border border-neon-red/20 hover:bg-neon-red/20 transition-all text-xs font-medium">
-                        Stop
+                    <button onclick="stopServer('@server.Id')" id="btn-stop-@server.Id"
+                            class="px-3 py-1.5 rounded-lg bg-neon-red/10 text-neon-red border border-neon-red/20 hover:bg-neon-red/20 transition-all text-xs font-medium flex items-center gap-1">
+                        <span>Stop</span>
                     </button>
                 }
                 <a href="/Features/Servers/Edit?id=@server.Id" class="px-3 py-1.5 rounded-lg bg-gray-700/30 text-gray-300 border border-gray-600/20 hover:bg-gray-700/50 transition-all text-xs font-medium">
@@ -119,3 +118,127 @@
         </div>
     }
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<script>
+(function() {
+    // SignalR connection (shared across page)
+    let signalRConnection = null;
+
+    function connectSignalR() {
+        if (signalRConnection && signalRConnection.state === signalR.HubConnectionState.Connected) return;
+
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl('/serverHub', { transport: signalR.HttpTransportType.WebSockets })
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on('ReceiveStartupProgress', (instanceId, eventType, message, elapsedSeconds) => {
+            handleStartupProgress(instanceId, eventType, message, elapsedSeconds);
+        });
+
+        connection.start().then(() => {
+            console.log('[SignalR] Connected to serverHub');
+        }).catch(err => {
+            console.warn('[SignalR] Connection failed:', err.message);
+        });
+
+        signalRConnection = connection;
+    }
+
+    // Map event type enum values: 0=Starting, 1=ProcessStarted, 2=HealthChecking, 3=Healthy, 4=Error
+    const eventTypeMap = { 0: 'Starting', 1: 'Process Started', 2: 'Health Checking', 3: 'Ready', 4: 'Error' };
+
+    function handleStartupProgress(instanceId, eventType, message, elapsedSeconds) {
+        const dotEl = document.getElementById('status-dot-' + instanceId);
+        const textEl = document.getElementById('status-text-' + instanceId);
+        const msgEl = document.getElementById('progress-msg-' + instanceId);
+
+        // Update progress message
+        if (msgEl && eventType !== 3 && eventType !== 4) {
+            msgEl.textContent = message;
+            msgEl.classList.remove('hidden');
+        }
+
+        switch (eventType) {
+            case 0: // Starting
+                if (dotEl) setDot(dotEl, 'bg-yellow-500 animate-pulse', '');
+                if (textEl) textEl.textContent = 'Starting';
+                break;
+            case 1: // Process Started
+                if (textEl) textEl.textContent = 'Process started';
+                break;
+            case 2: // Health Checking
+                if (textEl) textEl.textContent = 'Health checking...';
+                break;
+            case 3: // Healthy / Ready
+                if (dotEl) setDot(dotEl, 'bg-neon-green animate-pulse shadow-neon-green', '');
+                if (textEl) textEl.textContent = 'Running';
+                if (msgEl) msgEl.classList.add('hidden');
+                // Update button: swap Start for Stop
+                const startBtn = document.getElementById('btn-start-' + instanceId);
+                if (startBtn) {
+                    startBtn.id = 'btn-stop-' + instanceId;
+                    startBtn.onclick = () => stopServer(instanceId);
+                    startBtn.className = 'px-3 py-1.5 rounded-lg bg-neon-red/10 text-neon-red border border-neon-red/20 hover:bg-neon-red/20 transition-all text-xs font-medium';
+                    startBtn.innerHTML = '<span>Stop</span>';
+                }
+                break;
+            case 4: // Error
+                if (dotEl) setDot(dotEl, 'bg-neon-red animate-pulse shadow-neon-red', '');
+                if (textEl) textEl.textContent = 'Error';
+                if (msgEl) { msgEl.textContent = message; msgEl.classList.remove('hidden'); }
+                break;
+        }
+    }
+
+    function setDot(el, classes, removeClasses) {
+        el.className = 'w-3 h-3 rounded-full ' + classes;
+    }
+
+    window.startServer = async function(instanceId) {
+        const btn = document.getElementById('btn-start-' + instanceId);
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Starting...';
+        }
+
+        try {
+            const response = await fetch('/Features/Servers/Actions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ InstanceId: instanceId, Command: 'Start' })
+            });
+            const result = await response.json();
+            if (!result.success) {
+                alert('Failed to start server: ' + result.message);
+                if (btn) btn.disabled = false;
+            }
+        } catch (err) {
+            alert('Error starting server: ' + err.message);
+            if (btn) btn.disabled = false;
+        }
+    };
+
+    window.stopServer = async function(instanceId) {
+        try {
+            const response = await fetch('/Features/Servers/Actions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ InstanceId: instanceId, Command: 'Stop' })
+            });
+            const result = await response.json();
+            if (result.success) {
+                location.reload();
+            } else {
+                alert('Failed to stop server: ' + result.message);
+            }
+        } catch (err) {
+            alert('Error stopping server: ' + err.message);
+        }
+    };
+
+    // Connect SignalR on page load
+    connectSignalR();
+})();
+</script>

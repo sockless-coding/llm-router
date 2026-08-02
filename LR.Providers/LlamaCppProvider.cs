@@ -104,14 +104,20 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     private ServerInstance? _serverInstance;
 
     /// <summary>
-    /// Timeout in milliseconds to wait for the server to become healthy after starting.
+    /// Timeout in milliseconds to wait for the server to become healthy after starting (10 minutes).
+    /// Large models can take several minutes to load into GPU memory.
     /// </summary>
-    private const int StartupHealthCheckTimeoutMs = 60_000;
+    private const int StartupHealthCheckTimeoutMs = 600_000;
 
     /// <summary>
     /// Interval between health check polls during startup.
     /// </summary>
-    private const int HealthCheckPollIntervalMs = 1000;
+    private const int HealthCheckPollIntervalMs = 2000;
+
+    /// <summary>
+    /// How often to emit a progress event during health checking (every N seconds).
+    /// </summary>
+    private const int ProgressReportEverySeconds = 5;
 
     public LlamaCppProvider(
         ILogger<LlamaCppProvider> logger,
@@ -147,7 +153,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         if (port.HasValue) Port = port.Value;
     }
 
-    public async Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, CancellationToken cancellationToken = default)
+    public async Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, Func<StartupProgressEvent, Task>? onProgress = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(ServerExecutablePath))
             throw new InvalidOperationException($"Server executable path is not set. ExecutableFolderPath: '{ExecutableFolderPath}'");
@@ -180,10 +186,18 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
             $"Starting server on port {Port}. Args: {argString.Substring(0, Math.Min(argString.Length, 200))}{(argString.Length > 200 ? "..." : "")}");
 
         // Apply environment setup if configured (e.g., oneAPI setvars.bat)
-        await InitializeEnvironmentAsync(ServerExecutablePath, startInfo, cancellationToken);
-
+        string? tempBatchPath = null;
+        CancellationTokenSource? readCts = null;
         try
         {
+            // InitializeEnvironmentAsync may create a temp batch file — track it for cleanup
+            if (!string.IsNullOrEmpty(EnvironmentSetupCommand))
+            {
+                tempBatchPath = await CreateTempBatchScriptAsync(ServerExecutablePath, startInfo.Arguments ?? string.Empty);
+                startInfo.FileName = "cmd.exe";
+                startInfo.Arguments = "/c \"" + tempBatchPath + "\"";
+            }
+
             // Start companion app first (e.g., SYCL VRAM keeper)
             await StartCompanionAppAsync(cancellationToken);
 
@@ -218,22 +232,56 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
             };
 
             _serverProcess.Start();
-            var errorLines = new System.Collections.Generic.List<string>();
-            _ = Task.Run(async () => {
+
+            // Emit progress: process started
+            await onProgress?.Invoke(new StartupProgressEvent
+            {
+                InstanceId = _serverInstance?.Id ?? Guid.Empty,
+                EventType = StartupEventType.ProcessStarted,
+                Message = "Server process launched, loading model...",
+                ElapsedSeconds = 0
+            })!;
+
+            // Read both stdout and stderr in linked background tasks (properly tracked)
+            var outputLines = new System.Collections.Generic.List<string>();
+            readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            Task stdoutReaderTask = Task.Run(async () =>
+            {
                 try
                 {
-                    while (_serverProcess != null)
+                    while (!readCts.Token.IsCancellationRequested && _serverProcess != null)
                     {
-                        var line = await _serverProcess.StandardError.ReadLineAsync();
+                        var line = await _serverProcess.StandardOutput.ReadLineAsync();
                         if (line == null) break;
-                        lock (errorLines) errorLines.Add(line);
+                        lock (outputLines) outputLines.Add(line);
                     }
                 }
                 catch { /* process exited or stream closed */ }
-            }, cancellationToken);
+            }, readCts.Token);
 
-            // Poll health check until server is ready or timeout
+            Task stderrReaderTask = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!readCts.Token.IsCancellationRequested && _serverProcess != null)
+                    {
+                        var line = await _serverProcess.StandardError.ReadLineAsync();
+                        if (line == null) break;
+                        lock (outputLines) outputLines.Add(line);
+                    }
+                }
+                catch { /* process exited or stream closed */ }
+            }, readCts.Token);
+
+            // Track startup markers from process output
+            bool modelLoadedDetected = false;
+            int? detectedPort = null;
+
+            // Poll until server is ready (via output markers) or timeout
             var stopwatch = Stopwatch.StartNew();
+            double lastProgressElapsedSeconds = 0;
+
             while (stopwatch.ElapsedMilliseconds < StartupHealthCheckTimeoutMs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -241,51 +289,119 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                 if (_serverProcess.HasExited)
                 {
                     string earlyExitSnippet;
-                    lock (errorLines)
-                        earlyExitSnippet = string.Join("\n", errorLines.TakeLast(10));
+                    lock (outputLines)
+                        earlyExitSnippet = string.Join("\n", outputLines.TakeLast(10));
 
                     var msg = $"Server process exited prematurely with code {_serverProcess.ExitCode}. " +
-                        (string.IsNullOrEmpty(earlyExitSnippet) ? "" : $"Stderr: {earlyExitSnippet}");
+                        (string.IsNullOrEmpty(earlyExitSnippet) ? "" : $"Output: {earlyExitSnippet}");
                     throw new InvalidOperationException(msg);
                 }
 
-                try
+                // Check output lines for startup markers
+                lock (outputLines)
                 {
-                    bool healthy = await HealthCheckAsync(cancellationToken);
-                    if (healthy)
+                    foreach (var line in outputLines)
                     {
-                        _logger.LogInformation("Server started successfully at {ServerUrl} in {ElapsedMs}ms", ServerUrl, stopwatch.ElapsedMilliseconds);
+                        if (!modelLoadedDetected && line.Contains("llama_server: model loaded"))
+                        {
+                            _logger.LogInformation("Server output: model loaded detected");
+                            modelLoadedDetected = true;
+                        }
+
+                        // Match "listening on http://127.0.0.1:8081" or "listening on http://localhost:8081"
+                        if (!detectedPort.HasValue && line.Contains("llama_server: listening on"))
+                        {
+                            var listenMatch = System.Text.RegularExpressions.Regex.Match(line, @"listening\s+on\s+http://[^:]+:(\d+)");
+                            if (listenMatch.Success)
+                            {
+                                detectedPort = int.Parse(listenMatch.Groups[1].Value);
+                                _logger.LogInformation("Server output: listening on port {DetectedPort}", detectedPort.Value);
+                            }
+                        }
+                    }
+                }
+
+                // Primary readiness check: both markers found and port matches
+                if (modelLoadedDetected && detectedPort.HasValue)
+                {
+                    int expectedPort = Port;
+                    if (detectedPort.Value == expectedPort || expectedPort <= 0)
+                    {
+                        double elapsed = stopwatch.ElapsedMilliseconds / 1000.0;
+                        _logger.LogInformation("Server started successfully at {ServerUrl} in {ElapsedMs}ms (output markers detected)", ServerUrl, stopwatch.ElapsedMilliseconds);
                         await LogProviderMessage(ServerLogLevel.Info,
                             $"Server started successfully on {ServerUrl} ({stopwatch.ElapsedMilliseconds}ms).");
+
+                        // Emit progress: healthy
+                        await onProgress?.Invoke(new StartupProgressEvent
+                        {
+                            InstanceId = _serverInstance?.Id ?? Guid.Empty,
+                            EventType = StartupEventType.Healthy,
+                            Message = $"Server is ready on {ServerUrl} ({elapsed:F1}s).",
+                            ElapsedSeconds = elapsed
+                        })!;
+
                         return true;
                     }
                 }
-                catch
-                {
-                    // Server not ready yet, continue polling
-                }
 
                 await Task.Delay(HealthCheckPollIntervalMs, cancellationToken);
+
+                // Emit progress every ProgressReportEverySeconds to avoid spamming
+                double currentElapsed = stopwatch.ElapsedMilliseconds / 1000.0;
+                if (currentElapsed - lastProgressElapsedSeconds >= ProgressReportEverySeconds)
+                {
+                    lastProgressElapsedSeconds = currentElapsed;
+                    await onProgress?.Invoke(new StartupProgressEvent
+                    {
+                        InstanceId = _serverInstance?.Id ?? Guid.Empty,
+                        EventType = StartupEventType.HealthChecking,
+                        Message = $"Waiting for server to be ready... ({currentElapsed:F1}s elapsed)",
+                        ElapsedSeconds = currentElapsed
+                    })!;
+                }
             }
 
             // Timeout — kill the process and fail with diagnostics
-            string stderrSnippet;
-            lock (errorLines)
-                stderrSnippet = string.Join("\n", errorLines.TakeLast(10));
+            string outputSnippet;
+            lock (outputLines)
+                outputSnippet = string.Join("\n", outputLines.TakeLast(10));
 
-            _logger.LogError("Server failed to become healthy within {TimeoutMs}ms. Stderr: {Stderr}", StartupHealthCheckTimeoutMs, stderrSnippet);
+            _logger.LogError("Server failed to become healthy within {TimeoutMs}ms. Model loaded: {ModelLoaded}, Detected port: {DetectedPort}. Output: {Output}",
+                StartupHealthCheckTimeoutMs, modelLoadedDetected, detectedPort, outputSnippet);
             await LogProviderMessage(ServerLogLevel.Error,
-                $"Server failed to start within {StartupHealthCheckTimeoutMs / 1000}s.{(string.IsNullOrEmpty(stderrSnippet) ? " No stderr captured." : $" Recent stderr:\n{stderrSnippet}")}");
+                $"Server failed to start within {StartupHealthCheckTimeoutMs / 1000}s. Model loaded detected={modelLoadedDetected}, Detected port={detectedPort}.{(string.IsNullOrEmpty(outputSnippet) ? " No output captured." : $" Recent output:\n{outputSnippet}")}");
 
             throw new InvalidOperationException(
-                $"Server failed to become healthy within {StartupHealthCheckTimeoutMs / 1000}s. " +
-                (string.IsNullOrEmpty(stderrSnippet) ? "No stderr output captured." : $"Recent stderr: {stderrSnippet}"));
+                $"Server failed to become healthy within {StartupHealthCheckTimeoutMs / 1000}s. Model loaded={modelLoadedDetected}, Detected port={detectedPort}. " +
+                (string.IsNullOrEmpty(outputSnippet) ? "No output captured." : $"Recent output: {outputSnippet}"));
         }
-        catch
+        finally
         {
-            await StopServerProcessAsync(cancellationToken);
-            throw;
+            // Cancel the stderr reader so it doesn't keep running
+            readCts?.Cancel();
+            // Clean up temp batch file if we created one
+            CleanupTempBatch(tempBatchPath);
         }
+    }
+
+    /// <summary>
+    /// Creates a temporary batch script that initializes the environment then runs the target executable.
+    /// Returns the path to the temp file so it can be cleaned up later.
+    /// </summary>
+    private async Task<string> CreateTempBatchScriptAsync(string executablePath, string arguments)
+    {
+        string tempBatchPath = Path.Combine(Path.GetTempPath(), $"llm-router-init-{Guid.NewGuid():N}.bat");
+
+        var lines = new List<string>
+        {
+            "@echo off",
+            EnvironmentSetupCommand!,
+            $"call \"{executablePath}\" {arguments}",
+        };
+
+        await File.WriteAllLinesAsync(tempBatchPath, lines);
+        return tempBatchPath;
     }
 
     public async Task StopProcessAsync(CancellationToken cancellationToken = default)
@@ -293,12 +409,13 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         _logger.LogInformation("Stopping server at {ServerUrl}", ServerUrl);
         await LogProviderMessage(ServerLogLevel.Info, "Server stop initiated.");
 
-        if (_serverProcess?.HasExited == false)
+        if (_serverProcess?.HasExited == true)
         {
             var exitCode = _serverProcess.ExitCode;
-            _logger.LogInformation("Server process exited with code {ExitCode}", exitCode);
-            await LogProviderMessage(ServerLogLevel.Info,
-                $"Server process exited with code {exitCode}.");
+            _logger.LogWarning("Server process already exited with code {ExitCode}", exitCode);
+            await LogProviderMessage(ServerLogLevel.Warning,
+                $"Server process had already exited with code {exitCode}.");
+            return;
         }
 
         await StopServerProcessAsync(cancellationToken);
@@ -735,7 +852,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         if (root.TryGetProperty("usage", out JsonElement usageTiming))
         {
             if (response.PromptProcessingMs == 0)
-                response.PromptProcessingMs = GetDouble(usageTiming, "prompt_n" is not null ? "prompt_ms" : "time_prompt_ms") ?? 0;
+                response.PromptProcessingMs = GetDouble(usageTiming, "prompt_ms") ?? 0;
             if (response.GenerationMs == 0)
                 response.GenerationMs = GetDouble(usageTiming, "predicted_ms") ?? GetDouble(usageTiming, "time_generation_ms") ?? 0;
         }
