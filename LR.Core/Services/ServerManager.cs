@@ -307,21 +307,10 @@ public class ServerManager : IServerManager
 
     public async Task<ServerInstance?> GetHealthAsync(Guid instanceId)
     {
+        // Return the tracked entity directly so callers can modify runtime state (IsBusy) 
+        // and have it persist within the same request scope.
         var instance = await _context.ServerInstances.FindAsync(instanceId);
-        if (instance is null) return null;
-
-        // Return a snapshot to avoid mutation issues
-        return new ServerInstance
-        {
-            Id = instance.Id,
-            Name = instance.Name,
-            Engine = instance.Engine,
-            Status = instance.Status,
-            IsHealthy = instance.IsHealthy,
-            ActivePresetId = instance.ActivePresetId,
-            Url = instance.Url,
-            Port = instance.Port,
-        };
+        return instance;
     }
 
     public async Task<IReadOnlyList<ServerInstance>> GetAllInstancesAsync()

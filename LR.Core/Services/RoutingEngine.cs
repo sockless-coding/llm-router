@@ -37,8 +37,9 @@ public class RoutingEngine : IRoutingEngine
             if (instance is null)
                 continue;
 
-            // Server matches the rule and is ready — return it immediately
-            if (instance.Status == ServerStatus.Running && instance.IsHealthy && !instance.IsBusy)
+            // Server matches the rule and is running/healthy — return it immediately
+            // IsBusy is [NotMapped] so meaningless across requests; queue handles concurrency.
+            if (instance.Status == ServerStatus.Running && instance.IsHealthy)
                 return instance;
 
             // Server matches but is idle/errored — try to auto-start it
@@ -50,10 +51,11 @@ public class RoutingEngine : IRoutingEngine
             }
         }
 
-        // 2. Fallback: round-robin among healthy running and available (not busy) servers
+        // 2. Fallback: round-robin among healthy running servers
+        // IsBusy is [NotMapped] so meaningless across requests; queue handles concurrency.
         var allInstances = _serverManager.GetAllInstances();
         var healthyInstances = allInstances
-            .Where(s => s.Status == ServerStatus.Running && s.IsHealthy && !s.IsBusy)
+            .Where(s => s.Status == ServerStatus.Running && s.IsHealthy)
             .ToList();
 
         if (healthyInstances.Count > 0)
@@ -70,6 +72,10 @@ public class RoutingEngine : IRoutingEngine
             if (preset is not null)
             {
                 var instance = await GetInstanceAsync(preset.ServerInstanceId, cancellationToken);
+                // If the server is already running and healthy, return it directly
+                if (instance is not null && instance.Status == ServerStatus.Running && instance.IsHealthy)
+                    return instance;
+
                 if (instance is not null && instance.Status != ServerStatus.Running)
                 {
                     // Set this preset as active before starting
@@ -98,6 +104,10 @@ public class RoutingEngine : IRoutingEngine
             if (matchingPreset is not null)
             {
                 var instance = await GetInstanceAsync(matchingPreset.ServerInstanceId, cancellationToken);
+                // If the server is already running and healthy, return it directly
+                if (instance is not null && instance.Status == ServerStatus.Running && instance.IsHealthy)
+                    return instance;
+
                 if (instance is not null && instance.Status != ServerStatus.Running)
                 {
                     if (instance.ActivePresetId != matchingPreset.Id)

@@ -284,7 +284,9 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
             var outputLines = new System.Collections.Generic.List<string>();
             _stdoutReaderCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-            _stdoutReaderTask = Task.Run(async () =>
+            // Use synchronous ReadLine() to avoid InvalidOperationException from
+            // concurrent async operations on the same stream.
+            _stdoutReaderTask = Task.Run(() =>
             {
                 int lineCount = 0;
                 try
@@ -292,7 +294,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                     _logger.LogInformation("[Stats] Stdout reader task started for server on port {Port}", Port);
                     while (!_stdoutReaderCts.Token.IsCancellationRequested)
                     {
-                        var line = await _serverProcess!.StandardOutput.ReadLineAsync();
+                        var line = _serverProcess!.StandardOutput.ReadLine();
                         if (line == null) break;
 
                         lineCount++;
@@ -323,7 +325,9 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
             }, _stdoutReaderCts.Token);
 
             // Read stderr in a background task — llama.cpp sends print_timing to stderr!
-            var stderrTask = Task.Run(async () =>
+            // Use synchronous ReadLine() to avoid InvalidOperationException from
+            // concurrent async operations on the same stream.
+            var stderrTask = Task.Run(() =>
             {
                 int stderrLineCount = 0;
                 try
@@ -331,7 +335,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                     _logger.LogInformation("[Stats] Stderr reader task started for server on port {Port}", Port);
                     while (!_stdoutReaderCts.Token.IsCancellationRequested)
                     {
-                        var line = await _serverProcess.StandardError.ReadLineAsync();
+                        var line = _serverProcess.StandardError.ReadLine();
                         if (line == null) break;
 
                         stderrLineCount++;
@@ -516,40 +520,42 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         {
             if (string.IsNullOrEmpty(ServerUrl)) return false;
 
-            _httpClient.Timeout = TimeSpan.FromSeconds(5);
-            var response = await _httpClient.GetAsync($"{ServerUrl}/health", cancellationToken);
-            return response.IsSuccessStatusCode;
+                // Use a short-lived HttpClient for the health check instead of modifying
+                // the shared client's timeout, which would affect subsequent requests.
+                using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                var response = await httpClient.GetAsync($"{ServerUrl}/health", cancellationToken);
+                return response.IsSuccessStatusCode;
+            }
+            catch
+            {
+                return false;
+            }
         }
-        catch
-        {
-            return false;
-        }
-    }
 
     public async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
-    {
-        try
         {
-            if (string.IsNullOrEmpty(ServerUrl)) return null;
-
-            // Register this request for timing data collection from stdout
-            var routeResponse = new RouteResponse();
-            _pendingRequests.Enqueue((DateTimeOffset.UtcNow, routeResponse));
-            _logger.LogInformation("[Stats] Enqueued non-streaming request. Pending={_PendingSize}", _pendingRequests.Count);
-
-            var response = await _httpClient.PostAsJsonAsync(
-                $"{ServerUrl}/v1/chat/completions",
-                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload),
-                cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                throw new HttpRequestException($"Chat completion failed: {response.StatusCode} - {errorBody}");
-            }
+                if (string.IsNullOrEmpty(ServerUrl)) return null;
 
-            var jsonDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-            ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
+                // Register this request for timing data collection from stdout
+                var routeResponse = new RouteResponse();
+                _pendingRequests.Enqueue((DateTimeOffset.UtcNow, routeResponse));
+                _logger.LogInformation("[Stats] Enqueued non-streaming request. Pending={_PendingSize}", _pendingRequests.Count);
+
+                var response = await _httpClient.PostAsJsonAsync(
+                    $"{ServerUrl}/v1/chat/completions",
+                    JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload),
+                    cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                    throw new HttpRequestException($"Chat completion failed: {response.StatusCode} - {errorBody}");
+                }
+
+                var jsonDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
 
             // Non-streaming request: by the time we get here, stdout parsing should have
             // already captured completion timing. Merge it into our response.

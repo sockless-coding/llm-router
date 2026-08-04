@@ -10,11 +10,13 @@ public class ChatRequest
     /// <summary>
     /// The model to use. Should match a configured preset name.
     /// </summary>
+    [JsonPropertyName("model")]
     public string Model { get; set; } = string.Empty;
 
     /// <summary>
     /// The conversation messages.
     /// </summary>
+    [JsonPropertyName("messages")]
     public List<ChatMessage> Messages { get; set; } = new();
 
     /// <summary>

@@ -147,7 +147,7 @@ public class OllamaHandler : IProtocolHandler
 
         // Try to find a server immediately
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
-        if (server is not null && !server.IsBusy)
+        if (server != null)
         {
             if (request.Stream)
             {
@@ -158,54 +158,46 @@ public class OllamaHandler : IProtocolHandler
                 if (provider is null)
                     return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
 
-                server.IsBusy = true;
-                try
+                await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
                 {
-                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
+                    if (cancellationToken.IsCancellationRequested) break;
+
+                    if (chunk.IsFinal && chunk.Response is not null)
                     {
-                        if (cancellationToken.IsCancellationRequested) break;
-
-                        if (chunk.IsFinal && chunk.Response is not null)
+                        // Final chunk with done=true and metadata
+                        await httpResponse.WriteAsync(JsonSerializer.Serialize(new ChatResponse
                         {
-                            // Final chunk with done=true and metadata
-                            await httpResponse.WriteAsync(JsonSerializer.Serialize(new ChatResponse
-                            {
-                                Model = request.Model,
-                                CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                                Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = string.Empty },
-                                Done = true,
-                                DoneReason = "stop",
-                                PromptEvalCount = chunk.Response.PromptTokensProcessed,
-                                EvalCount = chunk.Response.GeneratedTokenCount,
-                                TotalDuration = (long)chunk.Response.TotalLatencyMs * 1_000_000L
-                            }) + "\n", cancellationToken);
+                            Model = request.Model,
+                            CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                            Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = string.Empty },
+                            Done = true,
+                            DoneReason = "stop",
+                            PromptEvalCount = chunk.Response.PromptTokensProcessed,
+                            EvalCount = chunk.Response.GeneratedTokenCount,
+                            TotalDuration = (long)chunk.Response.TotalLatencyMs * 1_000_000L
+                        }) + "\n", cancellationToken);
 
-                            // Record statistics from final response
-                            try
-                            {
-                                var presetId = routeRequest.PresetId ?? server.ActivePresetId;
-                                var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                                await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
-                            }
-                            catch { /* Stats recording failure shouldn't block the response */ }
-                        }
-                        else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                        // Record statistics from final response
+                        try
                         {
-                            await httpResponse.WriteAsync(JsonSerializer.Serialize(new ChatResponse
-                            {
-                                Model = request.Model,
-                                CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                                Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = chunk.TextDelta },
-                                Done = false
-                            }) + "\n", cancellationToken);
+                            var presetId = routeRequest.PresetId ?? server.ActivePresetId;
+                            var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
+                            await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
                         }
-
-                        await httpResponse.Body.FlushAsync(cancellationToken);
+                        catch { /* Stats recording failure shouldn't block the response */ }
                     }
-                }
-                finally
-                {
-                    server.IsBusy = false;
+                    else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                    {
+                        await httpResponse.WriteAsync(JsonSerializer.Serialize(new ChatResponse
+                        {
+                            Model = request.Model,
+                            CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                            Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = chunk.TextDelta },
+                            Done = false
+                        }) + "\n", cancellationToken);
+                    }
+
+                    await httpResponse.Body.FlushAsync(cancellationToken);
                 }
 
                 return Microsoft.AspNetCore.Http.Results.Ok();
@@ -228,34 +220,25 @@ public class OllamaHandler : IProtocolHandler
         RouteRequest routeRequest,
         CancellationToken cancellationToken)
     {
-        server.IsBusy = true;
+        var provider = _serverManager.GetProvider(server.Id);
+        if (provider is null)
+            throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
 
+        // Send request to the backend
+        var response = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+        if (response == null)
+            throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
+
+        // Record statistics
         try
         {
-            var provider = _serverManager.GetProvider(server.Id);
-            if (provider is null)
-                throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
-
-            // Send request to the backend
-            var response = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
-            if (response == null)
-                throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
-
-            // Record statistics
-            try
-            {
-                var presetId = routeRequest.PresetId ?? server.ActivePresetId;
-                var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                await _statisticsService.RecordRequestAsync(server, preset, response);
-            }
-            catch { /* Stats recording failure shouldn't block the response */ }
-
-            return BuildChatResponse(chatRequest.Model, response);
+            var presetId = routeRequest.PresetId ?? server.ActivePresetId;
+            var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
+            await _statisticsService.RecordRequestAsync(server, preset, response);
         }
-        finally
-        {
-            server.IsBusy = false;
-        }
+        catch { /* Stats recording failure shouldn't block the response */ }
+
+        return BuildChatResponse(chatRequest.Model, response);
     }
 
     /// <summary>
@@ -274,107 +257,88 @@ public class OllamaHandler : IProtocolHandler
 
         // Try to find a server immediately
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
-        if (server is not null && !server.IsBusy)
+        if (server != null)
         {
+            var provider = _serverManager.GetProvider(server.Id);
+            if (provider is null)
+                return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
+
             if (request.Stream)
             {
                 httpResponse.Headers.ContentType = "application/x-ndjson";
                 httpResponse.Headers.CacheControl = "no-cache";
 
-                var provider = _serverManager.GetProvider(server.Id);
-                if (provider is null)
-                    return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
-
-                server.IsBusy = true;
-                try
+                await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
                 {
-                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
+                    if (cancellationToken.IsCancellationRequested) break;
+
+                    if (chunk.IsFinal && chunk.Response is not null)
                     {
-                        if (cancellationToken.IsCancellationRequested) break;
-
-                        if (chunk.IsFinal && chunk.Response is not null)
+                        // Final chunk with done=true and metadata
+                        await httpResponse.WriteAsync(JsonSerializer.Serialize(new GenerateResponse
                         {
-                            // Final chunk with done=true and metadata
-                            await httpResponse.WriteAsync(JsonSerializer.Serialize(new GenerateResponse
-                            {
-                                Model = request.Model,
-                                CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                                Response = string.Empty,
-                                Done = true,
-                                DoneReason = "stop",
-                                PromptEvalCount = chunk.Response.PromptTokensProcessed,
-                                EvalCount = chunk.Response.GeneratedTokenCount,
-                                TotalDuration = (long)chunk.Response.TotalLatencyMs * 1_000_000L
-                            }) + "\n", cancellationToken);
+                            Model = request.Model,
+                            CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                            Response = string.Empty,
+                            Done = true,
+                            DoneReason = "stop",
+                            PromptEvalCount = chunk.Response.PromptTokensProcessed,
+                            EvalCount = chunk.Response.GeneratedTokenCount,
+                            TotalDuration = (long)chunk.Response.TotalLatencyMs * 1_000_000L
+                        }) + "\n", cancellationToken);
 
-                            // Record statistics from final response
-                            try
-                            {
-                                var presetId = routeRequest.PresetId ?? server.ActivePresetId;
-                                var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                                await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
-                            }
-                            catch { /* Stats recording failure shouldn't block the response */ }
-                        }
-                        else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                        // Record statistics from final response
+                        try
                         {
-                            await httpResponse.WriteAsync(JsonSerializer.Serialize(new GenerateResponse
-                            {
-                                Model = request.Model,
-                                CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                                Response = chunk.TextDelta,
-                                Done = false
-                            }) + "\n", cancellationToken);
+                            var presetId = routeRequest.PresetId ?? server.ActivePresetId;
+                            var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
+                            await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
                         }
-
-                        await httpResponse.Body.FlushAsync(cancellationToken);
+                        catch { /* Stats recording failure shouldn't block the response */ }
                     }
-                }
-                finally
-                {
-                    server.IsBusy = false;
+                    else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                    {
+                        await httpResponse.WriteAsync(JsonSerializer.Serialize(new GenerateResponse
+                        {
+                            Model = request.Model,
+                            CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                            Response = chunk.TextDelta,
+                            Done = false
+                        }) + "\n", cancellationToken);
+                    }
+
+                    await httpResponse.Body.FlushAsync(cancellationToken);
                 }
 
                 return Microsoft.AspNetCore.Http.Results.Ok();
             }
 
             // Non-streaming: process on server and return full response
-            server.IsBusy = true;
+
+            var result = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+            if (result == null)
+                return Microsoft.AspNetCore.Http.Results.Problem("Backend returned no response", statusCode: 502);
+
+            // Record statistics
             try
             {
-                var provider = _serverManager.GetProvider(server.Id);
-                if (provider is null)
-                    return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
-
-                var result = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
-                if (result == null)
-                    return Microsoft.AspNetCore.Http.Results.Problem("Backend returned no response", statusCode: 502);
-
-                // Record statistics
-                try
-                {
-                    var presetId = routeRequest.PresetId ?? server.ActivePresetId;
-                    var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                    await _statisticsService.RecordRequestAsync(server, preset, result);
-                }
-                catch { /* Stats recording failure shouldn't block the response */ }
-
-                return Microsoft.AspNetCore.Http.Results.Json(new GenerateResponse
-                {
-                    Model = request.Model,
-                    CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                    Response = result.Payload,
-                    Done = true,
-                    DoneReason = "stop",
-                    PromptEvalCount = result.PromptTokensProcessed,
-                    EvalCount = result.GeneratedTokenCount,
-                    TotalDuration = (long)result.TotalLatencyMs * 1_000_000L
-                });
+                var presetId = routeRequest.PresetId ?? server.ActivePresetId;
+                var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
+                await _statisticsService.RecordRequestAsync(server, preset, result);
             }
-            finally
+            catch { /* Stats recording failure shouldn't block the response */ }
+
+            return Microsoft.AspNetCore.Http.Results.Json(new GenerateResponse
             {
-                server.IsBusy = false;
-            }
+                Model = request.Model,
+                CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                Response = result.Payload,
+                Done = true,
+                DoneReason = "stop",
+                PromptEvalCount = result.PromptTokensProcessed,
+                EvalCount = result.GeneratedTokenCount,
+                TotalDuration = (long)result.TotalLatencyMs * 1_000_000L
+            });
         }
 
         // Queue the request

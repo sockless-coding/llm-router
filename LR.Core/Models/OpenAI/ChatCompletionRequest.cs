@@ -10,11 +10,13 @@ public class ChatCompletionRequest
     /// <summary>
     /// The model to use. Should match a configured preset name.
     /// </summary>
+    [JsonPropertyName("model")]
     public string Model { get; set; } = string.Empty;
 
     /// <summary>
     /// The messages to send for the conversation.
     /// </summary>
+    [JsonPropertyName("messages")]
     public List<ChatMessage> Messages { get; set; } = new();
 
     /// <summary>

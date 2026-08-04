@@ -73,7 +73,7 @@ public class OpenAiHandler : IProtocolHandler
             return Microsoft.AspNetCore.Http.Results.Problem("All inference servers are busy or unhealthy. Try again later.", statusCode: 503);
         }
 
-        if (server is not null && !server.IsBusy)
+        if (server != null)
         {
             if (request.Stream)
             {
@@ -84,10 +84,7 @@ public class OpenAiHandler : IProtocolHandler
                 if (provider is null)
                     return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
 
-                server.IsBusy = true;
-                try
-                {
-                    var completionId = $"chatcmpl-{Guid.NewGuid():N}";
+                var completionId = $"chatcmpl-{Guid.NewGuid():N}";
                     var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
                     // Yield first chunk with role
@@ -163,11 +160,6 @@ public class OpenAiHandler : IProtocolHandler
                     // Signal end of stream
                     await httpResponse.WriteAsync("data: [DONE]\n", cancellationToken);
                     await httpResponse.Body.FlushAsync(cancellationToken);
-                }
-                finally
-                {
-                    server.IsBusy = false;
-                }
 
                 return Microsoft.AspNetCore.Http.Results.Ok();
             }
@@ -189,34 +181,25 @@ public class OpenAiHandler : IProtocolHandler
         RouteRequest routeRequest,
         CancellationToken cancellationToken)
     {
-        server.IsBusy = true;
+        var provider = _serverManager.GetProvider(server.Id);
+        if (provider is null)
+            throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
 
+        // Send request to the backend
+        var response = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+        if (response == null)
+            throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
+
+        // Record statistics
         try
         {
-            var provider = _serverManager.GetProvider(server.Id);
-            if (provider is null)
-                throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
-
-            // Send request to the backend
-            var response = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
-            if (response == null)
-                throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
-
-            // Record statistics
-            try
-            {
-                var presetId = routeRequest.PresetId ?? server.ActivePresetId;
-                var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                await _statisticsService.RecordRequestAsync(server, preset, response);
-            }
-            catch { /* Stats recording failure shouldn't block the response */ }
-
-            return BuildCompletionResponse(chatRequest.Model, response);
+            var presetId = routeRequest.PresetId ?? server.ActivePresetId;
+            var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
+            await _statisticsService.RecordRequestAsync(server, preset, response);
         }
-        finally
-        {
-            server.IsBusy = false;
-        }
+        catch { /* Stats recording failure shouldn't block the response */ }
+
+        return BuildCompletionResponse(chatRequest.Model, response);
     }
 
     private RouteRequest BuildRouteRequest(ChatCompletionRequest request)

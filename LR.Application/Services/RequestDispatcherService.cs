@@ -38,10 +38,10 @@ public class RequestDispatcherService : BackgroundService
                 var serverManager = scope.ServiceProvider.GetRequiredService<IServerManager>();
                 var statisticsService = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
 
-                // Get all available (not busy) running healthy servers
+                // Get all running healthy servers
                 var instances = await serverManager.GetAllInstancesAsync();
                 var availableServers = instances
-                    .Where(s => s.Status == ServerStatus.Running && s.IsHealthy && !s.IsBusy)
+                    .Where(s => s.Status == ServerStatus.Running && s.IsHealthy)
                     .ToList();
 
                 foreach (var server in availableServers)
@@ -78,9 +78,6 @@ public class RequestDispatcherService : BackgroundService
         IStatisticsService statisticsService,
         CancellationToken cancellationToken)
     {
-        // Mark as busy
-        server.IsBusy = true;
-
         try
         {
             var response = await SendToProvider(server, request, serverManager, cancellationToken);
@@ -116,11 +113,6 @@ public class RequestDispatcherService : BackgroundService
         catch (Exception ex)
         {
             tcs.TrySetException(ex);
-        }
-        finally
-        {
-            // Mark as free
-            server.IsBusy = false;
         }
     }
 
