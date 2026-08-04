@@ -34,6 +34,11 @@ public class StatisticsService : IStatisticsService
             FirstTokenLatencyMs = response.FirstTokenLatencyMs,
             ContextLengthUsed = response.PromptTokensProcessed + response.GeneratedTokenCount,
             ContextMaxLength = preset?.ContextSize ?? 0,
+            // Speculative decoding metrics (populated when speculative decoding is active)
+            DraftAcceptanceRate = response.DraftAcceptanceRate,
+            DraftAccepted = response.DraftAccepted,
+            DraftGenerated = response.DraftGenerated,
+            DraftMeanLen = response.DraftMeanLen,
         };
 
         _context.ModelStatistics.Add(stat);

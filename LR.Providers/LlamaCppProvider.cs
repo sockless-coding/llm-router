@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -119,6 +120,42 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     /// </summary>
     private const int ProgressReportEverySeconds = 5;
 
+    // --- Stdout timing parser and request tracking ---
+
+    /// <summary>
+    /// Parser for llama.cpp print_timing stdout lines.
+    /// </summary>
+    private readonly LlamaCppStdoutParser _stdoutParser;
+
+    /// <summary>
+    /// CancellationTokenSource that keeps the long-lived stdout reader alive.
+    /// Cancelled when the server is stopped or disposed.
+    /// </summary>
+    private CancellationTokenSource? _stdoutReaderCts;
+
+    /// <summary>
+    /// Background task reading stdout lines and parsing timing events (lives for the duration of the server process).
+    /// </summary>
+    private Task? _stdoutReaderTask;
+
+    /// <summary>
+    /// Pending requests waiting to be assigned a task_id from stdout.
+    /// Each entry holds the RouteResponse being built and the enqueue time.
+    /// </summary>
+    private readonly ConcurrentQueue<(DateTimeOffset EnqueueTime, RouteResponse Response)> _pendingRequests = new();
+
+    /// <summary>
+    /// Active requests mapped by llama.cpp task_id to their RouteResponse.
+    /// Used to merge timing data into the correct response when completion lines appear.
+    /// </summary>
+    private readonly ConcurrentDictionary<int, (RouteResponse Response, DateTimeOffset StartTime)> _activeRequests = new();
+
+    /// <summary>
+    /// Accumulated timing data per task_id from stdout parsing.
+    /// Updated incrementally as print_timing lines arrive.
+    /// </summary>
+    private readonly ConcurrentDictionary<int, LlamaCppTaskTiming> _taskTimings = new();
+
     public LlamaCppProvider(
         ILogger<LlamaCppProvider> logger,
         IServiceScopeFactory scopeFactory)
@@ -127,6 +164,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         _scopeFactory = scopeFactory;
         _httpClient = new HttpClient();
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
+        _stdoutParser = new LlamaCppStdoutParser();
     }
 
     /// <summary>
@@ -187,7 +225,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
 
         // Apply environment setup if configured (e.g., oneAPI setvars.bat)
         string? tempBatchPath = null;
-        CancellationTokenSource? readCts = null;
+        bool startupSucceeded = false;
         try
         {
             // InitializeEnvironmentAsync may create a temp batch file — track it for cleanup
@@ -242,37 +280,85 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                 ElapsedSeconds = 0
             })!;
 
-            // Read both stdout and stderr in linked background tasks (properly tracked)
+            // Start long-lived stdout reader for timing data + startup markers
             var outputLines = new System.Collections.Generic.List<string>();
-            readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _stdoutReaderCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-            Task stdoutReaderTask = Task.Run(async () =>
+            _stdoutReaderTask = Task.Run(async () =>
             {
+                int lineCount = 0;
                 try
                 {
-                    while (!readCts.Token.IsCancellationRequested && _serverProcess != null)
+                    _logger.LogInformation("[Stats] Stdout reader task started for server on port {Port}", Port);
+                    while (!_stdoutReaderCts.Token.IsCancellationRequested)
                     {
-                        var line = await _serverProcess.StandardOutput.ReadLineAsync();
+                        var line = await _serverProcess!.StandardOutput.ReadLineAsync();
                         if (line == null) break;
-                        lock (outputLines) outputLines.Add(line);
-                    }
-                }
-                catch { /* process exited or stream closed */ }
-            }, readCts.Token);
 
-            Task stderrReaderTask = Task.Run(async () =>
+                        lineCount++;
+                        // Collect lines for startup marker detection
+                        lock (outputLines) outputLines.Add(line);
+
+                        // Log raw lines that contain "print_timing" to debug parsing issues
+                        if (line.Contains("print_timing"))
+                        {
+                            _logger.LogInformation("[Stats] RAW print_timing line #{LineCount}: {RawLine}",
+                                lineCount, line.Substring(0, Math.Min(line.Length, 200)));
+                        }
+
+                        // Parse timing events from stdout
+                        var timingEvent = _stdoutParser.ParseLine(line);
+                        if (timingEvent != null)
+                        {
+                            _logger.LogInformation("[Stats] Parsed: TaskId={TaskId}, Phase={Phase}", timingEvent.TaskId, timingEvent.Phase);
+                            ProcessTimingEvent(timingEvent, outputLines);
+                        }
+                    }
+                    _logger.LogInformation("[Stats] Stdout reader task exited after {LineCount} lines", lineCount);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[Stats] Stdout reader task failed after {LineCount} lines", lineCount);
+                }
+            }, _stdoutReaderCts.Token);
+
+            // Read stderr in a background task — llama.cpp sends print_timing to stderr!
+            var stderrTask = Task.Run(async () =>
             {
+                int stderrLineCount = 0;
                 try
                 {
-                    while (!readCts.Token.IsCancellationRequested && _serverProcess != null)
+                    _logger.LogInformation("[Stats] Stderr reader task started for server on port {Port}", Port);
+                    while (!_stdoutReaderCts.Token.IsCancellationRequested)
                     {
                         var line = await _serverProcess.StandardError.ReadLineAsync();
                         if (line == null) break;
+
+                        stderrLineCount++;
                         lock (outputLines) outputLines.Add(line);
+
+                        // Log raw lines that contain "print_timing" to debug parsing issues
+                        if (line.Contains("print_timing"))
+                        {
+                            _logger.LogInformation("[Stats] RAW print_timing from STDERR #{LineCount}: {RawLine}",
+                                stderrLineCount, line.Substring(0, Math.Min(line.Length, 200)));
+                        }
+
+                        // Parse timing events from stderr too (llama.cpp sends them here)
+                        var timingEvent = _stdoutParser.ParseLine(line);
+                        if (timingEvent != null)
+                        {
+                            _logger.LogInformation("[Stats] Parsed from STDERR: TaskId={TaskId}, Phase={Phase}", timingEvent.TaskId, timingEvent.Phase);
+                            ProcessTimingEvent(timingEvent, outputLines);
+                        }
                     }
+                    _logger.LogInformation("[Stats] Stderr reader task exited after {LineCount} lines", stderrLineCount);
                 }
-                catch { /* process exited or stream closed */ }
-            }, readCts.Token);
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[Stats] Stderr reader task failed after {LineCount} lines", stderrLineCount);
+                }
+            }, _stdoutReaderCts.Token);
 
             // Track startup markers from process output
             bool modelLoadedDetected = false;
@@ -341,6 +427,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                             ElapsedSeconds = elapsed
                         })!;
 
+                        startupSucceeded = true;
                         return true;
                     }
                 }
@@ -378,8 +465,9 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         }
         finally
         {
-            // Cancel the stderr reader so it doesn't keep running
-            readCts?.Cancel();
+            // On startup failure, cancel the stdout reader. On success, leave it alive.
+            if (!startupSucceeded)
+                _stdoutReaderCts?.Cancel();
             // Clean up temp batch file if we created one
             CleanupTempBatch(tempBatchPath);
         }
@@ -444,6 +532,11 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         {
             if (string.IsNullOrEmpty(ServerUrl)) return null;
 
+            // Register this request for timing data collection from stdout
+            var routeResponse = new RouteResponse();
+            _pendingRequests.Enqueue((DateTimeOffset.UtcNow, routeResponse));
+            _logger.LogInformation("[Stats] Enqueued non-streaming request. Pending={_PendingSize}", _pendingRequests.Count);
+
             var response = await _httpClient.PostAsJsonAsync(
                 $"{ServerUrl}/v1/chat/completions",
                 JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload),
@@ -456,7 +549,17 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
             }
 
             var jsonDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-            return ParseRouteResponse(jsonDoc.RootElement);
+            ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
+
+            // Non-streaming request: by the time we get here, stdout parsing should have
+            // already captured completion timing. Merge it into our response.
+            _logger.LogInformation("[Stats] Before merge - PromptMs={PromptMs}, GenMs={GenMs}, TotalMs={TotalMs}",
+                routeResponse.PromptProcessingMs, routeResponse.GenerationMs, routeResponse.TotalLatencyMs);
+            MergeTimingData(routeResponse);
+            _logger.LogInformation("[Stats] After merge - PromptMs={PromptMs:F0}, GenMs={GenMs:F0}, TotalMs={TotalMs:F0}, TokensProcessed={Tokens}",
+                routeResponse.PromptProcessingMs, routeResponse.GenerationMs, routeResponse.TotalLatencyMs, routeResponse.PromptTokensProcessed);
+
+            return routeResponse;
         }
         catch (OperationCanceledException)
         {
@@ -524,6 +627,11 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
 
         Stream? stream = null;
         StreamReader? reader = null;
+
+        // Register this request for timing data collection from stdout
+        var streamResponse = new RouteResponse();
+        _pendingRequests.Enqueue((DateTimeOffset.UtcNow, streamResponse));
+        _logger.LogInformation("[Stats] Enqueued streaming request. Pending={_PendingSize}", _pendingRequests.Count);
 
         try
         {
@@ -601,8 +709,14 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                     // If finish_reason is set and we have usage data, send final chunk
                     if (finishReason != null)
                     {
-                        var routeResponse = BuildRouteResponseFromStream(accumulatedText ?? string.Empty, root);
-                        chunk = new RouteStreamChunk { IsFinal = true, Response = routeResponse };
+                        BuildRouteResponseFromStreamInto(accumulatedText ?? string.Empty, root, streamResponse);
+                        _logger.LogInformation("[Stats] Stream complete - Before merge PromptMs={PromptMs}, GenMs={GenMs}",
+                            streamResponse.PromptProcessingMs, streamResponse.GenerationMs);
+                        // Merge timing data from stdout parsing
+                        MergeTimingData(streamResponse);
+                        _logger.LogInformation("[Stats] Stream complete - After merge PromptMs={PromptMs}, GenMs={GenMs}, TotalMs={TotalMs}",
+                            streamResponse.PromptProcessingMs, streamResponse.GenerationMs, streamResponse.TotalLatencyMs);
+                        chunk = new RouteStreamChunk { IsFinal = true, Response = streamResponse };
                         completed = true;
                     }
                 }
@@ -620,7 +734,9 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         // If stream ended without a proper finish_reason, send final chunk with what we have
         if (!completed && !string.IsNullOrEmpty(accumulatedText))
         {
-            yield return new RouteStreamChunk { IsFinal = true, Response = new RouteResponse { Payload = accumulatedText } };
+            streamResponse.Payload = accumulatedText ?? string.Empty;
+            MergeTimingData(streamResponse);
+            yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
         }
     }
 
@@ -816,12 +932,21 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     }
 
     /// <summary>
-    /// Parses a non-streaming llama.cpp OpenAI-compatible response into a RouteResponse.
+    /// Parses a non-streaming llama.cpp OpenAI-compatible response into a new RouteResponse.
     /// </summary>
     private static RouteResponse ParseRouteResponse(JsonElement root)
     {
         var response = new RouteResponse();
+        ParseRouteResponseInto(root, response);
+        return response;
+    }
 
+    /// <summary>
+    /// Parses llama.cpp OpenAI-compatible JSON response into an existing RouteResponse.
+    /// Used when we pre-allocate the RouteResponse for stdout timing correlation.
+    /// </summary>
+    private static void ParseRouteResponseInto(JsonElement root, RouteResponse response)
+    {
         // Extract content from choices[0].message.content
         if (root.TryGetProperty("choices", out JsonElement choices) && choices.GetArrayLength() > 0)
         {
@@ -864,8 +989,6 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         }
 
         response.TotalLatencyMs = response.PromptProcessingMs + response.GenerationMs;
-
-        return response;
     }
 
     /// <summary>
@@ -874,14 +997,23 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     private static RouteResponse BuildRouteResponseFromStream(string accumulatedText, JsonElement root)
     {
         var response = new RouteResponse { Payload = accumulatedText };
+        BuildRouteResponseFromStreamInto(accumulatedText, root, response);
+        return response;
+    }
+
+    /// <summary>
+    /// Populates an existing RouteResponse from streaming metadata.
+    /// Used when we pre-allocate the RouteResponse for stdout timing correlation.
+    /// </summary>
+    private static void BuildRouteResponseFromStreamInto(string accumulatedText, JsonElement root, RouteResponse response)
+    {
+        response.Payload = accumulatedText;
 
         if (root.TryGetProperty("usage", out JsonElement usage))
         {
             response.PromptTokensProcessed = GetInt32(usage, "prompt_tokens") ?? 0;
             response.GeneratedTokenCount = GetInt32(usage, "completion_tokens") ?? 0;
         }
-
-        return response;
     }
 
     private static int? GetInt32(JsonElement element, string propertyName)
@@ -899,10 +1031,12 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     }
 
     /// <summary>
-    /// Disposes the HTTP client.
+    /// Disposes the HTTP client and cancels any running stdout reader.
     /// </summary>
     public void Dispose()
     {
+        // Cancel the long-lived stdout reader
+        _stdoutReaderCts?.Cancel();
         _httpClient.Dispose();
     }
 
@@ -1019,6 +1153,9 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     /// </summary>
     protected virtual async Task StopServerProcessAsync(CancellationToken ct = default)
     {
+        // Cancel the stdout reader before killing the process
+        _stdoutReaderCts?.Cancel();
+
         if (_serverProcess is not null && !_serverProcess.HasExited)
         {
             try
@@ -1033,5 +1170,181 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                 _serverProcess = null;
             }
         }
+    }
+
+    // --- Stdout timing event processing and request tracking ---
+
+    /// <summary>
+    /// Processes a parsed timing event from stdout.
+    /// Assigns new task_ids to pending requests (FIFO) and merges completion data into active responses.
+    /// </summary>
+    private void ProcessTimingEvent(LlamaCppTimingEvent evt, System.Collections.Generic.List<string> outputLines)
+    {
+        // Get or create the accumulated timing for this task
+        var isNew = !_taskTimings.ContainsKey(evt.TaskId);
+        var timing = _taskTimings.GetOrAdd(evt.TaskId, _ => new LlamaCppTaskTiming { TaskId = evt.TaskId });
+
+        if (isNew)
+            _logger.LogInformation("[Stats] New stdout task detected: TaskId={TaskId}, Phase={Phase}", evt.TaskId, evt.Phase);
+
+        switch (evt.Phase)
+        {
+            case LlamaCppTimingPhase.PromptProcessing:
+                // Update progress info — also this is the first sign a task_id appeared,
+                // so assign it to a pending request if we have one.
+                timing.PromptProgress = evt.Progress ?? 0;
+                AssignTaskToPendingRequest(evt.TaskId);
+                break;
+
+            case LlamaCppTimingPhase.Generation:
+                timing.NDecoded = evt.NDecoded;
+                // Generation phase also means the task is active — assign if not yet assigned.
+                AssignTaskToPendingRequest(evt.TaskId);
+                break;
+
+            case LlamaCppTimingPhase.Completion:
+                // Merge completion summary data into accumulated timing
+                ApplyCompletionEvent(timing, evt);
+                _logger.LogInformation("[Stats] Completion event for TaskId={TaskId}: PromptEvalMs={PromptEvalMs}, EvalMs={EvalMs}, TotalMs={TotalMs}",
+                    evt.TaskId, evt.PromptEvalMs, evt.EvalMs, evt.TotalMs);
+                // Try to merge into the associated RouteResponse
+                MergeTimingIntoActiveRequest(evt.TaskId, timing);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Assigns a newly seen task_id to the oldest pending request (FIFO).
+    /// </summary>
+    private void AssignTaskToPendingRequest(int taskId)
+    {
+        // Check if already assigned
+        if (_activeRequests.ContainsKey(taskId))
+            return;
+
+        // Try to dequeue a pending request
+        while (_pendingRequests.TryDequeue(out var pending))
+        {
+            _activeRequests[taskId] = (pending.Response, pending.EnqueueTime);
+            _logger.LogInformation("[Stats] Assigned task {TaskId} to request. Active={_ActiveCount}, Pending={_PendingCount}",
+                taskId, _activeRequests.Count, _pendingRequests.Count);
+            return;
+        }
+
+        // If we get here, no pending request was found for this task_id
+        if (!_activeRequests.ContainsKey(taskId))
+            _logger.LogWarning("[Stats] No pending request found for stdout task {TaskId}! Pending queue empty. This means a task appeared before any request was enqueued.", taskId);
+    }
+
+    /// <summary>
+    /// Applies a completion summary event's data into the accumulated LlamaCppTaskTiming.
+    /// </summary>
+    private static void ApplyCompletionEvent(LlamaCppTaskTiming timing, LlamaCppTimingEvent evt)
+    {
+        if (evt.PromptEvalMs.HasValue) {
+            timing.PromptEvalMs = evt.PromptEvalMs;
+            timing.PromptTokens = evt.PromptTokens;
+            timing.PromptTokensPerSec = evt.PromptTokensPerSec;
+        }
+
+        if (evt.EvalMs.HasValue) {
+            timing.EvalMs = evt.EvalMs;
+            timing.GeneratedTokens = evt.GeneratedTokens;
+            timing.GenTokensPerSec = evt.GenTokensPerSecCompletion;
+        }
+
+        if (evt.TotalMs.HasValue)
+            timing.TotalMs = evt.TotalMs;
+
+        if (evt.DraftAcceptanceRate.HasValue) {
+            timing.DraftAcceptanceRate = evt.DraftAcceptanceRate;
+            timing.DraftAccepted = evt.DraftAccepted;
+            timing.DraftGenerated = evt.DraftGenerated;
+            timing.DraftMeanLen = evt.DraftMeanLen;
+        }
+    }
+
+    /// <summary>
+    /// Merges accumulated stdout timing data into the RouteResponse for an active request.
+    /// </summary>
+    private void MergeTimingIntoActiveRequest(int taskId, LlamaCppTaskTiming timing)
+    {
+        if (!_activeRequests.TryGetValue(taskId, out var entry))
+            return;
+
+        var response = entry.Response;
+
+        // Only overwrite timing values from stdout if they're non-zero (stdout data is authoritative here).
+        if (timing.PromptEvalMs.HasValue && timing.PromptEvalMs.Value > 0)
+            response.PromptProcessingMs = timing.PromptEvalMs.Value;
+
+        if (timing.EvalMs.HasValue && timing.EvalMs.Value > 0)
+            response.GenerationMs = timing.EvalMs.Value;
+
+        // Total latency from stdout is the most accurate.
+        if (timing.TotalMs.HasValue && timing.TotalMs.Value > 0)
+            response.TotalLatencyMs = timing.TotalMs.Value;
+        else if (response.PromptProcessingMs > 0 || response.GenerationMs > 0)
+            response.TotalLatencyMs = response.PromptProcessingMs + response.GenerationMs;
+
+        // Speculative decoding metrics (only populated when speculative decoding is active)
+        if (timing.DraftAcceptanceRate.HasValue && timing.DraftAcceptanceRate.Value > 0)
+        {
+            response.DraftAcceptanceRate = timing.DraftAcceptanceRate;
+            response.DraftAccepted = timing.DraftAccepted;
+            response.DraftGenerated = timing.DraftGenerated;
+            response.DraftMeanLen = timing.DraftMeanLen;
+        }
+
+        _logger.LogInformation("[Stats] Merged timing for task {TaskId}: Prompt={PromptMs:F0}ms, Gen={GenMs:F0}ms, Total={TotalMs:F0}ms",
+            taskId, response.PromptProcessingMs, response.GenerationMs, response.TotalLatencyMs);
+    }
+
+    /// <summary>
+    /// Merges any available stdout timing data into a RouteResponse.
+    /// Used by SendRequestAsync/SendStreamRequestAsync after the HTTP response completes.
+    /// </summary>
+    private void MergeTimingData(RouteResponse response)
+    {
+        bool foundInActive = false;
+
+        // Find which task_id this response is associated with
+        foreach (var kvp in _activeRequests)
+        {
+            if (ReferenceEquals(kvp.Value.Response, response))
+            {
+                var timing = _taskTimings.GetValueOrDefault(kvp.Key);
+                if (timing != null)
+                    MergeTimingIntoActiveRequest(kvp.Key, timing);
+                else
+                    _logger.LogWarning("[Stats] Task {TaskId} found in active requests but NO timing data available", kvp.Key);
+
+                // Clean up the active request entry
+                _activeRequests.TryRemove(kvp.Key, out _);
+                foundInActive = true;
+                break;
+            }
+        }
+
+        if (!foundInActive)
+        {
+            var activeTaskIds = string.Join(",", _activeRequests.Keys);
+            var timingKeys = string.Join(",", _taskTimings.Keys);
+            _logger.LogWarning("[Stats] Response NOT found in active requests! Active={_ActiveCount} (tasks: {ActiveTasks}), Pending={_PendingCount}, Timing entries: {TimingEntries}",
+                _activeRequests.Count, activeTaskIds, _pendingRequests.Count, timingKeys);
+        }
+
+        // Also try to remove from pending queue if it wasn't assigned a task yet
+        var itemsToRequeue = new System.Collections.Generic.List<(DateTimeOffset, RouteResponse)>();
+        bool foundAndRemoved = false;
+        while (_pendingRequests.TryDequeue(out var item))
+        {
+            if (ReferenceEquals(item.Response, response) && !foundAndRemoved)
+                foundAndRemoved = true; // skip this one
+            else
+                itemsToRequeue.Add(item);
+        }
+        foreach (var item in itemsToRequeue)
+            _pendingRequests.Enqueue(item);
     }
 }

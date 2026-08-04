@@ -62,4 +62,26 @@ public class RouteResponse
     /// Time from request sent to first output token received (TTFT - Time To First Token).
     /// </summary>
     public double FirstTokenLatencyMs { get; set; }
+
+    // --- Speculative decoding metrics (populated when speculative decoding is active) ---
+
+    /// <summary>
+    /// Draft acceptance rate for speculative decoding (0.0 to 1.0). Null if speculative decoding not used.
+    /// </summary>
+    public double? DraftAcceptanceRate { get; set; }
+
+    /// <summary>
+    /// Number of draft tokens accepted during speculative decoding.
+    /// </summary>
+    public int DraftAccepted { get; set; }
+
+    /// <summary>
+    /// Number of draft tokens generated during speculative decoding.
+    /// </summary>
+    public int DraftGenerated { get; set; }
+
+    /// <summary>
+    /// Mean length of accepted draft sequences during speculative decoding.
+    /// </summary>
+    public double? DraftMeanLen { get; set; }
 }

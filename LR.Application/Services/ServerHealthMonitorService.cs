@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
 using LR.Core.Interfaces;
+using LR.Core.Models;
 
 namespace LR.Application.Services;
 
@@ -63,12 +64,15 @@ public class ServerHealthMonitorService : BackgroundService
                         {
                             var errorMsg = $"Health check failed for {instance.Name}. Server may be unresponsive.";
 
-                            // Persist error state via DbContext directly
+                            // UpdateHealthAsync above loaded this instance via FindAsync, so it's already tracked.
+                            // Don't call .Update() on a detached copy — just read the tracked entity back.
                             var db = scope.ServiceProvider.GetRequiredService<LR.Core.Data.LRDbContext>();
-                            instance.LastErrorMessage = errorMsg;
-                            instance.LastErrorTime = DateTime.UtcNow;
-                            db.ServerInstances.Update(instance);
-                            await db.SaveChangesAsync();
+                            if (db.ChangeTracker.Entries<ServerInstance>().FirstOrDefault(e => e.Entity.Id == instance.Id)?.Entity is ServerInstance trackedInstance)
+                            {
+                                trackedInstance.LastErrorMessage = errorMsg;
+                                trackedInstance.LastErrorTime = DateTime.UtcNow;
+                                await db.SaveChangesAsync();
+                            }
 
                             var logService = scope.ServiceProvider.GetService<IServerLogService>();
                             if (logService != null)
@@ -87,12 +91,18 @@ public class ServerHealthMonitorService : BackgroundService
                         _logger.LogWarning(ex, "Health check failed for instance {Id} ({Name}), marking unhealthy.",
                             instance.Id, instance.Name);
 
-                        // Persist error state via DbContext directly
-                        var db = scope.ServiceProvider.GetRequiredService<LR.Core.Data.LRDbContext>();
-                        instance.LastErrorMessage = errorMsg;
-                        instance.LastErrorTime = DateTime.UtcNow;
-                        db.ServerInstances.Update(instance);
-                        await db.SaveChangesAsync();
+                        // Update the tracked entity directly to avoid EF Core tracking conflicts
+                        try
+                        {
+                            var db = scope.ServiceProvider.GetRequiredService<LR.Core.Data.LRDbContext>();
+                            if (db.ChangeTracker.Entries<ServerInstance>().FirstOrDefault(e => e.Entity.Id == instance.Id)?.Entity is ServerInstance trackedInstance)
+                            {
+                                trackedInstance.LastErrorMessage = errorMsg;
+                                trackedInstance.LastErrorTime = DateTime.UtcNow;
+                                await db.SaveChangesAsync();
+                            }
+                        }
+                        catch { /* Best effort — don't let logging failures break health checks */ }
 
                         var logService = scope.ServiceProvider.GetService<IServerLogService>();
                         if (logService != null)

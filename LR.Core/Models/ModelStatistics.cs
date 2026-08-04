@@ -91,6 +91,28 @@ public class ModelStatistics
     /// </summary>
     public int ContextMaxLength { get; set; }
 
+    // --- Speculative decoding metrics (only populated when speculative decoding is active) ---
+
+    /// <summary>
+    /// Draft acceptance rate for speculative decoding (0.0 to 1.0). Null if not used.
+    /// </summary>
+    public double? DraftAcceptanceRate { get; set; }
+
+    /// <summary>
+    /// Number of draft tokens accepted during speculative decoding.
+    /// </summary>
+    public int DraftAccepted { get; set; }
+
+    /// <summary>
+    /// Number of draft tokens generated during speculative decoding.
+    /// </summary>
+    public int DraftGenerated { get; set; }
+
+    /// <summary>
+    /// Mean length of accepted draft sequences during speculative decoding.
+    /// </summary>
+    public double? DraftMeanLen { get; set; }
+
     // --- Navigation properties ---
 
     public ServerInstance? ServerInstance { get; set; }
