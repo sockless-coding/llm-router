@@ -151,6 +151,7 @@ public class OllamaHandler : IProtocolHandler
         {
             if (request.Stream)
             {
+                httpResponse.StatusCode = 200;
                 httpResponse.Headers.ContentType = "application/x-ndjson";
                 httpResponse.Headers.CacheControl = "no-cache";
 
@@ -200,7 +201,7 @@ public class OllamaHandler : IProtocolHandler
                     await httpResponse.Body.FlushAsync(cancellationToken);
                 }
 
-                return Microsoft.AspNetCore.Http.Results.Ok();
+                return Results.Empty;
             }
 
             var result = await ProcessOnServer(server, request, routeRequest, cancellationToken);
@@ -265,6 +266,7 @@ public class OllamaHandler : IProtocolHandler
 
             if (request.Stream)
             {
+                httpResponse.StatusCode = 200;
                 httpResponse.Headers.ContentType = "application/x-ndjson";
                 httpResponse.Headers.CacheControl = "no-cache";
 
@@ -310,7 +312,7 @@ public class OllamaHandler : IProtocolHandler
                     await httpResponse.Body.FlushAsync(cancellationToken);
                 }
 
-                return Microsoft.AspNetCore.Http.Results.Ok();
+                return Results.Empty;
             }
 
             // Non-streaming: process on server and return full response
