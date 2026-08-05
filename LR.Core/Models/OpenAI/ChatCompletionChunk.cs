@@ -21,6 +21,9 @@ public class ChatCompletionChunk
 
     [JsonPropertyName("choices")]
     public List<ChunkChoice> Choices { get; set; } = new();
+
+    [JsonPropertyName("timings")]
+    public LlamaCppTimings? Timings { get; set; }
 }
 
 public class ChunkChoice

@@ -81,6 +81,13 @@ public class RouteResponse
     public int DraftGenerated { get; set; }
 
     /// <summary>
+    /// Raw timing data from the backend (e.g., llama-cpp-server timings object).
+    /// Populated directly from the HTTP response for maximum fidelity — includes
+    /// per-token and per-second metrics that don't fit in scalar properties.
+    /// </summary>
+    public OpenAI.LlamaCppTimings? BackendTimings { get; set; }
+
+    /// <summary>
     /// Mean length of accepted draft sequences during speculative decoding.
     /// </summary>
     public double? DraftMeanLen { get; set; }

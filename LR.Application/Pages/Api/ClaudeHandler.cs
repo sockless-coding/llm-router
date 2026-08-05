@@ -60,8 +60,7 @@ public class ClaudeHandler : IProtocolHandler
         {
             if (request.Stream)
             {
-                httpResponse.Headers.ContentType = "text/event-stream";
-                httpResponse.Headers.CacheControl = "no-cache";
+                    httpResponse.StatusCode = 200;
 
                 var provider = _serverManager.GetProvider(server.Id);
                 if (provider is null)
@@ -81,7 +80,7 @@ public class ClaudeHandler : IProtocolHandler
                             Content = new List<object>(),
                             Model = request.Model
                         }
-                    })}\n\n", cancellationToken);
+})}\r\n\r\n", cancellationToken);
                     await httpResponse.Body.FlushAsync(cancellationToken);
 
                     // content_block_start event
@@ -90,7 +89,7 @@ public class ClaudeHandler : IProtocolHandler
                         Type = "content_block_start",
                         Index = 0,
                         ContentBlock = new ContentBlock { Type = "text", Text = string.Empty }
-                    })}\n\n", cancellationToken);
+                    })}\r\n\r\n", cancellationToken);
                     await httpResponse.Body.FlushAsync(cancellationToken);
 
                     await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
@@ -108,13 +107,13 @@ public class ClaudeHandler : IProtocolHandler
                                     StopReason = "end_turn",
                                     StopSequence = null
                                 }
-                            })}\n\n", cancellationToken);
+                            })}\r\n\r\n", cancellationToken);
 
                             // message_stop event
                             await httpResponse.WriteAsync($"event: message_stop\ndata: {JsonSerializer.Serialize(new MessageStopData
                             {
                                 Type = "message_stop"
-                            })}\n\n", cancellationToken);
+                            })}\r\n\r\n", cancellationToken);
 
                             // Record statistics from final response
                             try
@@ -137,13 +136,13 @@ public class ClaudeHandler : IProtocolHandler
                                     Type = "text_delta",
                                     Text = chunk.TextDelta
                                 }
-                            })}\n\n", cancellationToken);
+                            })}\r\n\r\n", cancellationToken);
                         }
 
                         await httpResponse.Body.FlushAsync(cancellationToken);
                     }
 
-                return Microsoft.AspNetCore.Http.Results.Ok();
+                return Results.Empty;
             }
 
             var result = await ProcessOnServer(server, request, routeRequest, cancellationToken);

@@ -77,8 +77,7 @@ public class OpenAiHandler : IProtocolHandler
         {
             if (request.Stream)
             {
-                httpResponse.Headers.ContentType = "text/event-stream";
-                httpResponse.Headers.CacheControl = "no-cache";
+                    httpResponse.StatusCode = 200;
 
                 var provider = _serverManager.GetProvider(server.Id);
                 if (provider is null)
@@ -101,7 +100,7 @@ public class OpenAiHandler : IProtocolHandler
                                 Delta = new DeltaMessage { Role = "assistant", Content = string.Empty }
                             }
                         }
-                    })}\n", cancellationToken);
+                    })}\r\n\r\n", cancellationToken);
                     await httpResponse.Body.FlushAsync(cancellationToken);
 
                     await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
@@ -110,7 +109,8 @@ public class OpenAiHandler : IProtocolHandler
 
                         if (chunk.IsFinal && chunk.Response is not null)
                         {
-                            // Final chunk with finish_reason
+                            // Final chunk with finish_reason and timings
+                            var timing = BuildTimings(chunk.Response);
                             await httpResponse.WriteAsync($"data: {JsonSerializer.Serialize(new ChatCompletionChunk
                             {
                                 Id = completionId,
@@ -124,8 +124,9 @@ public class OpenAiHandler : IProtocolHandler
                                         Delta = new DeltaMessage(),
                                         FinishReason = "stop"
                                     }
-                                }
-                            })}\n", cancellationToken);
+                                },
+                                Timings = timing
+                            })}\r\n\r\n", cancellationToken);
 
                             // Record statistics from final response
                             try
@@ -151,17 +152,17 @@ public class OpenAiHandler : IProtocolHandler
                                         Delta = new DeltaMessage { Content = chunk.TextDelta }
                                     }
                                 }
-                            })}\n", cancellationToken);
+                            })}\r\n\r\n", cancellationToken);
                         }
 
                         await httpResponse.Body.FlushAsync(cancellationToken);
                     }
 
                     // Signal end of stream
-                    await httpResponse.WriteAsync("data: [DONE]\n", cancellationToken);
+                    await httpResponse.WriteAsync("data: [DONE]\r\n\r\n", cancellationToken);
                     await httpResponse.Body.FlushAsync(cancellationToken);
 
-                return Microsoft.AspNetCore.Http.Results.Ok();
+                return Results.Empty;
             }
 
             var result = await ProcessOnServer(server, request, routeRequest, cancellationToken);
@@ -200,6 +201,44 @@ public class OpenAiHandler : IProtocolHandler
         catch { /* Stats recording failure shouldn't block the response */ }
 
         return BuildCompletionResponse(chatRequest.Model, response);
+    }
+
+    private LlamaCppTimings? BuildTimings(RouteResponse response)
+    {
+        // Prefer the rich timings object from the backend if available
+        if (response.BackendTimings != null)
+            return response.BackendTimings;
+
+        // Fallback: construct from scalar properties on RouteResponse
+        var timing = new LlamaCppTimings
+        {
+            PromptN = response.PromptTokensProcessed,
+            PromptMs = response.PromptProcessingMs > 0 ? response.PromptProcessingMs : null,
+            GenerationN = response.GeneratedTokenCount,
+            GenerationMs = response.GenerationMs > 0 ? response.GenerationMs : null
+        };
+
+        // Calculate per-token and throughput metrics for prompt phase
+        if (timing.PromptMs.HasValue && timing.PromptN > 0)
+        {
+            timing.PromptPerTokenMs = timing.PromptMs.Value / timing.PromptN;
+            timing.PromptPerSecond = timing.PromptN / (timing.PromptMs.Value / 1000.0);
+        }
+
+        // Calculate per-token and throughput metrics for generation phase
+        if (timing.GenerationMs.HasValue && timing.GenerationN > 0)
+        {
+            timing.GenerationPerTokenMs = timing.GenerationMs.Value / timing.GenerationN;
+            timing.GenerationPerSecond = timing.GenerationN / (timing.GenerationMs.Value / 1000.0);
+        }
+
+        // Speculative decoding metrics
+        if (response.DraftAccepted > 0)
+        {
+            timing.PredictedN = response.DraftAccepted;
+        }
+
+        return timing;
     }
 
     private RouteRequest BuildRouteRequest(ChatCompletionRequest request)

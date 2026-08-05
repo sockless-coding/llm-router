@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
+using LR.Core.Models.OpenAI;
 
 namespace LR.Providers;
 
@@ -156,13 +157,34 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     /// </summary>
     private readonly ConcurrentDictionary<int, LlamaCppTaskTiming> _taskTimings = new();
 
+    /// <summary>
+    /// Number of active (in-flight) requests to the server.
+    /// Used to detect when all slots are occupied so we can reject gracefully instead of
+    /// letting llama.cpp reset the connection mid-body-write (SocketException 10053).
+    /// </summary>
+    private int _activeRequestCount;
+
     public LlamaCppProvider(
         ILogger<LlamaCppProvider> logger,
         IServiceScopeFactory scopeFactory)
     {
         _logger = logger;
         _scopeFactory = scopeFactory;
-        _httpClient = new HttpClient();
+
+        // Configure SocketsHttpHandler to handle socket resets gracefully:
+        // - Allow auto-retry on connection failures (handles 10053 / connection aborted errors)
+        // - Limit max connections per server to avoid overloading
+        var handler = new System.Net.Http.SocketsHttpHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip,
+            AllowAutoRedirect = false,
+            MaxConnectionsPerServer = 10,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            // Retry on connection-level failures (socket reset, connection refused)
+            //SslProtocols = System.Security.Authentication.SslProtocols.None,
+        };
+
+        _httpClient = new HttpClient(handler);
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
         _stdoutParser = new LlamaCppStdoutParser();
     }
@@ -1019,7 +1041,74 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         {
             response.PromptTokensProcessed = GetInt32(usage, "prompt_tokens") ?? 0;
             response.GeneratedTokenCount = GetInt32(usage, "completion_tokens") ?? 0;
+
+            // Some llama.cpp versions put timing data in the usage object of streaming responses
+            if (response.PromptProcessingMs == 0)
+                response.PromptProcessingMs = GetDouble(usage, "prompt_ms") ?? 0;
+            if (response.GenerationMs == 0)
+                response.GenerationMs = GetDouble(usage, "predicted_ms") ?? GetDouble(usage, "time_generation_ms") ?? 0;
         }
+
+        // Extract full timings object from top-level "timings" property (llama-cpp-server format)
+        if (root.TryGetProperty("timings", out JsonElement timingsJson))
+        {
+            var parsedTimings = ParseLlamaCppTimings(timingsJson);
+            response.BackendTimings = parsedTimings;
+
+            // Also populate scalar properties from the timings object as fallback
+            if (parsedTimings.PromptMs.HasValue && response.PromptProcessingMs == 0)
+                response.PromptProcessingMs = parsedTimings.PromptMs.Value;
+            var genMs = parsedTimings.GenerationMs ?? parsedTimings.PredictedMs;
+            if (genMs.HasValue && response.GenerationMs == 0)
+                response.GenerationMs = genMs.Value;
+        }
+
+        // Extract timing data from top-level "timing" object (alternative key)
+        if (response.BackendTimings == null && root.TryGetProperty("timing", out JsonElement timingJson))
+        {
+            var parsedTiming = ParseLlamaCppTimings(timingJson);
+            response.BackendTimings = parsedTiming;
+
+            var promptMs = GetDouble(timingJson, "prompt_ms");
+            if (promptMs.HasValue && response.PromptProcessingMs == 0)
+                response.PromptProcessingMs = promptMs.Value;
+
+            var genMs2 = GetDouble(timingJson, "predicted_ms") ?? GetDouble(timingJson, "eval_ms");
+            if (genMs2.HasValue && response.GenerationMs == 0)
+                response.GenerationMs = genMs2.Value;
+        }
+    }
+
+    /// <summary>
+    /// Parses a llama-cpp-server timings JSON element into LlamaCppTimings.
+    /// Handles both "timings" format (with generation_ms) and "timing" format (with predicted_ms).
+    /// </summary>
+    private static LlamaCppTimings ParseLlamaCppTimings(JsonElement element)
+    {
+        var result = new LlamaCppTimings();
+
+        // Prompt metrics
+        if (element.TryGetProperty("prompt_n", out JsonElement pn)) result.PromptN = pn.GetInt32();
+        if (element.TryGetProperty("prompt_ms", out JsonElement pm)) result.PromptMs = pm.GetDouble();
+        if (element.TryGetProperty("prompt_per_token_ms", out JsonElement ptm)) result.PromptPerTokenMs = ptm.GetDouble();
+        if (element.TryGetProperty("prompt_per_second", out JsonElement pps)) result.PromptPerSecond = pps.GetDouble();
+
+        // Cache metrics
+        if (element.TryGetProperty("cache_n", out JsonElement cn) && cn.ValueKind == JsonValueKind.Number) result.CacheN = cn.GetInt32();
+
+        // Generation metrics (may be named generation_* or predicted_* depending on version)
+        if (element.TryGetProperty("generation_n", out JsonElement gn)) result.GenerationN = gn.GetInt32();
+        if (element.TryGetProperty("generation_ms", out JsonElement gm)) result.GenerationMs = gm.GetDouble();
+        if (element.TryGetProperty("generation_per_token_ms", out JsonElement gptm)) result.GenerationPerTokenMs = gptm.GetDouble();
+        if (element.TryGetProperty("generation_per_second", out JsonElement gps)) result.GenerationPerSecond = gps.GetDouble();
+
+        // Predicted/speculative decoding metrics
+        if (element.TryGetProperty("predicted_n", out JsonElement predn) && predn.ValueKind == JsonValueKind.Number) result.PredictedN = predn.GetInt32();
+        if (element.TryGetProperty("predicted_ms", out JsonElement predm)) result.PredictedMs = predm.GetDouble();
+        if (element.TryGetProperty("predicted_per_token_ms", out JsonElement preptm)) result.PredictedPerTokenMs = preptm.GetDouble();
+        if (element.TryGetProperty("predicted_per_second", out JsonElement prepps)) result.PredictedPerSecond = prepps.GetDouble();
+
+        return result;
     }
 
     private static int? GetInt32(JsonElement element, string propertyName)
