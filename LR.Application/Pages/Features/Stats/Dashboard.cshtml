@@ -10,19 +10,19 @@
 
     <!-- Summary Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div class="bg-card cyber-card rounded-xl p-5 border border-gray-700/30">
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
             <p class="text-sm text-text-secondary">Total Requests (24h)</p>
             <p class="text-3xl font-bold mt-1 text-neon-cyan">@Model.TotalRequests</p>
         </div>
-        <div class="bg-card cyber-card rounded-xl p-5 border border-gray-700/30">
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-green">
             <p class="text-sm text-text-secondary">Total Tokens (24h)</p>
             <p class="text-3xl font-bold mt-1 text-neon-green">@Model.TotalTokens</p>
         </div>
-        <div class="bg-card cyber-card rounded-xl p-5 border border-gray-700/30">
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-magenta">
             <p class="text-sm text-text-secondary">Avg Latency (24h)</p>
             <p class="text-3xl font-bold mt-1 text-neon-magenta">@string.Format("{0:F1}", Model.AvgLatencyMs) ms</p>
         </div>
-        <div class="bg-card cyber-card rounded-xl p-5 border border-gray-700/30">
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
             <p class="text-sm text-text-secondary">Active Servers</p>
             <p class="text-3xl font-bold mt-1 text-neon-cyan">@Model.Servers.Count(s => s.Status == ServerStatus.Running)</p>
         </div>
@@ -32,8 +32,10 @@
     <div class="flex gap-2 mb-6">
         @foreach (var range in new[] { "1h", "6h", "24h", "7d" })
         {
-            var borderClass = range == "24h" ? "border-neon-cyan" : "border-transparent";
-            <button onclick="updateAllCharts('@range')" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors time-btn bg-gray-700/50 hover:bg-neon-cyan/20 text-text-primary border @borderClass">
+            var activeClass = range == "24h"
+                ? "bg-neon-cyan/20 text-neon-cyan border-neon-cyan shadow-neon-cyan"
+                : "bg-gray-800/50 text-text-secondary border-transparent hover:bg-neon-cyan/10 hover:text-neon-cyan";
+            <button onclick="updateAllCharts('@range')" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors time-btn border @activeClass">
                 @range
             </button>
         }
@@ -42,13 +44,13 @@
     <!-- Charts Row 1 -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <!-- Prompt Throughput Chart -->
-        <div class="bg-card cyber-card rounded-xl p-5 border border-gray-700/30">
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
             <h2 class="text-lg font-semibold mb-4 text-neon-cyan">⚡ Prompt Processing Speed (tokens/sec)</h2>
             <canvas id="promptThroughputChart"></canvas>
         </div>
 
         <!-- Generation Throughput Chart -->
-        <div class="bg-card cyber-card rounded-xl p-5 border border-gray-700/30">
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-green">
             <h2 class="text-lg font-semibold mb-4 text-neon-green">🚀 Token Generation Speed (tokens/sec)</h2>
             <canvas id="genThroughputChart"></canvas>
         </div>
@@ -57,7 +59,7 @@
     <!-- Charts Row 2 -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <!-- Context Usage Chart -->
-        <div class="bg-card cyber-card rounded-xl p-5 border border-gray-700/30">
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-magenta">
             <h2 class="text-lg font-semibold mb-4 text-neon-magenta">🧠 Context Window Usage</h2>
             @if (Model.Presets.Any())
             {
@@ -78,7 +80,7 @@
         </div>
 
         <!-- Latency Chart -->
-        <div class="bg-card cyber-card rounded-xl p-5 border border-gray-700/30">
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
             <h2 class="text-lg font-semibold mb-4 text-neon-red">⏱️ Request Latency (ms)</h2>
             <canvas id="latencyChart"></canvas>
         </div>
@@ -86,6 +88,17 @@
 </div>
 
 <script>
+// ── Chart.js dark-theme defaults for contrast ──
+Chart.defaults.color = '#9ca3af';           // text-secondary
+Chart.defaults.borderColor = 'rgba(75,85,99,0.2)';  // grid lines
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+Chart.defaults.plugins.legend.labels.usePointStyle = true;
+Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(10,10,15,0.92)';
+Chart.defaults.plugins.tooltip.titleColor = '#f0f0f5';
+Chart.defaults.plugins.tooltip.bodyColor = '#d1d5db';
+Chart.defaults.plugins.tooltip.borderColor = 'rgba(0,245,255,0.3)';
+Chart.defaults.plugins.tooltip.borderWidth = 1;
+
 const timeRanges = {
     '1h': { hours: 1 },
     '6h': { hours: 6 },
@@ -101,12 +114,18 @@ const serverNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Se
 const presets = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Presets.Select(p => new { id = p.Id, name = p.Name })));
 
 const chartColors = [
-    'rgba(0, 245, 255, 1)',   // cyan
-    'rgba(0, 255, 136, 1)',   // green
-    'rgba(255, 0, 255, 1)',   // magenta
-    'rgba(255, 46, 99, 1)',   // red
+    '#00f5ff',   // cyan
+    '#00ff88',   // green
+    '#ff00ff',   // magenta
+    '#ff2e63',   // red
 ];
-const chartColorsAlpha = chartColors.map(c => c.replace('1)', '0.3)'));
+const chartColorsAlpha = chartColors.map(c => {
+    const hex = c.slice(1);
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    return `rgba(${r},${g},${b},0.15)`;
+});
 
 function getFromTimestamp(rangeKey) {
     const range = timeRanges[rangeKey];
@@ -149,7 +168,7 @@ async function loadContextUsage(rangeKey = '24h') {
         const resp = await fetch(`/api/stats/context-usage?presetId=${encodeURIComponent(selectEl.value)}&from=${encodeURIComponent(from)}`);
         const data = await resp.json();
 
-        charts.context.data.labels = data.map(d => new Date(d.timestamp).toLocaleTimeString());
+        charts.context.data.labels = data.map(d => new Date(d.timestamp).toLocaleTimeString('en-GB', { hour12: false }));
         charts.context.data.datasets[0].data = data.map(d => d.tokensUsed);
         charts.context.update();
     } catch (e) { console.error('Failed to load context usage:', e); }
@@ -162,38 +181,63 @@ function updateContextChart() {
 
 function buildMultiServerChart(dataPointsByServerId, servers, colors, labelPrefix) {
     const datasets = [];
-    let allTimestamps = new Set();
+    let allLabels = new Set();
 
     for (const server of servers) {
         const points = dataPointsByServerId[server.id] || [];
         if (points.length === 0) continue;
 
+        // Build a per-server dataset with nulls aligned to shared labels
         datasets.push({
             label: serverNames[server.id],
-            data: points.map(p => ({ x: p.timestamp, y: Math.round(p.value * 100) / 100 })),
+            data: [],  // filled after we know all labels
             borderColor: colors[servers.indexOf(server) % colors.length],
             backgroundColor: chartColorsAlpha[servers.indexOf(server) % colors.length],
             tension: 0.3,
             pointRadius: 2,
         });
 
-        points.forEach(p => allTimestamps.add(new Date(p.timestamp).getTime()));
+        points.forEach(p => {
+            const label = new Date(p.timestamp).toLocaleTimeString('en-GB', { hour12: false });
+            allLabels.add(label);
+        });
     }
 
-    return { datasets, timestamps: [...allTimestamps].sort() };
+    // Sort labels chronologically (they're HH:mm:ss strings — lexicographic sort works)
+    const sortedLabels = [...allLabels].sort();
+
+    // For each dataset, map points to the shared label index
+    for (const server of servers) {
+        const points = dataPointsByServerId[server.id] || [];
+        if (points.length === 0) continue;
+
+        const pointMap = {};
+        points.forEach(p => {
+            const label = new Date(p.timestamp).toLocaleTimeString('en-GB', { hour12: false });
+            const yVal = Math.round(p.value * 100) / 100;
+            // If multiple points share the same time label, keep the last one
+            pointMap[label] = yVal;
+        });
+
+        const idx = datasets.findIndex(d => d.label === serverNames[server.id]);
+        if (idx >= 0) {
+            datasets[idx].data = sortedLabels.map(label => pointMap[label] ?? null);
+        }
+    }
+
+    return { datasets, labels: sortedLabels };
 }
 
 function initChart(canvasId, label) {
     const ctx = document.getElementById(canvasId).getContext('2d');
     return new Chart(ctx, {
         type: 'line',
-        data: { datasets: [] },
+        data: { labels: [], datasets: [] },
         options: {
             responsive: true,
+            animation: false,
             scales: {
                 x: {
-                    type: 'time',
-                    time: { tooltipFormat: 'HH:mm:ss' },
                     title: { display: true, text: 'Time' }
                 },
                 y: {
@@ -220,6 +264,7 @@ async function updateAllCharts(rangeKey = '24h') {
     // Prompt throughput
     const ptData = await loadPromptThroughput(rangeKey);
     if (ptData) {
+        charts.prompt.data.labels = ptData.labels;
         charts.prompt.data.datasets = ptData.datasets;
         charts.prompt.update();
     }
@@ -227,6 +272,7 @@ async function updateAllCharts(rangeKey = '24h') {
     // Gen throughput
     const gtData = await loadGenThroughput(rangeKey);
     if (gtData) {
+        charts.gen.data.labels = gtData.labels;
         charts.gen.data.datasets = gtData.datasets;
         charts.gen.update();
     }
@@ -234,6 +280,7 @@ async function updateAllCharts(rangeKey = '24h') {
     // Latency
     const latData = await loadLatency(rangeKey);
     if (latData) {
+        charts.latency.data.labels = latData.labels;
         charts.latency.data.datasets = latData.datasets;
         charts.latency.update();
     }
@@ -255,6 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
         data: { labels: [], datasets: [{ label: 'Tokens Used', data: [], backgroundColor: 'rgba(0, 245, 255, 0.6)', borderColor: 'rgba(0, 245, 255, 1)', borderWidth: 1 }] },
         options: {
             responsive: true,
+            animation: false,
             scales: {
                 x: { title: { display: true, text: 'Time' } },
                 y: { beginAtZero: true, title: { display: true, text: 'Tokens Used' } }
