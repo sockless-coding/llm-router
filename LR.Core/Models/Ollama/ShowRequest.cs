@@ -16,44 +16,52 @@ public class ShowRequest
 
 /// <summary>
 /// Response for the Ollama /api/show endpoint.
+/// Matches the Ollama API spec at https://docs.ollama.com/api-reference/show-model-details
 /// </summary>
 public class ShowResponse
 {
     /// <summary>
-    /// The Modelfile content (best-effort reconstruction from preset).
-    /// </summary>
-    [JsonPropertyName("modelfile")]
-    public string? Modelfile { get; set; }
-
-    /// <summary>
-    /// Model parameters as key-value pairs.
+    /// Model parameter settings serialized as text (e.g. "temperature 0.8\nnum_ctx 2048").
     /// </summary>
     [JsonPropertyName("parameters")]
     public string? Parameters { get; set; }
 
     /// <summary>
-    /// Projectors (empty for llama.cpp models).
+    /// The license of the model.
     /// </summary>
-    [JsonPropertyName("projectors")]
-    public string? Projectors { get; set; }
+    [JsonPropertyName("license")]
+    public string? License { get; set; }
 
     /// <summary>
-    /// General model information.
+    /// Last modified timestamp in ISO 8601 format.
+    /// </summary>
+    [JsonPropertyName("modified_at")]
+    public string? ModifiedAt { get; set; }
+
+    /// <summary>
+    /// High-level model details (architecture, parameter size, quantization, etc.).
     /// </summary>
     [JsonPropertyName("details")]
     public ShowDetails? Details { get; set; }
 
     /// <summary>
-    /// Examine info (empty for llama.cpp models).
-    /// </summary>
-    [JsonPropertyName("examine")] 
-    public object? Examine { get; set; }
-
-    /// <summary>
-    /// Template used by the model.
+    /// The template used by the model to render prompts.
     /// </summary>
     [JsonPropertyName("template")]
     public string? Template { get; set; }
+
+    /// <summary>
+    /// List of supported features (e.g. "completion", "vision").
+    /// </summary>
+    [JsonPropertyName("capabilities")]
+    public string[]? Capabilities { get; set; }
+
+    /// <summary>
+    /// Additional model metadata from GGUF header key-value pairs.
+    /// Excludes large binary arrays (tokenizer tokens, merges, etc.).
+    /// </summary>
+    [JsonPropertyName("model_info")]
+    public Dictionary<string, object>? ModelInfo { get; set; }
 }
 
 public class ShowDetails

@@ -31,6 +31,9 @@ builder.Services.AddScoped<IPresetManager, PresetManager>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IRoutingEngine, RoutingEngine>();
 
+// GGUF metadata reader (Singleton — stateless file reader)
+builder.Services.AddSingleton<IGgufMetadataReader, GgufMetadataReader>();
+
 // SignalR progress publisher (bridges LR.Core and LR.Application)
 builder.Services.AddScoped<LR.Core.Interfaces.ISignalRProgressPublisher, SignalRProgressPublisher>();
 

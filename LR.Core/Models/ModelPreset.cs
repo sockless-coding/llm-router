@@ -453,6 +453,53 @@ public class ModelPreset
     [MaxLength(2048)]
     public string? ChatTemplate { get; set; }
 
+    // ==================== GGUF METADATA (Auto-Read from File) ====================
+
+    /// <summary>
+    /// Architecture name read from GGUF file (e.g. "llama", "gemma2", "phi3").
+    /// </summary>
+    [MaxLength(64)]
+    public string? GgufArchitecture { get; set; }
+
+    /// <summary>
+    /// Model name read from GGUF file (e.g. "Llama-2-7B-chat").
+    /// </summary>
+    [MaxLength(256)]
+    public string? GgufModelName { get; set; }
+
+    /// <summary>
+    /// Human-readable parameter size from GGUF file (e.g. "7B", "13B").
+    /// </summary>
+    [MaxLength(32)]
+    public string? GgufParameterSize { get; set; }
+
+    /// <summary>
+    /// Quantization level read from GGUF file (e.g. "Q4_K_M", "Q8_0").
+    /// </summary>
+    [MaxLength(16)]
+    public string? GgufQuantizationLevel { get; set; }
+
+    /// <summary>
+    /// Context length read from GGUF file (e.g. 4096, 8192).
+    /// </summary>
+    public int? GgufContextLength { get; set; }
+
+    /// <summary>
+    /// Embedding length read from GGUF file (e.g. 4096, 3072).
+    /// </summary>
+    public int? GgufEmbeddingLength { get; set; }
+
+    /// <summary>
+    /// RoPE base frequency read from GGUF file.
+    /// </summary>
+    public double? GgufRopeFreqBase { get; set; }
+
+    /// <summary>
+    /// Chat template string read from GGUF file (tokenizer.chat_template).
+    /// </summary>
+    [MaxLength(4096)]
+    public string? GgufChatTemplate { get; set; }
+
     // ==================== LEGACY / FALLBACK ====================
 
     /// <summary>

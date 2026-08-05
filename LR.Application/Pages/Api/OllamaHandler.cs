@@ -21,6 +21,7 @@ public class OllamaHandler : IProtocolHandler
     private readonly IRoutingEngine _routingEngine;
     private readonly IRequestQueueService _queue;
     private readonly IStatisticsService _statisticsService;
+    private readonly IGgufMetadataReader _ggufReader;
 
     public ApiProtocol Protocol => ApiProtocol.Ollama;
     public string PathPrefix => "/api";
@@ -30,13 +31,15 @@ public class OllamaHandler : IProtocolHandler
         IPresetManager presetManager,
         IRoutingEngine routingEngine,
         IRequestQueueService queue,
-        IStatisticsService statisticsService)
+        IStatisticsService statisticsService,
+        IGgufMetadataReader ggufReader)
     {
         _serverManager = serverManager;
         _presetManager = presetManager;
         _routingEngine = routingEngine;
         _queue = queue;
         _statisticsService = statisticsService;
+        _ggufReader = ggufReader;
     }
 
     public async Task<object> HandleListModelsAsync()
@@ -61,76 +64,75 @@ public class OllamaHandler : IProtocolHandler
         if (preset is null)
             return Microsoft.AspNetCore.Http.Results.NotFound($"Model '{modelName}' not found");
 
-        // Build a Modelfile-like representation from the preset configuration
-        var modelfileLines = new List<string>
+        // Read GGUF metadata from the model file for accurate, real-time data
+        GgufMetadata? gguf = null;
+        try
         {
-            $"# Modelfile for {preset.Name}",
-            "",
-            $"FROM \"{preset.ModelPath}\""
-        };
+            gguf = await _ggufReader.ReadAsync(preset.ModelPath);
+        }
+        catch { /* If we can't read the file, fall back to cached preset fields */ }
 
-        if (preset.ContextSize.HasValue && preset.ContextSize.Value > 0)
-            modelfileLines.Add($"PARAMETER num_ctx {preset.ContextSize}");
-        if (preset.GpuLayers.HasValue)
-            modelfileLines.Add($"PARAMETER gpu_layers {preset.GpuLayers}");
+        // Build parameters text block (Ollama format: "key value" per line)
+        var paramLines = new List<string>();
         if (preset.Temperature.HasValue)
-            modelfileLines.Add($"PARAMETER temperature {preset.Temperature}");
-        if (preset.TopK.HasValue && preset.TopK.Value > 0)
-            modelfileLines.Add($"PARAMETER top_k {preset.TopK}");
-        if (preset.TopP.HasValue)
-            modelfileLines.Add($"PARAMETER top_p {preset.TopP}");
-        if (preset.MinP.HasValue)
-            modelfileLines.Add($"PARAMETER min_p {preset.MinP}");
-        if (preset.RepeatPenalty.HasValue && preset.RepeatPenalty.Value != 1.0f)
-            modelfileLines.Add($"PARAMETER repeat_penalty {preset.RepeatPenalty}");
-        if (preset.Threads.HasValue)
-            modelfileLines.Add($"PARAMETER num_thread {preset.Threads}");
-        if (preset.BatchSize.HasValue)
-            modelfileLines.Add($"PARAMETER batch_size {preset.BatchSize}");
-
-        var parameters = new Dictionary<string, string>();
+            paramLines.Add($"temperature {preset.Temperature.Value}");
         if (preset.ContextSize.HasValue && preset.ContextSize.Value > 0)
-            parameters["num_ctx"] = preset.ContextSize.Value.ToString();
+            paramLines.Add($"num_ctx {preset.ContextSize.Value}");
+        else if (gguf?.ContextLength.HasValue == true)
+            paramLines.Add($"num_ctx {gguf.ContextLength.Value}");
         if (preset.GpuLayers.HasValue)
-            parameters["gpu_layers"] = preset.GpuLayers.Value.ToString();
-        if (preset.Temperature.HasValue)
-            parameters["temperature"] = preset.Temperature.Value.ToString("G");
+            paramLines.Add($"gpu_layers {preset.GpuLayers.Value}");
         if (preset.TopK.HasValue && preset.TopK.Value > 0)
-            parameters["top_k"] = preset.TopK.Value.ToString();
+            paramLines.Add($"top_k {preset.TopK.Value}");
         if (preset.TopP.HasValue)
-            parameters["top_p"] = preset.TopP.Value.ToString("G");
+            paramLines.Add($"top_p {preset.TopP.Value}");
         if (preset.MinP.HasValue)
-            parameters["min_p"] = preset.MinP.Value.ToString("G");
+            paramLines.Add($"min_p {preset.MinP.Value}");
         if (preset.RepeatPenalty.HasValue && preset.RepeatPenalty.Value != 1.0f)
-            parameters["repeat_penalty"] = preset.RepeatPenalty.Value.ToString("G");
+            paramLines.Add($"repeat_penalty {preset.RepeatPenalty.Value}");
         if (preset.Threads.HasValue)
-            parameters["num_thread"] = preset.Threads.Value.ToString();
+            paramLines.Add($"num_thread {preset.Threads.Value}");
         if (preset.BatchSize.HasValue)
-            parameters["batch_size"] = preset.BatchSize.Value.ToString();
+            paramLines.Add($"batch_size {preset.BatchSize.Value}");
 
-        // Infer quantization from model path filename
-        var fileName = Path.GetFileName(preset.ModelPath).ToLowerInvariant();
-        string? quantLevel = null;
-        if (fileName.Contains("q4_k_m") || fileName.Contains("q4_0")) quantLevel = "Q4_K_M";
-        else if (fileName.Contains("q5_k_m")) quantLevel = "Q5_K_M";
-        else if (fileName.Contains("q8_0")) quantLevel = "Q8_0";
-        else if (fileName.Contains("f16") || fileName.Contains("f32")) quantLevel = "F16";
+        // Determine architecture from GGUF data or cached preset field, falling back to "llama"
+        var architecture = gguf?.Architecture ?? preset.GgufArchitecture ?? "llama";
+
+        // Build details from GGUF metadata (or fall back to cached fields)
+        var quantLevel = gguf?.QuantizationLevel ?? preset.GgufQuantizationLevel;
+        var parameterSize = gguf?.ParameterSize ?? preset.GgufParameterSize;
+
+        // Get modified_at from the GGUF file's last write time
+        string? modifiedAt = null;
+        try
+        {
+            if (File.Exists(preset.ModelPath))
+                modifiedAt = File.GetLastWriteTimeUtc(preset.ModelPath).ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+        }
+        catch { /* Can't read file time */ }
+
+        // Infer capabilities from architecture
+        var capabilities = new List<string> { "completion" };
+        if (architecture.Contains("mllama") || architecture.Contains("clip"))
+            capabilities.Add("vision");
 
         return new ShowResponse
         {
-            Modelfile = string.Join('\n', modelfileLines),
-            Parameters = parameters.Count > 0 ? JsonSerializer.Serialize(parameters) : null,
-            Projectors = null,
+            Parameters = paramLines.Count > 0 ? string.Join('\n', paramLines) : null,
+            License = gguf?.LicenseText,
+            ModifiedAt = modifiedAt,
             Details = new ShowDetails
             {
+                ParentModel = gguf?.ModelName ?? preset.GgufModelName,
                 Format = "gguf",
-                Family = "llama",
-                Families = ["llama"],
-                ParameterSize = null, // Not available from preset alone
+                Family = architecture,
+                Families = [architecture],
+                ParameterSize = parameterSize,
                 QuantizationLevel = quantLevel
             },
-            Examine = null,
-            Template = null
+            Template = gguf?.ChatTemplate ?? preset.GgufChatTemplate,
+            Capabilities = capabilities.ToArray(),
+            ModelInfo = gguf?.AllKvPairs
         };
     }
 
@@ -409,25 +411,35 @@ public class OllamaHandler : IProtocolHandler
                 continue;
 
             var presetId = instance.ActivePresetId;
-            string? quantLevel = null;
-            if (presetId.HasValue)
+            if (!presetId.HasValue)
+                continue;
+
+            var preset = _presetManager.GetById(presetId.Value);
+            if (preset is null)
+                continue;
+
+            // Get actual model file size
+            long modelSize = 0L;
+            try
             {
-                var preset = _presetManager.GetById(presetId.Value);
-                if (preset is not null)
-                {
-                    var fileName = Path.GetFileName(preset.ModelPath).ToLowerInvariant();
-                    if (fileName.Contains("q4_k_m") || fileName.Contains("q4_0")) quantLevel = "Q4_K_M";
-                    else if (fileName.Contains("q5_k_m")) quantLevel = "Q5_K_M";
-                    else if (fileName.Contains("q8_0")) quantLevel = "Q8_0";
-                    else if (fileName.Contains("f16") || fileName.Contains("f32")) quantLevel = "F16";
-                }
+                if (File.Exists(preset.ModelPath))
+                    modelSize = new FileInfo(preset.ModelPath).Length;
             }
+            catch { /* File may not be accessible */ }
+
+            // Infer quantization from model path filename
+            var fileName = Path.GetFileName(preset.ModelPath).ToLowerInvariant();
+            string? quantLevel = null;
+            if (fileName.Contains("q4_k_m") || fileName.Contains("q4_0")) quantLevel = "Q4_K_M";
+            else if (fileName.Contains("q5_k_m")) quantLevel = "Q5_K_M";
+            else if (fileName.Contains("q8_0")) quantLevel = "Q8_0";
+            else if (fileName.Contains("f16") || fileName.Contains("f32")) quantLevel = "F16";
 
             runningModels.Add(new PsModelInfo
             {
-                Name = instance.Name,
-                Model = instance.Name,
-                Size = 0L, // Not tracked at this level
+                Name = preset.Name,
+                Model = preset.Name,
+                Size = modelSize,
                 Digest = string.Empty,
                 Details = new PsModelDetails
                 {

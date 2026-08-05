@@ -12,10 +12,12 @@ namespace LR.Core.Services;
 public class PresetManager : IPresetManager
 {
     private readonly LRDbContext _context;
+    private readonly IGgufMetadataReader? _ggufReader;
 
-    public PresetManager(LRDbContext context)
+    public PresetManager(LRDbContext context, IGgufMetadataReader? ggufReader = null)
     {
         _context = context;
+        _ggufReader = ggufReader;
     }
 
     /// <summary>
@@ -42,13 +44,43 @@ public class PresetManager : IPresetManager
 
         _context.ModelPresets.Add(preset);
         await _context.SaveChangesAsync();
+
+        // Read GGUF metadata from the model file and populate fields
+        if (_ggufReader != null)
+            await ReadGgufMetadataAsync(preset, preset.ModelPath);
+
         return preset;
+    }
+
+    private async Task ReadGgufMetadataAsync(ModelPreset preset, string? modelPath)
+    {
+        if (string.IsNullOrEmpty(modelPath) || _ggufReader == null)
+            return;
+
+        var metadata = await _ggufReader.ReadAsync(modelPath);
+        if (metadata is null)
+            return;
+
+        preset.GgufArchitecture = metadata.Architecture;
+        preset.GgufModelName = metadata.ModelName;
+        preset.GgufParameterSize = metadata.ParameterSize;
+        preset.GgufQuantizationLevel = metadata.QuantizationLevel;
+        preset.GgufContextLength = metadata.ContextLength;
+        preset.GgufEmbeddingLength = metadata.EmbeddingLength;
+        preset.GgufRopeFreqBase = metadata.RopeFreqBase;
+        preset.GgufChatTemplate = metadata.ChatTemplate;
+
+        await _context.SaveChangesAsync();
     }
 
     public async Task<bool> UpdateAsync(Guid presetId, ModelPreset updated)
     {
         var existing = await _context.ModelPresets.FindAsync(presetId);
         if (existing is null) return false;
+
+        // Track whether model path changed so we can re-read GGUF metadata
+        var oldModelPath = existing.ModelPath;
+        var pathChanged = !string.Equals(oldModelPath, updated.ModelPath, StringComparison.Ordinal);
 
         existing.Name = updated.Name;
         existing.ModelPath = updated.ModelPath;
@@ -155,10 +187,25 @@ public class PresetManager : IPresetManager
         // Advanced: Chat Template
         existing.ChatTemplate = updated.ChatTemplate;
 
+        // GGUF Metadata (auto-read from file)
+        existing.GgufArchitecture = updated.GgufArchitecture;
+        existing.GgufModelName = updated.GgufModelName;
+        existing.GgufParameterSize = updated.GgufParameterSize;
+        existing.GgufQuantizationLevel = updated.GgufQuantizationLevel;
+        existing.GgufContextLength = updated.GgufContextLength;
+        existing.GgufEmbeddingLength = updated.GgufEmbeddingLength;
+        existing.GgufRopeFreqBase = updated.GgufRopeFreqBase;
+        existing.GgufChatTemplate = updated.GgufChatTemplate;
+
         // Fallback flags
         existing.Flags = updated.Flags;
 
         await _context.SaveChangesAsync();
+
+        // Re-read GGUF metadata if model path changed
+        if (pathChanged)
+            await ReadGgufMetadataAsync(existing, updated.ModelPath);
+
         return true;
     }
 
