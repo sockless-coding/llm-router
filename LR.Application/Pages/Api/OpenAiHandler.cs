@@ -97,7 +97,7 @@ public class OpenAiHandler : IProtocolHandler
                             new ChunkChoice
                             {
                                 Index = 0,
-                                Delta = new DeltaMessage { Role = "assistant", Content = string.Empty }
+                                Delta = new DeltaMessage { Role = "assistant", Content = ChatMessageContent.FromText(string.Empty) }
                             }
                         }
                     })}\r\n\r\n", cancellationToken);
@@ -149,7 +149,7 @@ public class OpenAiHandler : IProtocolHandler
                                     new ChunkChoice
                                     {
                                         Index = 0,
-                                        Delta = new DeltaMessage { Content = chunk.TextDelta }
+                                        Delta = new DeltaMessage { Content = ChatMessageContent.FromText(chunk.TextDelta) }
                                     }
                                 }
                             })}\r\n\r\n", cancellationToken);
@@ -267,7 +267,7 @@ public class OpenAiHandler : IProtocolHandler
                 new Choice
                 {
                     Index = 0,
-                    Message = new ChatMessage { Role = "assistant", Content = response.Payload },
+                    Message = new ChatMessage { Role = "assistant", Content = ChatMessageContent.FromText(response.Payload) },
                     FinishReason = "stop"
                 }
             },

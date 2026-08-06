@@ -466,14 +466,14 @@ public class OllamaHandler : IProtocolHandler
         {
             Model = ollamaRequest.Model,
             Stream = ollamaRequest.Stream,
-            Temperature = ollamaRequest.Options?.Temperature,
-            TopP = ollamaRequest.Options?.TopP,
+            Temperature = ollamaRequest.Options != null && ollamaRequest.Options.Temperature.HasValue ? (float)ollamaRequest.Options.Temperature.Value : null,
+            TopP = ollamaRequest.Options != null && ollamaRequest.Options.TopP.HasValue ? (float)ollamaRequest.Options.TopP.Value : null,
             MaxTokens = ollamaRequest.Options?.NumPredict,
             Stop = ollamaRequest.Options?.Stop,
             Messages = ollamaRequest.Messages.Select(m => new LR.Core.Models.OpenAI.ChatMessage
             {
                 Role = m.Role,
-                Content = m.Content
+                Content = ChatMessageContent.FromText(m.Content)
             }).ToList()
         };
 
@@ -497,15 +497,15 @@ public class OllamaHandler : IProtocolHandler
         // Convert generate request to OpenAI chat format (single user message with prompt)
         var messages = new List<LR.Core.Models.OpenAI.ChatMessage>();
         if (!string.IsNullOrEmpty(generateRequest.System))
-            messages.Add(new LR.Core.Models.OpenAI.ChatMessage { Role = "system", Content = generateRequest.System });
-        messages.Add(new LR.Core.Models.OpenAI.ChatMessage { Role = "user", Content = generateRequest.Prompt });
+            messages.Add(new LR.Core.Models.OpenAI.ChatMessage { Role = "system", Content = ChatMessageContent.FromText(generateRequest.System) });
+        messages.Add(new LR.Core.Models.OpenAI.ChatMessage { Role = "user", Content = ChatMessageContent.FromText(generateRequest.Prompt) });
 
         var openAiRequest = new ChatCompletionRequest
         {
             Model = generateRequest.Model,
             Stream = generateRequest.Stream,
-            Temperature = generateRequest.Options?.Temperature,
-            TopP = generateRequest.Options?.TopP,
+            Temperature = generateRequest.Options != null && generateRequest.Options.Temperature.HasValue ? (float)generateRequest.Options.Temperature.Value : null,
+            TopP = generateRequest.Options != null && generateRequest.Options.TopP.HasValue ? (float)generateRequest.Options.TopP.Value : null,
             MaxTokens = generateRequest.Options?.NumPredict,
             Stop = generateRequest.Options?.Stop,
             Messages = messages
