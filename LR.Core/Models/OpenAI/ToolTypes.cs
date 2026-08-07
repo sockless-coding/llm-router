@@ -10,6 +10,7 @@ public class ChatTool
 {
     /// <summary>The type of the tool. Currently only "function" is supported.</summary>
     [JsonPropertyName("type")]
+    [JsonConverter(typeof(StringOrFunctionConverter))]
     public string Type { get; set; } = "function";
 
     /// <summary>The function definition when type is "function".</summary>
@@ -46,6 +47,7 @@ public class ChatToolCall
 
     /// <summary>The type of the tool. Currently only "function" is supported.</summary>
     [JsonPropertyName("type")]
+    [JsonConverter(typeof(StringOrFunctionConverter))]
     public string Type { get; set; } = "function";
 
     /// <summary>The function that the model called.</summary>
@@ -71,6 +73,7 @@ public class ChatToolCallFunction
 /// Specifies which tool the model should use.
 /// Can be "none", "auto", "required", or an object specifying a specific tool.
 /// </summary>
+[JsonConverter(typeof(ChatToolChoiceConverter))]
 public class ChatToolChoice
 {
     /// <summary>When set to "none" the model will not call any tools.</summary>
@@ -80,6 +83,77 @@ public class ChatToolChoice
     /// <summary>When type is "function", specifies which function to call.</summary>
     [JsonPropertyName("function")]
     public ChatToolChoiceFunction? Function { get; set; }
+}
+
+/// <summary>
+/// Converts between string and object representations of tool_choice.
+/// OpenAI allows tool_choice to be a string ("none", "auto", "required") or an object.
+/// </summary>
+public class ChatToolChoiceConverter : JsonConverter<ChatToolChoice>
+{
+    public override ChatToolChoice? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            var value = reader.GetString();
+            return new ChatToolChoice { Type = value };
+        }
+
+        if (reader.TokenType == JsonTokenType.StartObject)
+        {
+            // Read object manually to avoid infinite recursion through the converter.
+            string? type = null;
+            ChatToolChoiceFunction? function = null;
+
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndObject)
+                    break;
+
+                if (reader.TokenType != JsonTokenType.PropertyName)
+                    continue;
+
+                var propertyName = reader.GetString();
+                reader.Read();
+
+                switch (propertyName)
+                {
+                    case "type":
+                        type = reader.GetString();
+                        break;
+                    case "function":
+                        function = JsonSerializer.Deserialize<ChatToolChoiceFunction>(ref reader, options);
+                        break;
+                }
+            }
+
+            return new ChatToolChoice { Type = type, Function = function };
+        }
+
+        throw new JsonException($"Unexpected token type: {reader.TokenType} for ChatToolChoice");
+    }
+
+    public override void Write(Utf8JsonWriter writer, ChatToolChoice value, JsonSerializerOptions options)
+    {
+        if (value.Function != null || (!string.IsNullOrEmpty(value.Type) && value.Type != "none" && value.Type != "auto" && value.Type != "required"))
+        {
+            // Write as object
+            writer.WriteStartObject();
+            if (!string.IsNullOrEmpty(value.Type))
+                writer.WriteString("type", value.Type);
+            if (value.Function != null)
+            {
+                writer.WritePropertyName("function");
+                JsonSerializer.Serialize(writer, value.Function, options);
+            }
+            writer.WriteEndObject();
+        }
+        else
+        {
+            // Write as string ("none", "auto", "required")
+            writer.WriteStringValue(value.Type ?? "auto");
+        }
+    }
 }
 
 /// <summary>

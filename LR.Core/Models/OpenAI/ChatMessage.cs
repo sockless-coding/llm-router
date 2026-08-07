@@ -12,6 +12,7 @@ public class ChatMessage
     /// The role of the messages author (system, user, assistant, tool).
     /// </summary>
     [JsonPropertyName("role")]
+    [JsonConverter(typeof(StringOrFunctionConverter))]
     public string Role { get; set; } = string.Empty;
 
     /// <summary>
@@ -80,6 +81,7 @@ public class ChatMessageContentPart
 {
     /// <summary>The type of content part: "text", "image_url", "input_audio", or "input_file".</summary>
     [JsonPropertyName("type")]
+    [JsonConverter(typeof(StringOrFunctionConverter))]
     public string Type { get; set; } = "text";
 
     /// <summary>Text content when type is "text".</summary>
@@ -153,6 +155,30 @@ public class ChatAudioOutput
     /// <summary>ID of the audio to be generated.</summary>
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Converter that returns a non-null default for string properties if the JSON value is null.
+/// Used on "type", "role", and similar required-string properties to prevent llama.cpp from receiving null where it expects a string.
+/// </summary>
+public class StringOrFunctionConverter : JsonConverter<string>
+{
+    public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+            return "function";
+
+        if (reader.TokenType != JsonTokenType.String)
+            throw new JsonException($"Expected string or null for property, got {reader.TokenType}");
+
+        var value = reader.GetString();
+        return string.IsNullOrEmpty(value) ? "function" : value;
+    }
+
+    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(string.IsNullOrEmpty(value) ? "function" : value);
+    }
 }
 
 /// <summary>

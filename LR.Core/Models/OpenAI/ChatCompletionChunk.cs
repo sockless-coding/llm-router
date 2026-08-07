@@ -75,6 +75,7 @@ public class ChunkChoice
 public class DeltaMessage
 {
     [JsonPropertyName("role")]
+    [JsonConverter(typeof(StringOrFunctionConverter))]
     public string? Role { get; set; }
 
     /// <summary>

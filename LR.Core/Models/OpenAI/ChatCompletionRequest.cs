@@ -208,6 +208,7 @@ public class ChatPrediction
 {
     /// <summary>The type of the prediction. Currently only "content" is supported.</summary>
     [JsonPropertyName("type")]
+    [JsonConverter(typeof(StringOrFunctionConverter))]
     public string Type { get; set; } = "content";
 
     /// <summary>The content to predict.</summary>

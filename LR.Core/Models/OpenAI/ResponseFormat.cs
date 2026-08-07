@@ -11,6 +11,7 @@ public class ChatResponseFormat
 {
     /// <summary>Must be one of "text", "json_object", or "json_schema".</summary>
     [JsonPropertyName("type")]
+    [JsonConverter(typeof(StringOrFunctionConverter))]
     public string Type { get; set; } = "text";
 
     /// <summary>The JSON Schema definition when type is "json_schema".</summary>

@@ -326,6 +326,8 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         try
         {
             var requestContent = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            _logger.LogInformation("Sending streaming request to {ServerUrl}/v1/chat/completions?stream=true", ServerUrl);
+            _logger.LogInformation("Streaming request payload: {Payload}", payload);
             var response = await _httpClient.PostAsync(
                 $"{ServerUrl}/v1/chat/completions?stream=true",
                 requestContent,

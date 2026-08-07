@@ -193,7 +193,8 @@ public class ClaudeHandler : IProtocolHandler
         {
             ModelName = request.Model,
             PresetId = preset?.Id,
-            Payload = JsonSerializer.Serialize(request)
+            // Omit null fields — backend rejects "name":null etc.
+            Payload = JsonSerializer.Serialize(request, new System.Text.Json.JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull })
         };
     }
 

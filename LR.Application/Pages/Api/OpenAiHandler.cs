@@ -1,7 +1,9 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
@@ -15,6 +17,10 @@ namespace LR.Application.Pages.Api;
 /// </summary>
 public class OpenAiHandler : IProtocolHandler
 {
+    // Omit null fields when forwarding to backends — llama.cpp rejects "name":null etc.
+    private static readonly JsonSerializerOptions BackendJsonOpts = new() { WriteIndented = false, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+
+    private readonly ILogger<OpenAiHandler> _logger;
     private readonly IServerManager _serverManager;
     private readonly IPresetManager _presetManager;
     private readonly IRoutingEngine _routingEngine;
@@ -25,12 +31,14 @@ public class OpenAiHandler : IProtocolHandler
     public string PathPrefix => "/v1";
 
     public OpenAiHandler(
+        ILogger<OpenAiHandler> logger,
         IServerManager serverManager,
         IPresetManager presetManager,
         IRoutingEngine routingEngine,
         IRequestQueueService queue,
         IStatisticsService statisticsService)
     {
+        _logger = logger;
         _serverManager = serverManager;
         _presetManager = presetManager;
         _routingEngine = routingEngine;
@@ -55,8 +63,9 @@ public class OpenAiHandler : IProtocolHandler
     {
         using var reader = new StreamReader(httpRequest.Body);
         var body = await reader.ReadToEndAsync(cancellationToken);
+        _logger.LogInformation("Received chat completion request: {Body}", body);
         var request = JsonSerializer.Deserialize<ChatCompletionRequest>(body);
-        if (request is null) return Microsoft.AspNetCore.Http.Results.BadRequest("Invalid JSON in request body");
+        if (request is null) return Results.BadRequest("Invalid JSON in request body");
 
         // Build internal RouteRequest from the OpenAI request
         var routeRequest = BuildRouteRequest(request);
@@ -69,8 +78,8 @@ public class OpenAiHandler : IProtocolHandler
             var instances = await _serverManager.GetAllInstancesAsync();
             bool anyRunning = instances.Any(s => s.Status == Core.Models.ServerStatus.Running);
             if (!anyRunning)
-                return Microsoft.AspNetCore.Http.Results.Problem("No inference servers are currently running. Start a server before sending requests.", statusCode: 503);
-            return Microsoft.AspNetCore.Http.Results.Problem("All inference servers are busy or unhealthy. Try again later.", statusCode: 503);
+                return Results.Problem("No inference servers are currently running. Start a server before sending requests.", statusCode: 503);
+            return Results.Problem("All inference servers are busy or unhealthy. Try again later.", statusCode: 503);
         }
 
         if (server != null)
@@ -247,11 +256,14 @@ public class OpenAiHandler : IProtocolHandler
         var presets = _presetManager.GetAllPresets();
         var preset = presets.FirstOrDefault(p => p.Name == request.Model);
 
+        var payload = JsonSerializer.Serialize(request, BackendJsonOpts);
+        _logger.LogDebug("RouteRequest payload for {Model}: {Payload}", request.Model, payload);
+
         return new RouteRequest
         {
             ModelName = request.Model,
             PresetId = preset?.Id,
-            Payload = JsonSerializer.Serialize(request)
+            Payload = payload
         };
     }
 

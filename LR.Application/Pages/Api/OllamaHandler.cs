@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using Microsoft.AspNetCore.Mvc;
 
@@ -481,7 +482,8 @@ public class OllamaHandler : IProtocolHandler
         {
             ModelName = ollamaRequest.Model,
             PresetId = preset?.Id,
-            Payload = JsonSerializer.Serialize(openAiRequest)
+            // Omit null fields — backend rejects "name":null etc.
+            Payload = JsonSerializer.Serialize(openAiRequest, new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull })
         };
     }
 
@@ -515,7 +517,8 @@ public class OllamaHandler : IProtocolHandler
         {
             ModelName = generateRequest.Model,
             PresetId = preset?.Id,
-            Payload = JsonSerializer.Serialize(openAiRequest)
+            // Omit null fields — backend rejects "name":null etc.
+            Payload = JsonSerializer.Serialize(openAiRequest, new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull })
         };
     }
 
