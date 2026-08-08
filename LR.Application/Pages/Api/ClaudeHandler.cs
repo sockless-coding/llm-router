@@ -21,6 +21,7 @@ public class ClaudeHandler : IProtocolHandler
     private readonly IRequestQueueService _queue;
     private readonly IStatisticsService _statisticsService;
     private readonly IApiRequestLogger _requestLogger;
+    private readonly GatewaySettings _gatewaySettings;
 
     public ApiProtocol Protocol => ApiProtocol.Claude;
     public string PathPrefix => "/v1";
@@ -31,7 +32,8 @@ public class ClaudeHandler : IProtocolHandler
         IRoutingEngine routingEngine,
         IRequestQueueService queue,
         IStatisticsService statisticsService,
-        IApiRequestLogger requestLogger)
+        IApiRequestLogger requestLogger,
+        GatewaySettings gatewaySettings)
     {
         _serverManager = serverManager;
         _presetManager = presetManager;
@@ -39,6 +41,7 @@ public class ClaudeHandler : IProtocolHandler
         _queue = queue;
         _statisticsService = statisticsService;
         _requestLogger = requestLogger;
+        _gatewaySettings = gatewaySettings;
     }
 
     public Task<object> HandleListModelsAsync()
@@ -65,8 +68,19 @@ public class ClaudeHandler : IProtocolHandler
         // Log translated payload
         if (logId != Guid.Empty) { try { await _requestLogger.LogTranslatedPayloadAsync(logId, routeRequest.Payload); } catch { } }
 
-        // Try to find a server immediately
+        // Create a backend-specific cancellation token that is NOT tied to client disconnection.
+        using var backendCts = new CancellationTokenSource();
+        if (_gatewaySettings.BackendTimeoutSeconds > 0)
+        {
+            backendCts.CancelAfter(TimeSpan.FromSeconds(_gatewaySettings.BackendTimeoutSeconds));
+        }
+
+        // Use the HTTP context token for routing (fast DB query — safe to cancel on client disconnect)
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+
+        // Backend token — survives client disconnect but respects the backend timeout
+        var backendToken = backendCts.Token;
+
         if (server != null)
         {
             if (request.Stream)
@@ -103,9 +117,9 @@ public class ClaudeHandler : IProtocolHandler
                     })}\r\n\r\n", cancellationToken);
                     await httpResponse.Body.FlushAsync(cancellationToken);
 
-                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
+                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, backendToken))
                     {
-                        if (cancellationToken.IsCancellationRequested) break;
+                        if (backendToken.IsCancellationRequested) break;
 
                         if (chunk.IsFinal && chunk.Response is not null)
                         {
@@ -168,12 +182,12 @@ public class ClaudeHandler : IProtocolHandler
                 return Results.Empty;
             }
 
-            var result = await ProcessOnServer(server, request, routeRequest, logId, cancellationToken);
+            var result = await ProcessOnServer(server, request, routeRequest, logId, backendToken);
             return Microsoft.AspNetCore.Http.Results.Json(result);
         }
 
-        // Queue the request
-        var response = await _queue.EnqueueAsync(routeRequest, cancellationToken);
+        // Queue the request — use backend token so a client disconnect doesn't abort the queue wait
+        var response = await _queue.EnqueueAsync(routeRequest, backendToken);
 
         // Log queued request completion
         if (logId != Guid.Empty)

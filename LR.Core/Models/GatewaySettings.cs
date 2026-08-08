@@ -48,4 +48,14 @@ public class GatewaySettings
     /// Default: 7.
     /// </summary>
     public int RequestLogRetentionDays { get; set; } = 7;
+
+    // ── Backend timeout settings ─────────────────────────────────────
+
+    /// <summary>
+    /// Timeout for backend (inference server) requests in seconds.
+    /// This is independent of the client connection — if the client disconnects,
+    /// the backend call continues until this timeout or completion.
+    /// Default: 300 (5 minutes). Set to -1 for no timeout.
+    /// </summary>
+    public int BackendTimeoutSeconds { get; set; } = 300;
 }

@@ -61,14 +61,18 @@ var gatewaySettings = builder.Configuration.GetSection("Gateway").Get<GatewaySet
 builder.Services.AddSingleton(gatewaySettings);
 builder.Services.Configure<GatewaySettings>(builder.Configuration.GetSection("Gateway"));
 
-// Configure Kestrel to listen on the gateway port
-if (gatewaySettings.Port > 0)
+// Configure Kestrel for long-running inference requests
+builder.WebHost.ConfigureKestrel(options =>
 {
-    builder.WebHost.ConfigureKestrel(options =>
+    // Keep alive settings for long SSE/streaming connections
+    options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(10);
+    options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+
+    if (gatewaySettings.Port > 0)
     {
         options.ListenAnyIP(gatewaySettings.Port);
-    });
-}
+    }
+});
 
 // Request queue (singleton - holds the Channel)
 builder.Services.AddSingleton<IRequestQueueService, RequestQueueService>();
