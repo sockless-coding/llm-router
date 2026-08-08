@@ -18,9 +18,15 @@ public static class OllamaEndpoints
     /// - POST /api/generate
     /// - POST /api/embed
     /// - GET  /api/ps
+    /// - GET  /api/version
     /// </summary>
     public static IEndpointRouteBuilder MapOllamaEndpoints(this IEndpointRouteBuilder app)
     {
+        // GET /api/version — reports the Ollama-compatible server version.
+        // Required by some clients (e.g. VS Code Copilot Chat's Ollama provider) which gate
+        // model discovery on a minimum server version before models reach the model picker.
+        app.MapGet("/api/version", () => Results.Json(new { version = "0.9.0" }));
+
         // POST /api/chat — chat completions with messages array
         app.MapPost("/api/chat", async (
                 OllamaHandler handler,

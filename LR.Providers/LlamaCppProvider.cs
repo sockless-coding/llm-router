@@ -51,8 +51,13 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     /// <summary>
     /// Base URL of the running server (set after StartProcessAsync).
     /// Override or implement in concrete providers.
+    /// Uses the literal loopback address rather than "localhost": llama.cpp binds IPv4-only
+    /// (127.0.0.1) by default, but "localhost" resolves to ::1 first on Windows, which causes
+    /// every connection (health checks and completion requests alike) to eat several failed
+    /// IPv6 connection attempts before falling back to IPv4 — several seconds of pure overhead
+    /// per request that real Ollama doesn't have, since it listens on both stacks.
     /// </summary>
-    protected virtual string? ServerUrl => $"http://localhost:{Port}";
+    protected virtual string? ServerUrl => $"http://127.0.0.1:{Port}";
 
     /// <summary>
     /// The GPU backend type this llama.cpp build was compiled for (e.g., CUDA, Vulkan, SYCL).

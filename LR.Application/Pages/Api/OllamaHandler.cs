@@ -52,13 +52,52 @@ public class OllamaHandler : IProtocolHandler
     public async Task<object> HandleListModelsAsync()
     {
         var presets = await _presetManager.GetAllPresetsAsync();
-        var models = presets.Select(p => new
+        var models = presets.Select(p =>
         {
-            name = p.Name,
-            model = p.Name,
-            size = 0L,
-            digest = string.Empty,
-            modified_at = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+            var architecture = p.GgufArchitecture ?? "llama";
+
+            // Infer capabilities from architecture and chat template — mirrors HandleShowModelAsync so
+            // clients that only call /api/tags (e.g. Visual Studio's Copilot Ollama
+            // provider) see the same capabilities as /api/show.
+            var capabilities = new List<string> { "completion" };
+            if (architecture.Contains("mllama") || architecture.Contains("clip"))
+                capabilities.Add("vision");
+            if (SupportsTools(p.GgufChatTemplate))
+                capabilities.Add("tools");
+            if (SupportsThinking(p.Reasoning, p.GgufChatTemplate))
+                capabilities.Add("thinking");
+
+            long modelSize = 0L;
+            try
+            {
+                if (File.Exists(p.ModelPath))
+                    modelSize = new FileInfo(p.ModelPath).Length;
+            }
+            catch { /* File may not be accessible */ }
+
+            return new
+            {
+                name = p.Name,
+                model = p.Name,
+                size = modelSize,
+                digest = string.Empty,
+                modified_at = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                details = new
+                {
+                    parent_model = p.GgufModelName,
+                    format = "gguf",
+                    family = architecture,
+                    families = new[] { architecture },
+                    parameter_size = p.GgufParameterSize,
+                    quantization_level = p.GgufQuantizationLevel,
+                    // Ollama nests context/embedding length inside "details", not as a
+                    // top-level sibling of "capabilities" — clients like VS Code's Copilot
+                    // Ollama provider read context length from here.
+                    context_length = p.GgufContextLength,
+                    embedding_length = p.GgufEmbeddingLength
+                },
+                capabilities
+            };
         }).ToList();
 
         return new { models };
@@ -118,10 +157,16 @@ public class OllamaHandler : IProtocolHandler
         }
         catch { /* Can't read file time */ }
 
-        // Infer capabilities from architecture
+        var template = gguf?.ChatTemplate ?? preset.GgufChatTemplate;
+
+        // Infer capabilities from architecture and chat template
         var capabilities = new List<string> { "completion" };
         if (architecture.Contains("mllama") || architecture.Contains("clip"))
             capabilities.Add("vision");
+        if (SupportsTools(template))
+            capabilities.Add("tools");
+        if (SupportsThinking(preset.Reasoning, template))
+            capabilities.Add("thinking");
 
         return new ShowResponse
         {
@@ -137,10 +182,33 @@ public class OllamaHandler : IProtocolHandler
                 ParameterSize = parameterSize,
                 QuantizationLevel = quantLevel
             },
-            Template = gguf?.ChatTemplate ?? preset.GgufChatTemplate,
+            Template = template,
             Capabilities = capabilities.ToArray(),
             ModelInfo = gguf?.AllKvPairs
         };
+    }
+
+    /// <summary>
+    /// Ollama reports "tools" capability when the model's chat template renders a tool-call
+    /// block (Jinja templates gate this behind an "{% if tools %}"-style check). Mirroring that
+    /// via a template scan keeps Copilot's agent/tool-use mode enabled for models routed through
+    /// us the same way it is when Copilot talks to Ollama directly.
+    /// </summary>
+    private static bool SupportsTools(string? chatTemplate) =>
+        !string.IsNullOrEmpty(chatTemplate) && chatTemplate.Contains("tools", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// "thinking" capability: either the preset has reasoning explicitly enabled, or the chat
+    /// template itself emits/gates a thinking block (e.g. "&lt;think&gt;" or "enable_thinking").
+    /// </summary>
+    private static bool SupportsThinking(string? reasoning, string? chatTemplate)
+    {
+        if (!string.IsNullOrEmpty(reasoning) && !reasoning.Equals("off", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return !string.IsNullOrEmpty(chatTemplate) &&
+            (chatTemplate.Contains("<think>", StringComparison.OrdinalIgnoreCase) ||
+             chatTemplate.Contains("enable_thinking", StringComparison.OrdinalIgnoreCase));
     }
 
 
