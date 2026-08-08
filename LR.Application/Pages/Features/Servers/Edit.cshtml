@@ -8,8 +8,8 @@
 @if (!string.IsNullOrEmpty(TempData["SuccessMessage"] as string))
 {
     <div class="max-w-lg mx-auto mb-4">
-        <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex items-center gap-3">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+        <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex items-center gap-3" role="status">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-400 flex-shrink-0" aria-hidden="true" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
             <p class="text-sm text-emerald-300">@TempData["SuccessMessage"]</p>
         </div>
     </div>
@@ -22,17 +22,17 @@
 
         <!-- Info section -->
         <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5 mb-4">
-            <h2 class="text-lg font-semibold text-gray-100">Server Details</h2>
+            <h2 class="text-lg font-semibold text-text-primary">Server Details</h2>
 
             <!-- Name -->
             <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">Name</label>
-                <p class="text-lg text-gray-100 font-medium">@Model.Server.Name</p>
+                <p class="text-sm font-medium text-text-secondary mb-1">Name</p>
+                <p class="text-lg text-text-primary font-medium">@Model.Server.Name</p>
             </div>
 
             <!-- Engine -->
             <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">Server Engine</label>
+                <p class="text-sm font-medium text-text-secondary mb-1">Server Engine</p>
                 <span class="px-2 py-0.5 rounded text-xs font-medium bg-neon-cyan/10 text-neon-cyan">
                     @Model.Server.Engine.ToString().Replace("LlamaCpp", "llama.cpp")
                 </span>
@@ -40,49 +40,49 @@
 
             <!-- Status -->
             <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">Status</label>
-                <p class="text-gray-200">@Model.Server.Status - @if (Model.Server.IsHealthy) { <text>Healthy</text> } else { <text>Unhealthy</text> }</p>
+                <p class="text-sm font-medium text-text-secondary mb-1">Status</p>
+                <p class="text-text-primary">@Model.Server.Status - @if (Model.Server.IsHealthy) { <text>Healthy</text> } else { <text>Unhealthy</text> }</p>
             </div>
 
             <!-- Port -->
             <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">Port</label>
-                <p class="text-gray-200">@Model.Server.Port</p>
+                <p class="text-sm font-medium text-text-secondary mb-1">Port</p>
+                <p class="text-text-primary">@Model.Server.Port</p>
             </div>
 
             <!-- URL -->
             @if (!string.IsNullOrEmpty(Model.Server.Url))
             {
                 <div>
-                    <label class="block text-sm font-medium text-gray-400 mb-1">URL</label>
+                    <p class="text-sm font-medium text-text-secondary mb-1">URL</p>
                     <p class="text-neon-cyan">@Model.Server.Url</p>
                 </div>
             }
 
             <!-- Start Command -->
             <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">Start Command</label>
+                <p class="text-sm font-medium text-text-secondary mb-1">Start Command</p>
                 @if (!string.IsNullOrEmpty(Model.ViewModel.StartCommand))
                 {
-                    <p class="text-xs text-gray-500 mb-2">The command that will be executed to start this server.</p>
+                    <p class="text-xs text-text-secondary mb-2">The command that will be executed to start this server.</p>
                     <div class="relative">
-                        <pre id="start-command" class="bg-cyber-bg-dark rounded-lg p-3 border border-gray-600/30 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto"><code>@Model.ViewModel.StartCommand</code></pre>
+                        <pre id="start-command" class="bg-cyber-bg-dark rounded-lg p-3 border border-gray-600/30 text-xs font-mono text-text-primary overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto"><code>@Model.ViewModel.StartCommand</code></pre>
                         <button type="button" onclick="copyToClipboard('start-command')"
-                                class="absolute top-2 right-2 px-2 py-1 rounded-md bg-gray-700/50 text-gray-400 hover:text-neon-cyan hover:bg-gray-600/50 transition-all text-xs flex items-center gap-1">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+                                class="absolute top-2 right-2 px-2 py-1 rounded-md bg-gray-700/50 text-text-secondary hover:text-neon-cyan hover:bg-gray-600/50 transition-all text-xs flex items-center gap-1">
+                            <svg class="w-3 h-3" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
                             Copy
                         </button>
                     </div>
                 }
                 else
                 {
-                    <p class="text-xs text-gray-500 mb-2">The command that will be executed to start this server.</p>
+                    <p class="text-xs text-text-secondary mb-2">The command that will be executed to start this server.</p>
                     <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
                         <p class="text-sm text-yellow-400">No active preset configured for this server.</p>
-                        <p class="text-xs text-gray-500 mt-1">Create a preset with a model path and set it as the active preset before starting.</p>
+                        <p class="text-xs text-text-secondary mt-1">Create a preset with a model path and set it as the active preset before starting.</p>
                     </div>
                 }
-            
+
         </div>
 
     <script>
@@ -104,38 +104,38 @@
         @if (Model.Server.Engine == ServerEngine.LlamaCpp)
         {
             <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5">
-                <h2 class="text-lg font-semibold text-gray-100">llama.cpp Configuration</h2>
+                <h2 class="text-lg font-semibold text-text-primary">llama.cpp Configuration</h2>
 
                 <!-- Executable Folder Path -->
                 <div>
-                    <label asp-for="ViewModel.LlamaCppExecutableFolderPath" class="block text-sm font-medium text-gray-300 mb-1">
+                    <label asp-for="ViewModel.LlamaCppExecutableFolderPath" class="block text-sm font-medium text-text-secondary mb-1">
                         Server Folder Path
                     </label>
                     <p class="text-xs text-gray-500 mb-2">Path to the folder containing your llama.cpp server executable (e.g., <code>llama-server.exe</code>). Each GPU backend build should be in its own folder.</p>
                     <input asp-for="ViewModel.LlamaCppExecutableFolderPath" placeholder="C:\\llamacpp\\cuda-build"
-                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
+                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
                     <span asp-validation-for="ViewModel.LlamaCppExecutableFolderPath" class="text-xs text-neon-red mt-1"></span>
                 </div>
 
                 <!-- Companion App Path -->
                 <div>
-                    <label asp-for="ViewModel.CompanionAppPath" class="block text-sm font-medium text-gray-300 mb-1">
+                    <label asp-for="ViewModel.CompanionAppPath" class="block text-sm font-medium text-text-secondary mb-1">
                         Companion App Path <span class="text-gray-500">(optional)</span>
                     </label>
                     <p class="text-xs text-gray-500 mb-2">Path to a companion application that should run alongside the server. For example, the SYCL VRAM keeper on Windows when no display is connected.</p>
                     <input asp-for="ViewModel.CompanionAppPath" placeholder="C:\\tools\\sycl-vram-keeper.exe"
-                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
+                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
                     <span asp-validation-for="ViewModel.CompanionAppPath" class="text-xs text-neon-red mt-1"></span>
                 </div>
 
                 <!-- Environment Setup Command -->
                 <div>
-                    <label asp-for="ViewModel.EnvironmentSetupCommand" class="block text-sm font-medium text-gray-300 mb-1">
+                    <label asp-for="ViewModel.EnvironmentSetupCommand" class="block text-sm font-medium text-text-secondary mb-1">
                         Environment Setup Command <span class="text-gray-500">(optional)</span>
                     </label>
                     <p class="text-xs text-gray-500 mb-2">Shell command to initialize environment variables before starting the server. For example, for SYCL backends on Windows: <code class="text-neon-cyan/70">"C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64</code></p>
                     <input asp-for="ViewModel.EnvironmentSetupCommand" placeholder='"C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64'
-                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
+                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
                     <span asp-validation-for="ViewModel.EnvironmentSetupCommand" class="text-xs text-neon-red mt-1"></span>
                 </div>
 
@@ -146,7 +146,7 @@
                         Save Changes
                     </button>
                     <a href="/Features/Servers/Index"
-                       class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-gray-400 border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
+                       class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
                         Back
                     </a>
                 </div>

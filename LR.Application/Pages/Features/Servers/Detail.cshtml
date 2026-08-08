@@ -9,7 +9,7 @@
 @if (Model.Server == null)
 {
     <div class="bg-cyber-card rounded-xl border border-neon-cyan/10 p-8 text-center">
-        <p class="text-gray-400">Server not found.</p>
+        <p class="text-text-secondary">Server not found.</p>
         <a href="/Features/Servers" class="text-neon-cyan hover:underline mt-2 inline-block">← Back to servers</a>
     </div>
 }
@@ -18,33 +18,33 @@ else
     @* Server Info Card *@
     <div class="bg-cyber-card rounded-xl border border-neon-cyan/10 p-6 mb-6">
         <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-semibold text-gray-100">@Model.Server.Name</h2>
+            <h2 class="text-lg font-semibold text-text-primary">@Model.Server.Name</h2>
             <a href="/Features/Servers" class="text-neon-cyan hover:underline text-sm">← Back to servers</a>
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-                <span class="text-xs text-gray-500 uppercase tracking-wider">Engine</span>
-                <p class="text-sm text-gray-300 mt-1">@Model.Server.Engine.ToString().Replace("LlamaCpp", "llama.cpp")</p>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Engine</span>
+                <p class="text-sm text-text-primary mt-1">@Model.Server.Engine.ToString().Replace("LlamaCpp", "llama.cpp")</p>
             </div>
             <div>
-                <span class="text-xs text-gray-500 uppercase tracking-wider">Status</span>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Status</span>
                 <p class="flex items-center gap-2 mt-1">
-                    <span class="w-2 h-2 rounded-full
+                    <span aria-hidden="true" class="w-2 h-2 rounded-full
                         @if (Model.Server.Status == ServerStatus.Running) { <text>bg-neon-green</text> }
                         else if (Model.Server.Status == ServerStatus.Starting || Model.Server.Status == ServerStatus.Stopping) { <text>bg-yellow-500 animate-pulse</text> }
                         else if (Model.Server.Status == ServerStatus.Error) { <text>bg-neon-red</text> }
                         else { <text>bg-gray-400</text> }"></span>
-                    <span class="text-sm text-gray-300">@Model.Server.Status</span>
+                    <span class="text-sm text-text-primary">@Model.Server.Status</span>
                 </p>
             </div>
             <div>
-                <span class="text-xs text-gray-500 uppercase tracking-wider">Port</span>
-                <p class="text-sm text-gray-300 mt-1">@Model.Server.Port</p>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Port</span>
+                <p class="text-sm text-text-primary mt-1">@Model.Server.Port</p>
             </div>
             <div>
-                <span class="text-xs text-gray-500 uppercase tracking-wider">Restarts</span>
-                <p class="text-sm text-gray-300 mt-1">@Model.Server.RestartCount / @Model.Server.MaxRestarts</p>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Restarts</span>
+                <p class="text-sm text-text-primary mt-1">@Model.Server.RestartCount / @Model.Server.MaxRestarts</p>
             </div>
         </div>
 
@@ -52,10 +52,10 @@ else
         {
             <div class="mt-4 p-3 rounded-lg bg-neon-red/5 border border-neon-red/20">
                 <span class="text-xs text-neon-red uppercase tracking-wider">Last Error</span>
-                <p class="text-sm text-gray-300 mt-1">@Model.Server.LastErrorMessage</p>
+                <p class="text-sm text-text-primary mt-1">@Model.Server.LastErrorMessage</p>
                 @if (Model.Server.LastErrorTime.HasValue)
                 {
-                    <p class="text-xs text-gray-500 mt-1">@Model.Server.LastErrorTime.Value.ToString("yyyy-MM-dd HH:mm:ss") UTC</p>
+                    <p class="text-xs text-text-secondary mt-1">@Model.Server.LastErrorTime.Value.ToString("yyyy-MM-dd HH:mm:ss") UTC</p>
                 }
             </div>
         }
@@ -64,8 +64,8 @@ else
     @* Logs Section *@
     <div class="bg-cyber-card rounded-xl border border-neon-cyan/10 overflow-hidden">
         <div class="flex items-center justify-between px-6 py-3 border-b border-gray-700/50">
-            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Logs (@Model.Logs.Count entries)</h3>
-            <button onclick="clearLogs()" id="clear-btn"
+            <h3 class="text-sm font-semibold text-text-secondary uppercase tracking-wider">Logs (@Model.Logs.Count entries)</h3>
+            <button type="button" onclick="clearLogs()" id="clear-btn"
                     class="text-xs px-3 py-1 rounded-lg bg-neon-red/10 text-neon-red border border-neon-red/30 hover:bg-neon-red/20 transition-all">
                 Clear Logs
             </button>
@@ -73,7 +73,7 @@ else
 
         @if (!Model.Logs.Any())
         {
-            <div class="p-8 text-center text-gray-500">No log entries yet.</div>
+            <div class="p-8 text-center text-text-secondary">No log entries yet.</div>
         }
         else
         {
@@ -85,7 +85,7 @@ else
                         "1" => "text-neon-green",  // Info
                         "2" => "text-yellow-500",   // Warning
                         "3" => "text-neon-red",     // Error
-                        _ => "text-gray-400"
+                        _ => "text-text-secondary"
                     };
 
                     var levelBg = log.Level switch
@@ -93,7 +93,7 @@ else
                         "1" => "bg-neon-green/10 text-neon-green",
                         "2" => "bg-yellow-500/10 text-yellow-500",
                         "3" => "bg-neon-red/10 text-neon-red",
-                        _ => "bg-gray-400/10 text-gray-400"
+                        _ => "bg-gray-400/10 text-text-secondary"
                     };
 
                     var levelLabel = log.Level switch
@@ -108,8 +108,8 @@ else
                         <div class="flex items-start gap-3">
                             <span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold @levelBg">@levelLabel</span>
                             <div class="min-w-0 flex-1">
-                                <p class="text-sm text-gray-300 break-all">@log.Message.Replace("\n", "<br/>")</p>
-                                <p class="text-xs text-gray-600 mt-1">@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss") UTC</p>
+                                <p class="text-sm text-text-primary break-all">@log.Message.Replace("\n", "<br/>")</p>
+                                <p class="text-xs text-text-secondary mt-1">@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss") UTC</p>
                             </div>
                         </div>
                     </div>

@@ -10,7 +10,7 @@
     <!-- Breadcrumb -->
     <a href="/Features/RequestLog/Index" class="text-sm text-neon-cyan hover:underline mb-4 inline-block">← Back to Request Log</a>
 
-    <h1 class="text-3xl font-bold mb-2 text-neon-cyan">📋 Request Detail</h1>
+    <h1 class="text-3xl font-bold mb-2 text-neon-cyan"><span aria-hidden="true">📋</span> Request Detail</h1>
 
     <!-- Overview Cards -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -19,8 +19,8 @@
             @{
                 var protocolColor = log.Protocol switch
                 {
-                    ApiProtocol.OpenAI => "text-indigo-400",
-                    ApiProtocol.Claude => "text-orange-400",
+                    ApiProtocol.OpenAI => "text-indigo-700 dark:text-indigo-400",
+                    ApiProtocol.Claude => "text-orange-700 dark:text-orange-400",
                     ApiProtocol.Ollama => "text-neon-green",
                     _ => "text-text-secondary"
                 };
@@ -30,7 +30,7 @@
         <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30">
             <p class="text-xs text-text-secondary">Status</p>
             @{
-                var statusColor = log.ErrorMessage != null ? "text-red-400" : log.StatusCode >= 500 ? "text-orange-400" : "text-green-400";
+                var statusColor = log.ErrorMessage != null ? "text-red-700 dark:text-red-400" : log.StatusCode >= 500 ? "text-orange-700 dark:text-orange-400" : "text-green-700 dark:text-green-400";
             }
             <p class="text-xl font-bold mt-1 @statusColor">@log.StatusDisplay @(log.StatusCode)</p>
         </div>
@@ -46,10 +46,10 @@
 
     <!-- Request Flow Visualization -->
     <div class="bg-cyber-card rounded-xl p-6 border border-gray-700/30 mb-8">
-        <h2 class="text-lg font-semibold mb-4 text-neon-cyan">🔄 Request Flow</h2>
+        <h2 class="text-lg font-semibold mb-4 text-neon-cyan"><span aria-hidden="true">🔄</span> Request Flow</h2>
         <div class="flex items-center gap-3 flex-wrap">
             <div class="bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-4 py-2 text-sm">
-                <span class="text-indigo-400 font-medium">Client</span><br>
+                <span class="text-indigo-700 dark:text-indigo-400 font-medium">Client</span><br>
                 <span class="text-xs opacity-60">@log.ProtocolBadge API</span>
             </div>
             <span class="text-neon-cyan text-lg">→</span>
@@ -70,7 +70,7 @@
                 }
             }
             <div class="bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-4 py-2 text-sm">
-                <span class="text-indigo-400 font-medium">Client</span><br>
+                <span class="text-indigo-700 dark:text-indigo-400 font-medium">Client</span><br>
                 <span class="text-xs opacity-60">@log.StatusCode @if (log.IsStreaming) { <span>Stream</span> } else { <span>JSON</span> }</span>
             </div>
         </div>
@@ -93,8 +93,8 @@
     @if (!string.IsNullOrEmpty(log.ErrorMessage))
     {
         <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-8">
-            <h2 class="text-lg font-semibold text-red-400 mb-2">❌ Error</h2>
-            <p class="text-sm text-red-300 font-mono whitespace-pre-wrap">@log.ErrorMessage</p>
+            <h2 class="text-lg font-semibold text-red-700 dark:text-red-400 mb-2"><span aria-hidden="true">❌</span> Error</h2>
+            <p class="text-sm text-red-700 dark:text-red-300 font-mono whitespace-pre-wrap">@log.ErrorMessage</p>
         </div>
     }
 
@@ -114,9 +114,9 @@
         bool hasContent = !string.IsNullOrEmpty(section.Content);
         
         <div class="bg-cyber-card rounded-xl border @(hasContent ? "border-gray-700/30" : "border-gray-800") mb-4 overflow-hidden">
-            <button onclick="togglePayload(@i)" class="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-neon-cyan/5 transition-colors">
+            <button type="button" onclick="togglePayload(@i)" aria-expanded="false" aria-controls="payload-@i" class="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-neon-cyan/5 transition-colors" @(!hasContent ? "disabled" : "")>
                 <span class="font-semibold @(!hasContent ? "text-text-secondary opacity-60" : "text-text-primary")">
-                    @(section.Icon) @(section.Title)
+                    <span aria-hidden="true">@(section.Icon)</span> @(section.Title)
                     @if (hasContent)
                     {
                         <span class="ml-2 text-xs text-text-secondary font-normal">@string.Format("{0:N0}", section.Content.Length) chars</span>
@@ -125,7 +125,7 @@
                 @{
                     var iconId = $"icon-{i}";
                 }
-                <svg id="@iconId" class="w-5 h-5 text-text-secondary transition-transform @(!hasContent ? "opacity-30" : "")" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg id="@iconId" class="w-5 h-5 text-text-secondary transition-transform @(!hasContent ? "opacity-30" : "")" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                 </svg>
             </button>
@@ -143,9 +143,9 @@
                         catch { /* Not valid JSON — show as-is */ }
                     }
                     <div class="relative">
-                        <button onclick="copyPayload(@i)" class="absolute top-3 right-3 bg-gray-700/50 hover:bg-neon-cyan/20 text-xs px-3 py-1.5 rounded-lg transition-colors z-10 copy-btn"
+                        <button type="button" onclick="copyPayload(@i)" class="absolute top-3 right-3 bg-gray-700/50 hover:bg-neon-cyan/20 text-xs px-3 py-1.5 rounded-lg transition-colors z-10 copy-btn"
                                 data-payload-id="@i">
-                            📋 Copy
+                            <span aria-hidden="true">📋</span> Copy
                         </button>
                         <pre id="json-@i" class="p-5 text-xs font-mono text-text-secondary overflow-x-auto max-h-[600px] bg-gray-900/30"><code>@Html.Raw(json)</code></pre>
                     </div>
@@ -174,12 +174,15 @@
 function togglePayload(id) {
     const el = document.getElementById('payload-' + id);
     const icon = document.getElementById('icon-' + id);
+    const button = icon.closest('button');
     if (el.classList.contains('hidden')) {
         el.classList.remove('hidden');
         icon.style.transform = 'rotate(180deg)';
+        button.setAttribute('aria-expanded', 'true');
     } else {
         el.classList.add('hidden');
         icon.style.transform = 'rotate(0deg)';
+        button.setAttribute('aria-expanded', 'false');
     }
 }
 

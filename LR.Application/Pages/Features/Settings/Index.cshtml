@@ -5,30 +5,30 @@
 }
 
 <div class="max-w-3xl mx-auto px-4 py-6">
-    <h1 class="text-3xl font-bold mb-6 text-neon-cyan">⚙️ System Settings</h1>
+    <h1 class="text-3xl font-bold mb-6 text-neon-cyan"><span aria-hidden="true">⚙️</span> System Settings</h1>
 
     @if (!string.IsNullOrEmpty(Model.StatusMessage))
     {
         var isError = Model.StatusMessage.Contains("failed", StringComparison.OrdinalIgnoreCase);
-        <div class="mb-6 rounded-xl p-4 border @(isError ? "border-red-500/30 bg-red-500/10" : "border-neon-green/30 bg-neon-green/10")">
-            <p class="text-sm @(isError ? "text-red-400" : "text-neon-green")">@Model.StatusMessage</p>
+        <div class="mb-6 rounded-xl p-4 border @(isError ? "border-red-500/30 bg-red-500/10" : "border-neon-green/30 bg-neon-green/10")" role="status">
+            <p class="text-sm @(isError ? "text-red-700 dark:text-red-400" : "text-neon-green")">@Model.StatusMessage</p>
         </div>
     }
 
     <form method="post">
         <!-- Request Logging Section -->
         <div class="bg-cyber-card rounded-xl p-6 border border-gray-700/30 mb-6">
-            <h2 class="text-lg font-semibold text-neon-cyan mb-4">📋 Request Logging</h2>
+            <h2 class="text-lg font-semibold text-neon-cyan mb-4"><span aria-hidden="true">📋</span> Request Logging</h2>
 
             <!-- Enable/Disable -->
             <div class="flex items-center justify-between py-3 border-b border-gray-700/20">
-                <div>
+                <div id="enableLoggingLabel">
                     <p class="text-sm text-text-primary font-medium">Enable Request Logging</p>
                     <p class="text-xs text-text-secondary mt-0.5">Log all API requests passing through the router</p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" name="EnableRequestLogging" value="true" checked="@(Model.EnableRequestLogging ? "checked" : null)"
-class="sr-only peer"
+class="sr-only peer" aria-labelledby="enableLoggingLabel"
                                asp-for="EnableRequestLogging" />
                     <!-- Always send false when unchecked -->
                     <input type="hidden" name="EnableRequestLogging" value="false" />
@@ -39,13 +39,13 @@ class="sr-only peer"
 
             <!-- Log Full Payloads -->
             <div class="flex items-center justify-between py-3 border-b border-gray-700/20">
-                <div>
+                <div id="logFullPayloadsLabel">
                     <p class="text-sm text-text-primary font-medium">Log Full Payloads</p>
                     <p class="text-xs text-text-secondary mt-0.5">Store complete request/response bodies (8KB limit when disabled)</p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" name="LogFullPayloads" value="true" checked="@(Model.LogFullPayloads ? "checked" : null)"
-class="sr-only peer"
+class="sr-only peer" aria-labelledby="logFullPayloadsLabel"
                                asp-for="LogFullPayloads" />
                     <input type="hidden" name="LogFullPayloads" value="false" />
                     <div class="w-11 h-6 bg-gray-700 rounded-full peer-checked:bg-neon-cyan/40 peer-focus:ring-2 peer-focus:ring-neon-cyan/30 transition-colors"></div>
@@ -55,45 +55,45 @@ class="sr-only peer"
 
             <!-- Retention Days -->
             <div class="flex items-center justify-between py-3">
-                <div>
+                <div id="retentionDaysLabel">
                     <p class="text-sm text-text-primary font-medium">Retention Period</p>
                     <p class="text-xs text-text-secondary mt-0.5">How many days to keep request logs (auto-cleaned hourly)</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <input type="number" name="RequestLogRetentionDays" min="1" max="365" value="@Model.RequestLogRetentionDays"
-class="bg-gray-800 text-text-primary border border-gray-600 rounded-lg px-3 py-2 w-20 text-sm text-center"
+class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-2 w-20 text-sm text-center" aria-labelledby="retentionDaysLabel"
                                asp-for="RequestLogRetentionDays" />
-                    <span class="text-xs text-text-secondary">days</span>
+                    <span class="text-xs text-text-secondary" aria-hidden="true">days</span>
                 </div>
             </div>
         </div>
 
         <!-- Gateway Section -->
         <div class="bg-cyber-card rounded-xl p-6 border border-gray-700/30 mb-6">
-            <h2 class="text-lg font-semibold text-neon-magenta mb-4">🌐 API Gateway</h2>
+            <h2 class="text-lg font-semibold text-neon-magenta mb-4"><span aria-hidden="true">🌐</span> API Gateway</h2>
 
             <!-- Max Queue Size -->
             <div class="flex items-center justify-between py-3 border-b border-gray-700/20">
-                <div>
+                <div id="maxQueueSizeLabel">
                     <p class="text-sm text-text-primary font-medium">Max Queue Size</p>
                     <p class="text-xs text-text-secondary mt-0.5">Maximum requests queued when all servers are busy (-1 = unlimited)</p>
                 </div>
                 <input type="number" name="MaxQueueSize" min="-1" value="@Model.MaxQueueSize"
-class="bg-gray-800 text-text-primary border border-gray-600 rounded-lg px-3 py-2 w-24 text-sm text-center"
+class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-2 w-24 text-sm text-center" aria-labelledby="maxQueueSizeLabel"
                            asp-for="MaxQueueSize" />
             </div>
 
             <!-- Queue Timeout -->
             <div class="flex items-center justify-between py-3">
-                <div>
+                <div id="queueTimeoutLabel">
                     <p class="text-sm text-text-primary font-medium">Queue Timeout</p>
                     <p class="text-xs text-text-secondary mt-0.5">Seconds a request can wait in queue before timing out (-1 = no timeout)</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <input type="number" name="QueueTimeoutSeconds" min="-1" value="@Model.QueueTimeoutSeconds"
-class="bg-gray-800 text-text-primary border border-gray-600 rounded-lg px-3 py-2 w-24 text-sm text-center"
+class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-2 w-24 text-sm text-center" aria-labelledby="queueTimeoutLabel"
                                asp-for="QueueTimeoutSeconds" />
-                    <span class="text-xs text-text-secondary">seconds</span>
+                    <span class="text-xs text-text-secondary" aria-hidden="true">seconds</span>
                 </div>
             </div>
         </div>
@@ -102,12 +102,12 @@ class="bg-gray-800 text-text-primary border border-gray-600 rounded-lg px-3 py-2
         <div class="flex gap-3">
             <button type="submit" name="action" value="save"
 class="bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan shadow-neon-cyan px-6 py-2.5 rounded-lg font-medium transition-colors">
-                💾 Save Settings
+                <span aria-hidden="true">💾</span> Save Settings
             </button>
 
             <button type="submit" name="action" value="cleanup"
 class="bg-gray-700/50 hover:bg-red-500/20 text-text-secondary hover:text-red-400 border border-gray-600 hover:border-red-500/30 px-6 py-2.5 rounded-lg font-medium transition-colors">
-                🧹 Run Cleanup Now
+                <span aria-hidden="true">🧹</span> Run Cleanup Now
             </button>
         </div>
     </form>

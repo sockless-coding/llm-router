@@ -6,7 +6,7 @@
 }
 
 <div class="max-w-7xl mx-auto px-4 py-6">
-    <h1 class="text-3xl font-bold mb-6 text-neon-cyan">📊 Statistics Dashboard</h1>
+    <h1 class="text-3xl font-bold mb-6 text-neon-cyan"><span aria-hidden="true">📊</span> Statistics Dashboard</h1>
 
     <!-- Summary Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -35,7 +35,7 @@
             var activeClass = range == "24h"
                 ? "bg-neon-cyan/20 text-neon-cyan border-neon-cyan shadow-neon-cyan"
                 : "bg-gray-800/50 text-text-secondary border-transparent hover:bg-neon-cyan/10 hover:text-neon-cyan";
-            <button onclick="updateAllCharts('@range')" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors time-btn border @activeClass">
+            <button type="button" onclick="updateAllCharts('@range')" aria-pressed="@(range == "24h" ? "true" : "false")" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors time-btn border @activeClass">
                 @range
             </button>
         }
@@ -45,13 +45,13 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <!-- Prompt Throughput Chart -->
         <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
-            <h2 class="text-lg font-semibold mb-4 text-neon-cyan">⚡ Prompt Processing Speed (tokens/sec)</h2>
+            <h2 class="text-lg font-semibold mb-4 text-neon-cyan"><span aria-hidden="true">⚡</span> Prompt Processing Speed (tokens/sec)</h2>
             <canvas id="promptThroughputChart"></canvas>
         </div>
 
         <!-- Generation Throughput Chart -->
         <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-green">
-            <h2 class="text-lg font-semibold mb-4 text-neon-green">🚀 Token Generation Speed (tokens/sec)</h2>
+            <h2 class="text-lg font-semibold mb-4 text-neon-green"><span aria-hidden="true">🚀</span> Token Generation Speed (tokens/sec)</h2>
             <canvas id="genThroughputChart"></canvas>
         </div>
     </div>
@@ -60,11 +60,11 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <!-- Context Usage Chart -->
         <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-magenta">
-            <h2 class="text-lg font-semibold mb-4 text-neon-magenta">🧠 Context Window Usage</h2>
+            <h2 class="text-lg font-semibold mb-4 text-neon-magenta"><span aria-hidden="true">🧠</span> Context Window Usage</h2>
             @if (Model.Presets.Any())
             {
                 <div class="mb-3">
-                    <select id="presetSelect" onchange="updateContextChart()" class="bg-gray-800 text-text-primary border border-gray-600 rounded-lg px-3 py-1.5 text-sm">
+                    <select id="presetSelect" onchange="updateContextChart()" class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-1.5 text-sm">
                         @foreach (var preset in Model.Presets)
                         {
                             <option value="@preset.Id">@preset.Name (@(preset.ContextSize?.ToString() ?? "auto")) ctx</option>
@@ -81,16 +81,17 @@
 
         <!-- Latency Chart -->
         <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
-            <h2 class="text-lg font-semibold mb-4 text-neon-red">⏱️ Request Latency (ms)</h2>
+            <h2 class="text-lg font-semibold mb-4 text-neon-red"><span aria-hidden="true">⏱️</span> Request Latency (ms)</h2>
             <canvas id="latencyChart"></canvas>
         </div>
     </div>
 </div>
 
 <script>
-// ── Chart.js dark-theme defaults for contrast ──
-Chart.defaults.color = '#9ca3af';           // text-secondary
-Chart.defaults.borderColor = 'rgba(75,85,99,0.2)';  // grid lines
+// ── Chart.js theme-aware defaults (kept >= 4.5:1 contrast against the canvas background in both modes) ──
+const isDarkTheme = document.documentElement.classList.contains('dark');
+Chart.defaults.color = isDarkTheme ? '#9ca3af' : '#374151';           // text-secondary
+Chart.defaults.borderColor = isDarkTheme ? 'rgba(75,85,99,0.2)' : 'rgba(107,114,128,0.25)';  // grid lines
 Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
 Chart.defaults.plugins.legend.labels.usePointStyle = true;
 Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(10,10,15,0.92)';
@@ -113,11 +114,19 @@ const servers = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Server
 const serverNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ServerNames));
 const presets = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Presets.Select(p => new { id = p.Id, name = p.Name })));
 
-const chartColors = [
+// Line colors need >= 3:1 contrast against the canvas background (WCAG 1.4.11) — the raw
+// neon palette only clears that on the near-black dark-mode canvas, so use the darker
+// AA-safe shades from _Layout's --neon-* variables when the light theme is active.
+const chartColors = isDarkTheme ? [
     '#00f5ff',   // cyan
     '#00ff88',   // green
     '#ff00ff',   // magenta
     '#ff2e63',   // red
+] : [
+    '#0e7490',   // cyan-700
+    '#047857',   // emerald-700
+    '#a21caf',   // fuchsia-700
+    '#b91c1c',   // red-700
 ];
 const chartColorsAlpha = chartColors.map(c => {
     const hex = c.slice(1);
@@ -259,6 +268,7 @@ async function updateAllCharts(rangeKey = '24h') {
         const isMatch = btn.textContent.trim() === rangeKey;
         btn.classList.toggle('border-neon-cyan', isMatch);
         btn.classList.toggle('border-transparent', !isMatch);
+        btn.setAttribute('aria-pressed', isMatch ? 'true' : 'false');
     });
 
     // Prompt throughput
@@ -299,7 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ctxContext = document.getElementById('contextUsageChart').getContext('2d');
     charts.context = new Chart(ctxContext, {
         type: 'bar',
-        data: { labels: [], datasets: [{ label: 'Tokens Used', data: [], backgroundColor: 'rgba(0, 245, 255, 0.6)', borderColor: 'rgba(0, 245, 255, 1)', borderWidth: 1 }] },
+        data: { labels: [], datasets: [{ label: 'Tokens Used', data: [], backgroundColor: chartColors[0] + '99', borderColor: chartColors[0], borderWidth: 1 }] },
         options: {
             responsive: true,
             animation: false,

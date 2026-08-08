@@ -6,8 +6,8 @@
 }
 
 @* Helper: input class *@
-@{ var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500"; }
-@{ var selCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-gray-100 focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all"; }
+@{ var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500"; }
+@{ var selCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all"; }
 
 
 <div class="max-w-4xl mx-auto">
@@ -16,7 +16,7 @@
 
         @if (!ViewData.ModelState.IsValid)
         {
-            <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 space-y-2">
+            <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 space-y-2" role="alert">
                 <h3 class="text-sm font-semibold text-red-400">Please fix the following errors:</h3>
                 <ul class="list-disc list-inside text-sm text-red-300 space-y-1">
                     @foreach (var entry in ViewData.ModelState.Values.Where(e => e?.Errors != null && e.Errors.Any()))
@@ -32,11 +32,11 @@
 
         <!-- ==================== IDENTITY ==================== -->
         <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
-            <h2 class="text-lg font-semibold text-gray-100">Identity</h2>
+            <h2 class="text-lg font-semibold text-text-primary">Identity</h2>
 
             <!-- Server Instance -->
             <div>
-                <label asp-for="ViewModel.ServerInstanceId" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                <label asp-for="ViewModel.ServerInstanceId" class="block text-sm font-medium text-text-secondary mb-1"></label>
                 <select asp-for="ViewModel.ServerInstanceId" asp-items="@(new SelectList(Model.Servers, "Id", "Name"))"
                         class="@selCls">
                     <option value="">— Select a server —</option>
@@ -45,14 +45,14 @@
 
             <!-- Name -->
             <div>
-                <label asp-for="ViewModel.Name" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                <label asp-for="ViewModel.Name" class="block text-sm font-medium text-text-secondary mb-1"></label>
                 <input asp-for="ViewModel.Name" required placeholder="e.g. llama-3-cuda"
                        class="@inpCls" />
             </div>
 
             <!-- Model Path -->
             <div>
-                <label asp-for="ViewModel.ModelPath" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                <label asp-for="ViewModel.ModelPath" class="block text-sm font-medium text-text-secondary mb-1"></label>
                 <input asp-for="ViewModel.ModelPath" required placeholder="/path/to/model.gguf"
                        class="@inpCls" />
             </div>
@@ -60,18 +60,18 @@
 
         <!-- ==================== CORE SETTINGS (Always Visible) ==================== -->
         <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
-            <h2 class="text-lg font-semibold text-gray-100">Core Settings</h2>
+            <h2 class="text-lg font-semibold text-text-primary">Core Settings</h2>
 
             <!-- Context Size & GPU Layers -->
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label asp-for="ViewModel.ContextSize" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.ContextSize" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.ContextSize" type="number" min="0"
                            placeholder="from model"
                            class="@inpCls" />
                 </div>
                 <div>
-                    <label asp-for="ViewModel.GpuLayers" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.GpuLayers" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.GpuLayers" type="number"
                            placeholder="auto"
                            class="@inpCls" />
@@ -81,7 +81,7 @@
             <!-- KV Cache Types -->
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label asp-for="ViewModel.CacheTypeK" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.CacheTypeK" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <select asp-for="ViewModel.CacheTypeK" class="@selCls">
                         <option value="">— default (f16) —</option>
                         @foreach (var v in new[] { "f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1" })
@@ -91,7 +91,7 @@
                     </select>
                 </div>
                 <div>
-                    <label asp-for="ViewModel.CacheTypeV" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.CacheTypeV" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <select asp-for="ViewModel.CacheTypeV" class="@selCls">
                         <option value="">— default (f16) —</option>
                         @foreach (var v in new[] { "f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1" })
@@ -105,7 +105,7 @@
             <!-- Flash Attention & Jinja -->
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label asp-for="ViewModel.FlashAttention" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.FlashAttention" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <select asp-for="ViewModel.FlashAttention" class="@selCls">
                         <option value="">— default (auto) —</option>
                         <option value="on">on</option>
@@ -114,7 +114,7 @@
                     </select>
                 </div>
                 <div>
-                    <label asp-for="ViewModel.Jinja" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.Jinja" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <select asp-for="ViewModel.Jinja" class="@selCls">
                         <option value="">— default (enabled) —</option>
                         <option value="True">enabled</option>
@@ -125,7 +125,7 @@
 
             <!-- Spec Type -->
             <div>
-                <label asp-for="ViewModel.SpecType" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                <label asp-for="ViewModel.SpecType" class="block text-sm font-medium text-text-secondary mb-1"></label>
                 <input asp-for="ViewModel.SpecType" placeholder="none, ngram-simple, draft-eagle3, ..."
                        class="@inpCls" />
             </div>
@@ -133,18 +133,18 @@
 
         <!-- ==================== SAMPLING (Always Visible) ==================== -->
         <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
-            <h2 class="text-lg font-semibold text-gray-100">Sampling</h2>
+            <h2 class="text-lg font-semibold text-text-primary">Sampling</h2>
 
             <!-- Temperature & Top-K -->
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label asp-for="ViewModel.Temperature" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.Temperature" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.Temperature" type="number" step="any"
                            placeholder="0.8"
                            class="@inpCls" />
                 </div>
                 <div>
-                    <label asp-for="ViewModel.TopK" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.TopK" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.TopK" type="number"
                            placeholder="40"
                            class="@inpCls" />
@@ -154,13 +154,13 @@
             <!-- Min-P & Top-P -->
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label asp-for="ViewModel.MinP" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.MinP" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.MinP" type="number" step="any"
                            placeholder="0.05"
                            class="@inpCls" />
                 </div>
                 <div>
-                    <label asp-for="ViewModel.TopP" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.TopP" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.TopP" type="number" step="any"
                            placeholder="0.95"
                            class="@inpCls" />
@@ -170,13 +170,13 @@
             <!-- Repeat Penalty & Presence Penalty -->
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label asp-for="ViewModel.RepeatPenalty" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.RepeatPenalty" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.RepeatPenalty" type="number" step="any"
                            placeholder="1.0"
                            class="@inpCls" />
                 </div>
                 <div>
-                    <label asp-for="ViewModel.PresencePenalty" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.PresencePenalty" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.PresencePenalty" type="number" step="any"
                            placeholder="0.0"
                            class="@inpCls" />
@@ -186,46 +186,46 @@
 
         <!-- ==================== ADVANCED: Generation ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Generation
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.Threads" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Threads" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.Threads" type="number" placeholder="auto" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.ThreadsBatch" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.ThreadsBatch" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.ThreadsBatch" type="number" placeholder="auto" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.PredictN" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.PredictN" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.PredictN" type="number" placeholder="-1 (∞)" class="@inpCls" />
                     </div>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.BatchSize" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.BatchSize" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.BatchSize" type="number" placeholder="2048" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.UbatchSize" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.UbatchSize" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.UbatchSize" type="number" placeholder="512" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.KeepN" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.KeepN" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.KeepN" type="number" placeholder="0" class="@inpCls" />
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label asp-for="ViewModel.Seed" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Seed" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.Seed" type="number" placeholder="random" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.IgnoreEos" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.IgnoreEos" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.IgnoreEos" class="@selCls">
                             <option value="">— default (false) —</option>
                             <option value="True">enabled</option>
@@ -238,18 +238,18 @@
 
         <!-- ==================== ADVANCED: GPU/Device ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: GPU / Device
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.Device" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Device" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.Device" placeholder="cuda0,cuda1" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.SplitMode" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.SplitMode" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.SplitMode" class="@selCls">
                             <option value="">— default (layer) —</option>
                             <option value="none">none</option>
@@ -259,17 +259,17 @@
                         </select>
                     </div>
                     <div>
-                        <label asp-for="ViewModel.TensorSplit" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.TensorSplit" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.TensorSplit" placeholder="3,1" class="@inpCls" />
                     </div>
                 </div>
                 <div class="grid grid-cols-4 gap-4">
                     <div>
-                        <label asp-for="ViewModel.MainGpu" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.MainGpu" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.MainGpu" type="number" placeholder="0" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.Fit" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Fit" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.Fit" class="@selCls">
                             <option value="">— default (on) —</option>
                             <option value="on">on</option>
@@ -277,7 +277,7 @@
                         </select>
                     </div>
                     <div>
-                        <label asp-for="ViewModel.KvOffload" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.KvOffload" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.KvOffload" class="@selCls">
                             <option value="">— default (enabled) —</option>
                             <option value="True">enabled</option>
@@ -285,7 +285,7 @@
                         </select>
                     </div>
                     <div>
-                        <label asp-for="ViewModel.Repack" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Repack" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.Repack" class="@selCls">
                             <option value="">— default (enabled) —</option>
                             <option value="True">enabled</option>
@@ -298,14 +298,14 @@
 
         <!-- ==================== ADVANCED: Memory ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Memory
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label asp-for="ViewModel.LoadMode" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.LoadMode" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.LoadMode" class="@selCls">
                             <option value="">— default (mmap) —</option>
                             <option value="none">none</option>
@@ -315,7 +315,7 @@
                         </select>
                     </div>
                     <div>
-                        <label asp-for="ViewModel.CacheRam" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.CacheRam" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.CacheRam" type="number" placeholder="8192 (MiB)" class="@inpCls" />
                     </div>
                 </div>
@@ -324,14 +324,14 @@
 
         <!-- ==================== ADVANCED: RoPE Scaling ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: RoPE Scaling
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.RopeScalingType" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.RopeScalingType" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.RopeScalingType" class="@selCls">
                             <option value="">— default —</option>
                             <option value="none">none</option>
@@ -340,39 +340,39 @@
                         </select>
                     </div>
                     <div>
-                        <label asp-for="ViewModel.RopeScale" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.RopeScale" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.RopeScale" type="number" step="any" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.RopeFreqBase" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.RopeFreqBase" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.RopeFreqBase" type="number" step="any" class="@inpCls" />
                     </div>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.RopeFreqScale" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.RopeFreqScale" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.RopeFreqScale" type="number" step="any" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.YarnOrigCtx" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.YarnOrigCtx" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.YarnOrigCtx" type="number" placeholder="model ctx" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.YarnExtFactor" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.YarnExtFactor" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.YarnExtFactor" type="number" step="any" placeholder="-1.00" class="@inpCls" />
                     </div>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.YarnAttnFactor" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.YarnAttnFactor" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.YarnAttnFactor" type="number" step="any" placeholder="-1.00" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.YarnBetaSlow" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.YarnBetaSlow" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.YarnBetaSlow" type="number" step="any" placeholder="-1.00" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.YarnBetaFast" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.YarnBetaFast" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.YarnBetaFast" type="number" step="any" placeholder="-1.00" class="@inpCls" />
                     </div>
                 </div>
@@ -381,67 +381,67 @@
 
         <!-- ==================== ADVANCED: Sampling (Extended) ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Sampling (Extended)
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <!-- Top-N-Sigma, XTC, Typical-P -->
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.TopNSigma" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.TopNSigma" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.TopNSigma" type="number" step="any" placeholder="-1.00 (off)" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.XtcProbability" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.XtcProbability" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.XtcProbability" type="number" step="any" placeholder="0 (off)" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.XtcThreshold" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.XtcThreshold" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.XtcThreshold" type="number" step="any" placeholder="0.10" class="@inpCls" />
                     </div>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.TypicalP" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.TypicalP" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.TypicalP" type="number" step="any" placeholder="1.0 (off)" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.RepeatLastN" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.RepeatLastN" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.RepeatLastN" type="number" placeholder="64" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.FrequencyPenalty" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.FrequencyPenalty" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.FrequencyPenalty" type="number" step="any" placeholder="0.0" class="@inpCls" />
                     </div>
                 </div>
 
                 <!-- DRY -->
-                <h3 class="text-sm font-semibold text-gray-400 mt-2">DRY</h3>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">DRY</h3>
                 <div class="grid grid-cols-4 gap-4">
                     <div>
-                        <label asp-for="ViewModel.DryMultiplier" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.DryMultiplier" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.DryMultiplier" type="number" step="any" placeholder="0 (off)" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.DryBase" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.DryBase" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.DryBase" type="number" step="any" placeholder="1.75" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.DryAllowedLength" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.DryAllowedLength" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.DryAllowedLength" type="number" placeholder="2" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.DryPenaltyLastN" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.DryPenaltyLastN" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.DryPenaltyLastN" type="number" placeholder="-1 (ctx)" class="@inpCls" />
                     </div>
                 </div>
 
                 <!-- Mirostat -->
-                <h3 class="text-sm font-semibold text-gray-400 mt-2">Mirostat</h3>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">Mirostat</h3>
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.Mirostat" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Mirostat" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.Mirostat" class="@selCls">
                             <option value="">— off —</option>
                             <option value="0">off</option>
@@ -450,24 +450,24 @@
                         </select>
                     </div>
                     <div>
-                        <label asp-for="ViewModel.MirostatTau" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.MirostatTau" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.MirostatTau" type="number" step="any" placeholder="5.0 (eta)" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.MirostatEta" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.MirostatEta" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.MirostatEta" type="number" step="any" placeholder="0.1 (lr)" class="@inpCls" />
                     </div>
                 </div>
 
                 <!-- Dynatemp -->
-                <h3 class="text-sm font-semibold text-gray-400 mt-2">Dynatemp</h3>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">Dynatemp</h3>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label asp-for="ViewModel.DynatempRange" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.DynatempRange" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.DynatempRange" type="number" step="any" placeholder="0 (off)" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.DynatempExp" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.DynatempExp" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.DynatempExp" type="number" step="any" placeholder="1.0" class="@inpCls" />
                     </div>
                 </div>
@@ -476,40 +476,40 @@
 
         <!-- ==================== ADVANCED: Speculative Decoding ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Speculative Decoding
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div>
-                    <label asp-for="ViewModel.SpecDraftModel" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.SpecDraftModel" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.SpecDraftModel" placeholder="/path/to/draft.gguf" class="@inpCls" />
                 </div>
                 <div class="grid grid-cols-4 gap-4">
                     <div>
-                        <label asp-for="ViewModel.SpecDraftNMax" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.SpecDraftNMax" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.SpecDraftNMax" type="number" placeholder="3" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.SpecDraftNMin" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.SpecDraftNMin" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.SpecDraftNMin" type="number" placeholder="0" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.SpecDraftPMin" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.SpecDraftPMin" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.SpecDraftPMin" type="number" step="any" placeholder="0.00" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.SpecDraftThreads" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.SpecDraftThreads" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.SpecDraftThreads" type="number" placeholder="auto" class="@inpCls" />
                     </div>
                 </div>
                 <div class="grid grid-cols-4 gap-4">
                     <div>
-                        <label asp-for="ViewModel.SpecDraftGpuLayers" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.SpecDraftGpuLayers" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.SpecDraftGpuLayers" type="number" placeholder="auto" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.SpecDraftTypeK" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.SpecDraftTypeK" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.SpecDraftTypeK" class="@selCls">
                             <option value="">— default —</option>
                             @foreach (var v in new[] { "f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1" })
@@ -519,7 +519,7 @@
                         </select>
                     </div>
                     <div>
-                        <label asp-for="ViewModel.SpecDraftTypeV" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.SpecDraftTypeV" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.SpecDraftTypeV" class="@selCls">
                             <option value="">— default —</option>
                             @foreach (var v in new[] { "f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1" })
@@ -534,36 +534,36 @@
 
         <!-- ==================== ADVANCED: Server ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Server
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.Host" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Host" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.Host" placeholder="127.0.0.1" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.Port" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Port" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.Port" type="number" placeholder="8080" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.Parallel" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Parallel" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.Parallel" type="number" placeholder="auto" class="@inpCls" />
                     </div>
                 </div>
                 <div class="grid grid-cols-4 gap-4">
                     <div>
-                        <label asp-for="ViewModel.Timeout" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Timeout" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.Timeout" type="number" placeholder="3600 (s)" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.ApiKey" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.ApiKey" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.ApiKey" placeholder="sk-..." class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.ContBatching" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.ContBatching" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.ContBatching" class="@selCls">
                             <option value="">— default (enabled) —</option>
                             <option value="True">enabled</option>
@@ -571,7 +571,7 @@
                         </select>
                     </div>
                     <div>
-                        <label asp-for="ViewModel.CachePrompt" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.CachePrompt" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.CachePrompt" class="@selCls">
                             <option value="">— default (enabled) —</option>
                             <option value="True">enabled</option>
@@ -584,14 +584,14 @@
 
         <!-- ==================== ADVANCED: Reasoning ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Reasoning
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div class="grid grid-cols-3 gap-4">
                     <div>
-                        <label asp-for="ViewModel.Reasoning" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.Reasoning" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.Reasoning" class="@selCls">
                             <option value="">— default (auto) —</option>
                             <option value="on">on</option>
@@ -600,11 +600,11 @@
                         </select>
                     </div>
                     <div>
-                        <label asp-for="ViewModel.ReasoningBudget" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.ReasoningBudget" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.ReasoningBudget" type="number" placeholder="-1 (unrestricted)" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.ReasoningFormat" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.ReasoningFormat" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <select asp-for="ViewModel.ReasoningFormat" class="@selCls">
                             <option value="">— default (auto) —</option>
                             <option value="none">none (leave thoughts in content, unparsed)</option>
@@ -618,22 +618,22 @@
 
         <!-- ==================== ADVANCED: Multimodal ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Multimodal
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div>
-                    <label asp-for="ViewModel.Mmproj" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.Mmproj" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.Mmproj" placeholder="/path/to/mmproj.gguf" class="@inpCls" />
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label asp-for="ViewModel.ImageMinTokens" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.ImageMinTokens" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.ImageMinTokens" type="number" placeholder="from model" class="@inpCls" />
                     </div>
                     <div>
-                        <label asp-for="ViewModel.ImageMaxTokens" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <label asp-for="ViewModel.ImageMaxTokens" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.ImageMaxTokens" type="number" placeholder="from model" class="@inpCls" />
                     </div>
                 </div>
@@ -642,13 +642,13 @@
 
         <!-- ==================== ADVANCED: LoRA ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: LoRA
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div>
-                    <label asp-for="ViewModel.Lora" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.Lora" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.Lora" placeholder="/path/to/lora.gguf (comma-separated)" class="@inpCls" />
                 </div>
             </div>
@@ -656,13 +656,13 @@
 
         <!-- ==================== ADVANCED: Chat Template ==================== -->
         <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
-            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-gray-100 hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
-                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Chat Template
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div>
-                    <label asp-for="ViewModel.ChatTemplate" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                    <label asp-for="ViewModel.ChatTemplate" class="block text-sm font-medium text-text-secondary mb-1"></label>
                     <input asp-for="ViewModel.ChatTemplate" placeholder="chatml, deepseek, llama3, ..."
                            class="@inpCls" />
                 </div>
@@ -676,7 +676,7 @@
                 Save Changes
             </button>
             <a href="/Features/Presets/Index"
-               class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-gray-400 border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
+               class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
                 Cancel
             </a>
         </div>
