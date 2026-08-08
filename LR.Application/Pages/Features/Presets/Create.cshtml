@@ -606,6 +606,15 @@
                         <label asp-for="ViewModel.ReasoningBudget" class="block text-sm font-medium text-gray-300 mb-1"></label>
                         <input asp-for="ViewModel.ReasoningBudget" type="number" placeholder="-1 (unrestricted)" class="@inpCls" />
                     </div>
+                    <div>
+                        <label asp-for="ViewModel.ReasoningFormat" class="block text-sm font-medium text-gray-300 mb-1"></label>
+                        <select asp-for="ViewModel.ReasoningFormat" class="@selCls">
+                            <option value="">— default (auto) —</option>
+                            <option value="none">none (leave thoughts in content, unparsed)</option>
+                            <option value="deepseek">deepseek (split into reasoning_content)</option>
+                            <option value="deepseek-legacy">deepseek-legacy (keep &lt;think&gt; in content too)</option>
+                        </select>
+                    </div>
                 </div>
             </div>
         </details>

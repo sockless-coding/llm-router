@@ -130,6 +130,7 @@ public class PresetEditModel : PageModel
         ViewModel.CachePrompt = preset.CachePrompt;
         ViewModel.Reasoning = preset.Reasoning;
         ViewModel.ReasoningBudget = preset.ReasoningBudget;
+        ViewModel.ReasoningFormat = preset.ReasoningFormat;
         ViewModel.Mmproj = preset.Mmproj;
         ViewModel.ImageMinTokens = preset.ImageMinTokens;
         ViewModel.ImageMaxTokens = preset.ImageMaxTokens;
@@ -212,6 +213,7 @@ public class PresetEditModel : PageModel
         entity.CachePrompt = ViewModel.CachePrompt;
         entity.Reasoning = ViewModel.Reasoning;
         entity.ReasoningBudget = ViewModel.ReasoningBudget;
+        entity.ReasoningFormat = ViewModel.ReasoningFormat;
         entity.Mmproj = ViewModel.Mmproj;
         entity.ImageMinTokens = ViewModel.ImageMinTokens;
         entity.ImageMaxTokens = ViewModel.ImageMaxTokens;

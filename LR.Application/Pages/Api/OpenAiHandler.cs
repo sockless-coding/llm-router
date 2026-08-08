@@ -348,6 +348,15 @@ public class OpenAiHandler : IProtocolHandler
         var presets = _presetManager.GetAllPresets();
         var preset = presets.FirstOrDefault(p => p.Name == request.Model);
 
+        // llama.cpp (like OpenAI) only includes token usage in the SSE stream when
+        // stream_options.include_usage is set. Force it on so usage/stats are always
+        // available, regardless of whether the calling client requested it.
+        if (request.Stream)
+        {
+            request.StreamOptions ??= new StreamOptions();
+            request.StreamOptions.IncludeUsage = true;
+        }
+
         var payload = JsonSerializer.Serialize(request, BackendJsonOpts);
         _logger.LogDebug("RouteRequest payload for {Model}: {Payload}", request.Model, payload);
 

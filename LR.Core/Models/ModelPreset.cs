@@ -419,6 +419,15 @@ public class ModelPreset
     /// </summary>
     public int? ReasoningBudget { get; set; }
 
+    /// <summary>
+    /// Controls how thought tags are extracted from the response (--reasoning-format).
+    /// One of: none, deepseek, deepseek-legacy. Empty/null leaves llama.cpp's "auto" default,
+    /// which guesses from the model's chat template and can misclassify non-standard reasoning
+    /// output (e.g. everything ending up in reasoning_content and nothing in content).
+    /// </summary>
+    [MaxLength(16)]
+    public string? ReasoningFormat { get; set; }
+
     // ==================== ADVANCED: Multimodal ====================
 
     /// <summary>

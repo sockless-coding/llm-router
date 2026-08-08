@@ -119,6 +119,7 @@ public class LlamaCppArgBuilder
         // --- Advanced: Reasoning ---
         AddArgIfSet(args, "--reasoning", preset.Reasoning);
         AddIntArg(args, "--reasoning-budget", preset.ReasoningBudget);
+        AddArgIfSet(args, "--reasoning-format", preset.ReasoningFormat);
 
         // --- Advanced: Multimodal ---
         AddArgIfSet(args, "--mmproj", preset.Mmproj);

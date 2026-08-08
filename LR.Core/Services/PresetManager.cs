@@ -175,6 +175,7 @@ public class PresetManager : IPresetManager
         // Advanced: Reasoning
         existing.Reasoning = updated.Reasoning;
         existing.ReasoningBudget = updated.ReasoningBudget;
+        existing.ReasoningFormat = updated.ReasoningFormat;
 
         // Advanced: Multimodal
         existing.Mmproj = updated.Mmproj;

@@ -109,6 +109,7 @@ public class PresetCreateModel : PageModel
             CachePrompt = ViewModel.CachePrompt,
             Reasoning = ViewModel.Reasoning,
             ReasoningBudget = ViewModel.ReasoningBudget,
+            ReasoningFormat = ViewModel.ReasoningFormat,
             Mmproj = ViewModel.Mmproj,
             ImageMinTokens = ViewModel.ImageMinTokens,
             ImageMaxTokens = ViewModel.ImageMaxTokens,
@@ -221,6 +222,7 @@ public class PresetViewModel
     // Advanced: Reasoning
     public string? Reasoning { get; set; }
     public int? ReasoningBudget { get; set; }
+    public string? ReasoningFormat { get; set; }
 
     // Advanced: Multimodal
     public string? Mmproj { get; set; }

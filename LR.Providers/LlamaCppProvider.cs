@@ -441,13 +441,30 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         while (!completed && !cancellationToken.IsCancellationRequested)
         {
             string? line = await reader.ReadLineAsync();
-            if (line is null || string.IsNullOrWhiteSpace(line)) continue;
+            // EOF: the backend closed the connection. ReadLineAsync keeps returning null
+            // instantly on a dead stream, so looping back here would spin forever instead
+            // of blocking — stop and let the post-loop fallback flush whatever we have.
+            if (line is null) break;
+            if (string.IsNullOrWhiteSpace(line)) continue;
 
             // llama.cpp SSE format: "data: {json}"
             if (!line.StartsWith("data:")) continue;
 
             string data = line.Substring(5).Trim();
-            if (string.IsNullOrEmpty(data) || data == "[DONE]") continue;
+            if (string.IsNullOrEmpty(data)) continue;
+
+            if (data == "[DONE]")
+            {
+                // Official end of stream. Flush the final chunk now — this also covers the
+                // case where usage arrived in a separate trailing frame after finish_reason
+                // (llama.cpp/OpenAI send stream_options usage as its own frame with empty
+                // choices, which the code below folds into streamResponse as it's seen).
+                streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
+                _timingCoordinator.MergeTimingData(streamResponse);
+                completed = true;
+                yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
+                break;
+            }
 
             // A single SSE frame can carry the last content token AND finish_reason together
             // (common for short answers) — collect both so neither is dropped.
@@ -457,11 +474,13 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                 using var jsonDoc = JsonDocument.Parse(data);
                 var root = jsonDoc.RootElement;
 
-                // Extract text delta from choices[0].delta.content and reasoning_content
-                string? textDelta = null;
-                string? reasoningContentDelta = null;
-                if (root.TryGetProperty("choices", out JsonElement choices) && choices.GetArrayLength() > 0)
+                bool hasChoices = root.TryGetProperty("choices", out JsonElement choices) && choices.GetArrayLength() > 0;
+
+                if (hasChoices)
                 {
+                    // Extract text delta from choices[0].delta.content and reasoning_content
+                    string? textDelta = null;
+                    string? reasoningContentDelta = null;
                     var firstChoice = choices[0];
                     if (firstChoice.TryGetProperty("delta", out JsonElement delta))
                     {
@@ -497,20 +516,21 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                         reasoningContentChunkCount++;
                     }
 
-                    // If finish_reason is set and we have usage data, send final chunk
+                    // finish_reason marks the end of content, but usage/timings may still
+                    // arrive in a later frame — capture what's here and keep reading until
+                    // [DONE] instead of finalizing immediately.
                     if (finishReason != null)
                     {
                         LlamaCppResponseParser.BuildRouteResponseFromStreamInto(accumulatedText ?? string.Empty, root, streamResponse);
-                        streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
-                        _logger.LogInformation("[Stats] Stream complete - Before merge PromptMs={PromptMs}, GenMs={GenMs}",
+                        _logger.LogInformation("[Stats] Stream finish_reason seen - PromptMs={PromptMs}, GenMs={GenMs}",
                             streamResponse.PromptProcessingMs, streamResponse.GenerationMs);
-                        // Merge timing data from stdout parsing
-                        _timingCoordinator.MergeTimingData(streamResponse);
-                        _logger.LogInformation("[Stats] Stream complete - After merge PromptMs={PromptMs}, GenMs={GenMs}, TotalMs={TotalMs}",
-                            streamResponse.PromptProcessingMs, streamResponse.GenerationMs, streamResponse.TotalLatencyMs);
-                        chunksToYield.Add(new RouteStreamChunk { IsFinal = true, Response = streamResponse });
-                        completed = true;
                     }
+                }
+                else if (root.TryGetProperty("usage", out _))
+                {
+                    // Trailing usage-only frame (choices: []), sent when stream_options.include_usage
+                    // was requested. Merge it in so token counts make it back to the client.
+                    LlamaCppResponseParser.BuildRouteResponseFromStreamInto(accumulatedText ?? string.Empty, root, streamResponse);
                 }
             }
             catch (JsonException)
@@ -523,9 +543,11 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                 yield return chunk;
         }
 
-        // If stream ended without a proper finish_reason, send final chunk with what we have
-        if (!completed && !string.IsNullOrEmpty(accumulatedText))
+        // Stream ended without a proper [DONE] frame (backend crash, dropped connection, etc.) —
+        // surface whatever partial content/reasoning we captured instead of dropping it silently.
+        if (!completed)
         {
+            streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
             streamResponse.Payload = accumulatedText ?? string.Empty;
             _timingCoordinator.MergeTimingData(streamResponse);
             yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
