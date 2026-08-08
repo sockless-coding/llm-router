@@ -26,6 +26,7 @@ public class OpenAiHandler : IProtocolHandler
     private readonly IRoutingEngine _routingEngine;
     private readonly IRequestQueueService _queue;
     private readonly IStatisticsService _statisticsService;
+    private readonly IApiRequestLogger _requestLogger;
 
     public ApiProtocol Protocol => ApiProtocol.OpenAI;
     public string PathPrefix => "/v1";
@@ -36,7 +37,8 @@ public class OpenAiHandler : IProtocolHandler
         IPresetManager presetManager,
         IRoutingEngine routingEngine,
         IRequestQueueService queue,
-        IStatisticsService statisticsService)
+        IStatisticsService statisticsService,
+        IApiRequestLogger requestLogger)
     {
         _logger = logger;
         _serverManager = serverManager;
@@ -44,6 +46,7 @@ public class OpenAiHandler : IProtocolHandler
         _routingEngine = routingEngine;
         _queue = queue;
         _statisticsService = statisticsService;
+        _requestLogger = requestLogger;
     }
 
     public async Task<object> HandleListModelsAsync()
@@ -63,12 +66,20 @@ public class OpenAiHandler : IProtocolHandler
     {
         using var reader = new StreamReader(httpRequest.Body);
         var body = await reader.ReadToEndAsync(cancellationToken);
-        _logger.LogInformation("Received chat completion request: {Body}", body);
+        _logger.LogDebug("Received chat completion request: {Body}", body);
         var request = JsonSerializer.Deserialize<ChatCompletionRequest>(body);
         if (request is null) return Results.BadRequest("Invalid JSON in request body");
 
         // Build internal RouteRequest from the OpenAI request
         var routeRequest = BuildRouteRequest(request);
+
+        // Log incoming request
+        Guid logId = Guid.Empty;
+        try { logId = await _requestLogger.LogIncomingAsync(ApiProtocol.OpenAI, "/v1/chat/completions", body, request.Model); }
+        catch { /* Logging failure shouldn't block the request */ }
+
+        // Log translated payload
+        if (logId != Guid.Empty) { try { await _requestLogger.LogTranslatedPayloadAsync(logId, routeRequest.Payload); } catch { } }
 
         // Try to find a server immediately
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
@@ -77,9 +88,16 @@ public class OpenAiHandler : IProtocolHandler
             // No available servers — check if any are running at all for a better error message
             var instances = await _serverManager.GetAllInstancesAsync();
             bool anyRunning = instances.Any(s => s.Status == Core.Models.ServerStatus.Running);
+            string errorMsg = !anyRunning
+                ? "No inference servers are currently running. Start a server before sending requests."
+                : "All inference servers are busy or unhealthy. Try again later.";
+            int errorStatus = 503;
+
+            if (logId != Guid.Empty) { try { await _requestLogger.LogErrorAsync(logId, errorMsg, errorStatus); } catch { } }
+
             if (!anyRunning)
-                return Results.Problem("No inference servers are currently running. Start a server before sending requests.", statusCode: 503);
-            return Results.Problem("All inference servers are busy or unhealthy. Try again later.", statusCode: 503);
+                return Results.Problem(errorMsg, statusCode: errorStatus);
+            return Results.Problem(errorMsg, statusCode: errorStatus);
         }
 
         if (server != null)
@@ -94,6 +112,9 @@ public class OpenAiHandler : IProtocolHandler
 
                 var completionId = $"chatcmpl-{Guid.NewGuid():N}";
                     var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+                    // Log the response ID for future OpenAI response_id correlation
+                    if (logId != Guid.Empty) { try { await _requestLogger.LogResponseIdAsync(logId, completionId); } catch { } }
 
                     // Yield first chunk with role
                     await httpResponse.WriteAsync($"data: {JsonSerializer.Serialize(new ChatCompletionChunk
@@ -145,6 +166,18 @@ public class OpenAiHandler : IProtocolHandler
                                 await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
                             }
                             catch { /* Stats recording failure shouldn't block the response */ }
+
+                            // Log request completion
+                            if (logId != Guid.Empty)
+                            {
+                                try
+                                {
+                                    var preset = routeRequest.PresetId.HasValue ? _presetManager.GetById(routeRequest.PresetId.Value) : null;
+                                    await _requestLogger.LogCompletionAsync(logId, server, preset, chunk.Response, 200,
+                                        $"Streamed {chunk.Response.GeneratedTokenCount} tokens", true, false);
+                                }
+                                catch { /* Logging failure shouldn't block the response */ }
+                            }
                         }
                         else if (!string.IsNullOrEmpty(chunk.TextDelta))
                         {
@@ -174,12 +207,24 @@ public class OpenAiHandler : IProtocolHandler
                 return Results.Empty;
             }
 
-            var result = await ProcessOnServer(server, request, routeRequest, cancellationToken);
+            var result = await ProcessOnServer(server, request, routeRequest, logId, cancellationToken);
             return Microsoft.AspNetCore.Http.Results.Json(result);
         }
 
         // Queue the request
         var response = await _queue.EnqueueAsync(routeRequest, cancellationToken);
+
+        // Log queued request completion
+        if (logId != Guid.Empty)
+        {
+            try
+            {
+                var preset = routeRequest.PresetId.HasValue ? _presetManager.GetById(routeRequest.PresetId.Value) : null;
+                await _requestLogger.LogCompletionAsync(logId, null, preset, response, 200,
+                    $"Queued: {response.GeneratedTokenCount} tokens", false, true);
+            }
+            catch { /* Logging failure shouldn't block the response */ }
+        }
 
         // Convert RouteResponse back to OpenAI format
         return Microsoft.AspNetCore.Http.Results.Json(BuildCompletionResponse(request.Model, response));
@@ -189,6 +234,7 @@ public class OpenAiHandler : IProtocolHandler
         ServerInstance server,
         ChatCompletionRequest chatRequest,
         RouteRequest routeRequest,
+        Guid logId,
         CancellationToken cancellationToken)
     {
         var provider = _serverManager.GetProvider(server.Id);
@@ -208,6 +254,18 @@ public class OpenAiHandler : IProtocolHandler
             await _statisticsService.RecordRequestAsync(server, preset, response);
         }
         catch { /* Stats recording failure shouldn't block the response */ }
+
+        // Log request completion
+        if (logId != Guid.Empty)
+        {
+            try
+            {
+                var preset = routeRequest.PresetId.HasValue ? _presetManager.GetById(routeRequest.PresetId.Value) : null;
+                await _requestLogger.LogCompletionAsync(logId, server, preset, response, 200,
+                    $"Non-streaming: {response.GeneratedTokenCount} tokens", false, false);
+            }
+            catch { /* Logging failure shouldn't block the response */ }
+        }
 
         return BuildCompletionResponse(chatRequest.Model, response);
     }

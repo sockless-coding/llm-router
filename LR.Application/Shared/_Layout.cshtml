@@ -99,7 +99,9 @@
     bool isDashboard = path == "/" || path == "";
     bool isServers = path.StartsWith("/Features/Servers");
     bool isPresets = path.StartsWith("/Features/Presets");
+    bool isRequestLog = path.StartsWith("/Features/RequestLog");
     bool isStats = path.StartsWith("/Features/Stats");
+    bool isSettings = path.StartsWith("/Features/Settings");
     string activeStyle = @"color: #00f5ff; background-color: rgba(0,245,255,0.1); border-left-color: #00f5ff";
     string inactiveStyle = @"color: var(--text-secondary)";
 }
@@ -120,10 +122,22 @@
                     <span class="text-sm font-medium">Presets</span>
                 </a>
 
+                <a href="/Features/RequestLog/Index" class="@(isRequestLog ? "border-l-2 " : "hover:text-neon-cyan ") flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isRequestLog ? activeStyle : inactiveStyle)">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+                    <span class="text-sm font-medium">Request Log</span>
+                </a>
+
                 <a href="/Features/Stats/Dashboard" class="@(isStats ? "border-l-2 " : "hover:text-neon-cyan ") flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isStats ? activeStyle : inactiveStyle)">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>
                     <span class="text-sm font-medium">Statistics</span>
                 </a>
+
+                <div class="pt-2 mt-2 border-t" style="border-color: rgba(0,245,255,0.1)">
+                    <a href="/Features/Settings/Index" class="@(isSettings ? "border-l-2 " : "hover:text-neon-cyan ") flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isSettings ? activeStyle : inactiveStyle)">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        <span class="text-sm font-medium">Settings</span>
+                    </a>
+                </div>
             </nav>
 
             <!-- Theme Toggle -->

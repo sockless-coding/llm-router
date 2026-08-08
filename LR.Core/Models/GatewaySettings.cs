@@ -27,4 +27,25 @@ public class GatewaySettings
     /// Default: 300 (5 minutes). Set to -1 for no timeout.
     /// </summary>
     public int QueueTimeoutSeconds { get; set; } = 300;
+
+    // ── Request logging settings ─────────────────────────────────────
+
+    /// <summary>
+    /// Whether to log API requests. When disabled, logging is a no-op (zero overhead).
+    /// Default: true.
+    /// </summary>
+    public bool EnableRequestLogging { get; set; } = true;
+
+    /// <summary>
+    /// Whether to store full payloads in the database.
+    /// When false, backend responses and outgoing payloads are summarized/truncated for privacy and storage efficiency.
+    /// Default: false.
+    /// </summary>
+    public bool LogFullPayloads { get; set; } = false;
+
+    /// <summary>
+    /// How many days to keep request log entries. Logs older than this will be automatically purged.
+    /// Default: 7.
+    /// </summary>
+    public int RequestLogRetentionDays { get; set; } = 7;
 }

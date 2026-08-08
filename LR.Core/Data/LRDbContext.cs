@@ -14,6 +14,7 @@ public class LRDbContext : DbContext
     public DbSet<Models.RoutingRule> RoutingRules => Set<Models.RoutingRule>();
     public DbSet<Models.ModelStatistics> ModelStatistics => Set<Models.ModelStatistics>();
     public DbSet<Models.ServerLog> ServerLogs => Set<Models.ServerLog>();
+    public DbSet<Models.ApiRequestLog> ApiRequestLogs => Set<Models.ApiRequestLog>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -124,6 +125,30 @@ public class LRDbContext : DbContext
 
             // Index for preset-based context usage queries
             entity.HasIndex(e => new { e.PresetId, e.Timestamp });
+        });
+
+        // ApiRequestLog configurations
+        modelBuilder.Entity<Models.ApiRequestLog>(entity =>
+        {
+            entity.ToTable("ApiRequestLogs");
+
+            // Optional FK to ServerInstance — logs survive server deletion
+            entity.HasOne(l => l.ServerInstance)
+                .WithMany()
+                .HasForeignKey(l => l.ServerInstanceId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Optional FK to ModelPreset — logs survive preset deletion
+            entity.HasOne(l => l.Preset)
+                .WithMany()
+                .HasForeignKey(l => l.PresetId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Index for retention cleanup queries (delete old records by timestamp)
+            entity.HasIndex(e => e.Timestamp);
+
+            // Composite index for filtering by protocol + time range
+            entity.HasIndex(e => new { e.Protocol, e.Timestamp });
         });
     }
 }

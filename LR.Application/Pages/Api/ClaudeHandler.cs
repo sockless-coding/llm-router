@@ -20,6 +20,7 @@ public class ClaudeHandler : IProtocolHandler
     private readonly IRoutingEngine _routingEngine;
     private readonly IRequestQueueService _queue;
     private readonly IStatisticsService _statisticsService;
+    private readonly IApiRequestLogger _requestLogger;
 
     public ApiProtocol Protocol => ApiProtocol.Claude;
     public string PathPrefix => "/v1";
@@ -29,13 +30,15 @@ public class ClaudeHandler : IProtocolHandler
         IPresetManager presetManager,
         IRoutingEngine routingEngine,
         IRequestQueueService queue,
-        IStatisticsService statisticsService)
+        IStatisticsService statisticsService,
+        IApiRequestLogger requestLogger)
     {
         _serverManager = serverManager;
         _presetManager = presetManager;
         _routingEngine = routingEngine;
         _queue = queue;
         _statisticsService = statisticsService;
+        _requestLogger = requestLogger;
     }
 
     public Task<object> HandleListModelsAsync()
@@ -53,6 +56,14 @@ public class ClaudeHandler : IProtocolHandler
 
         // Build internal RouteRequest from the Claude request
         var routeRequest = BuildRouteRequest(request);
+
+        // Log incoming request
+        Guid logId = Guid.Empty;
+        try { logId = await _requestLogger.LogIncomingAsync(ApiProtocol.Claude, "/v1/messages", body, request.Model); }
+        catch { /* Logging failure shouldn't block the request */ }
+
+        // Log translated payload
+        if (logId != Guid.Empty) { try { await _requestLogger.LogTranslatedPayloadAsync(logId, routeRequest.Payload); } catch { } }
 
         // Try to find a server immediately
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
@@ -123,6 +134,18 @@ public class ClaudeHandler : IProtocolHandler
                                 await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
                             }
                             catch { /* Stats recording failure shouldn't block the response */ }
+
+                            // Log request completion
+                            if (logId != Guid.Empty)
+                            {
+                                try
+                                {
+                                    var preset = routeRequest.PresetId.HasValue ? _presetManager.GetById(routeRequest.PresetId.Value) : null;
+                                    await _requestLogger.LogCompletionAsync(logId, server, preset, chunk.Response, 200,
+                                        $"Streamed {chunk.Response.GeneratedTokenCount} tokens", true, false);
+                                }
+                                catch { /* Logging failure shouldn't block the response */ }
+                            }
                         }
                         else if (!string.IsNullOrEmpty(chunk.TextDelta))
                         {
@@ -145,12 +168,24 @@ public class ClaudeHandler : IProtocolHandler
                 return Results.Empty;
             }
 
-            var result = await ProcessOnServer(server, request, routeRequest, cancellationToken);
+            var result = await ProcessOnServer(server, request, routeRequest, logId, cancellationToken);
             return Microsoft.AspNetCore.Http.Results.Json(result);
         }
 
         // Queue the request
         var response = await _queue.EnqueueAsync(routeRequest, cancellationToken);
+
+        // Log queued request completion
+        if (logId != Guid.Empty)
+        {
+            try
+            {
+                var preset = routeRequest.PresetId.HasValue ? _presetManager.GetById(routeRequest.PresetId.Value) : null;
+                await _requestLogger.LogCompletionAsync(logId, null, preset, response, 200,
+                    $"Queued: {response.GeneratedTokenCount} tokens", false, true);
+            }
+            catch { /* Logging failure shouldn't block the response */ }
+        }
 
         // Convert RouteResponse back to Claude format
         return Microsoft.AspNetCore.Http.Results.Json(BuildMessageResponse(request.Model, response));
@@ -160,6 +195,7 @@ public class ClaudeHandler : IProtocolHandler
         ServerInstance server,
         CreateMessageRequest chatRequest,
         RouteRequest routeRequest,
+        Guid logId,
         CancellationToken cancellationToken)
     {
         var provider = _serverManager.GetProvider(server.Id);
@@ -179,6 +215,18 @@ public class ClaudeHandler : IProtocolHandler
             await _statisticsService.RecordRequestAsync(server, preset, response);
         }
         catch { /* Stats recording failure shouldn't block the response */ }
+
+        // Log request completion
+        if (logId != Guid.Empty)
+        {
+            try
+            {
+                var preset = routeRequest.PresetId.HasValue ? _presetManager.GetById(routeRequest.PresetId.Value) : null;
+                await _requestLogger.LogCompletionAsync(logId, server, preset, response, 200,
+                    $"Non-streaming: {response.GeneratedTokenCount} tokens", false, false);
+            }
+            catch { /* Logging failure shouldn't block the response */ }
+        }
 
         return BuildMessageResponse(chatRequest.Model, response);
     }

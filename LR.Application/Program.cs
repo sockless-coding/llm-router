@@ -41,6 +41,12 @@ builder.Services.AddScoped<LR.Core.Interfaces.ISignalRProgressPublisher, SignalR
 builder.Services.AddScoped<IServerLogService, LR.Core.Services.ServerLogService>();
 builder.Services.AddScoped<IAutoRestartService, AutoRestartService>();
 
+// API Request Logger (Scoped — needs DbContext for reads/writes)
+builder.Services.AddScoped<IApiRequestLogger, ApiRequestLogger>();
+
+// API Request Logger (Scoped — needs DbContext for reads/writes)
+builder.Services.AddScoped<IApiRequestLogger, ApiRequestLogger>();
+
 // Backend provider factory (mock by default)
 builder.Services.AddSingleton<IBackendProviderFactory>(sp =>
 {
@@ -75,6 +81,12 @@ builder.Services.AddScoped<LR.Application.Pages.Api.OllamaHandler>();
 // Background services
 builder.Services.AddHostedService<ServerHealthMonitorService>();
 builder.Services.AddHostedService<LR.Application.Services.RequestDispatcherService>();
+
+// Retention cleanup for request logs (runs hourly)
+builder.Services.AddHostedService<RetentionCleanupService>();
+
+// Retention cleanup for request logs (runs hourly)
+builder.Services.AddHostedService<RetentionCleanupService>();
 
 var app = builder.Build();
 

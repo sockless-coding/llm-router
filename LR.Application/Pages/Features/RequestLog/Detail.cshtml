@@ -1,0 +1,194 @@
+@page
+@using LR.Core.Models
+@model LR.Application.Pages.Features.RequestLog.DetailModel
+@{
+    ViewData["Title"] = "Request Detail";
+    var log = Model.Log!;
+}
+
+<div class="max-w-7xl mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <a href="/Features/RequestLog/Index" class="text-sm text-neon-cyan hover:underline mb-4 inline-block">← Back to Request Log</a>
+
+    <h1 class="text-3xl font-bold mb-2 text-neon-cyan">📋 Request Detail</h1>
+
+    <!-- Overview Cards -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30 shadow-neon-cyan">
+            <p class="text-xs text-text-secondary">Protocol</p>
+            @{
+                var protocolColor = log.Protocol switch
+                {
+                    ApiProtocol.OpenAI => "text-indigo-400",
+                    ApiProtocol.Claude => "text-orange-400",
+                    ApiProtocol.Ollama => "text-neon-green",
+                    _ => "text-text-secondary"
+                };
+            }
+            <p class="text-xl font-bold mt-1 @protocolColor">@log.ProtocolBadge</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30">
+            <p class="text-xs text-text-secondary">Status</p>
+            @{
+                var statusColor = log.ErrorMessage != null ? "text-red-400" : log.StatusCode >= 500 ? "text-orange-400" : "text-green-400";
+            }
+            <p class="text-xl font-bold mt-1 @statusColor">@log.StatusDisplay @(log.StatusCode)</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30 shadow-neon-magenta">
+            <p class="text-xs text-text-secondary">Latency</p>
+            <p class="text-xl font-bold mt-1 text-neon-magenta">@(log.TotalLatencyMs.HasValue ? string.Format("{0:F1} ms", log.TotalLatencyMs.Value) : "—")</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30 shadow-neon-green">
+            <p class="text-xs text-text-secondary">Tokens</p>
+            <p class="text-lg font-bold mt-1 text-neon-green">@(log.PromptTokensProcessed) in / @(log.GeneratedTokenCount) out</p>
+        </div>
+    </div>
+
+    <!-- Request Flow Visualization -->
+    <div class="bg-cyber-card rounded-xl p-6 border border-gray-700/30 mb-8">
+        <h2 class="text-lg font-semibold mb-4 text-neon-cyan">🔄 Request Flow</h2>
+        <div class="flex items-center gap-3 flex-wrap">
+            <div class="bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-4 py-2 text-sm">
+                <span class="text-indigo-400 font-medium">Client</span><br>
+                <span class="text-xs opacity-60">@log.ProtocolBadge API</span>
+            </div>
+            <span class="text-neon-cyan text-lg">→</span>
+            <div class="bg-neon-cyan/10 border border-neon-cyan/30 rounded-lg px-4 py-2 text-sm">
+                <span class="text-neon-cyan font-medium">Router</span><br>
+                <span class="text-xs opacity-60">@log.EndpointPath</span>
+            </div>
+            <span class="text-neon-cyan text-lg">→</span>
+            @{
+                var server = log.ServerInstance;
+                if (server != null)
+                {
+                    <><div class="bg-neon-green/10 border border-neon-green/30 rounded-lg px-4 py-2 text-sm">
+                        <span class="text-neon-green font-medium">Backend</span><br>
+                        <span class="text-xs opacity-60">@server.Name</span>
+                    </div>
+                    <span class="text-neon-cyan text-lg">→</span></>
+                }
+            }
+            <div class="bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-4 py-2 text-sm">
+                <span class="text-indigo-400 font-medium">Client</span><br>
+                <span class="text-xs opacity-60">@log.StatusCode @if (log.IsStreaming) { <span>Stream</span> } else { <span>JSON</span> }</span>
+            </div>
+        </div>
+
+        <!-- Metadata row -->
+        <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div><span class="text-text-secondary">Model:</span> <span class="text-text-primary font-mono">@log.ModelName</span></div>
+            <div><span class="text-text-secondary">Time:</span> <span class="text-text-primary">@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")</span></div>
+            <div><span class="text-text-secondary">Type:</span> <span class="text-text-primary">@(log.IsStreaming ? "⚡ Streaming" : "Static") @if (log.WasQueued) { <span>| 📥 Queued</span> }</span></div>
+            @{
+                if (log.FirstTokenLatencyMs.HasValue)
+                {
+                    <><div><span class="text-text-secondary">First Token:</span> <span class="text-neon-magenta">@string.Format("{0:F1} ms", log.FirstTokenLatencyMs.Value)</span></div></>
+                }
+            }
+        </div>
+    </div>
+
+    <!-- Error (if any) -->
+    @if (!string.IsNullOrEmpty(log.ErrorMessage))
+    {
+        <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-8">
+            <h2 class="text-lg font-semibold text-red-400 mb-2">❌ Error</h2>
+            <p class="text-sm text-red-300 font-mono whitespace-pre-wrap">@log.ErrorMessage</p>
+        </div>
+    }
+
+    <!-- Payload Accordion Sections -->
+    @{
+        var sections = new (string Title, string Icon, string? Content)[] {
+            ($"Incoming Request ({log.ProtocolBadge})", "📨", log.IncomingPayload),
+            ($"Translated Payload (to Backend)", "🔄", log.TranslatedPayload),
+            ($"Backend Response", "⚙️", log.BackendResponsePayload),
+            ($"Outgoing Response Summary", "📤", log.OutgoingPayloadSummary)
+        };
+    }
+
+    @for (int i = 0; i < sections.Length; i++)
+    {
+        var section = sections[i];
+        bool hasContent = !string.IsNullOrEmpty(section.Content);
+        
+        <div class="bg-cyber-card rounded-xl border @(hasContent ? "border-gray-700/30" : "border-gray-800") mb-4 overflow-hidden">
+            <button onclick="togglePayload(@i)" class="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-neon-cyan/5 transition-colors">
+                <span class="font-semibold @(!hasContent ? "text-text-secondary opacity-60" : "text-text-primary")">
+                    @(section.Icon) @(section.Title)
+                    @if (hasContent)
+                    {
+                        <span class="ml-2 text-xs text-text-secondary font-normal">@string.Format("{0:N0}", section.Content.Length) chars</span>
+                    }
+                </span>
+                @{
+                    var iconId = $"icon-{i}";
+                }
+                <svg id="@iconId" class="w-5 h-5 text-text-secondary transition-transform @(!hasContent ? "opacity-30" : "")" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+            </button>
+
+            @if (hasContent)
+            {
+                <div id="payload-@i" class="hidden border-t border-gray-700/30">
+                    @{
+                        var json = section.Content!;
+                        try
+                        {
+                            using var doc = System.Text.Json.JsonDocument.Parse(json);
+                            json = System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                        }
+                        catch { /* Not valid JSON — show as-is */ }
+                    }
+                    <div class="relative">
+                        <button onclick="copyPayload(@i)" class="absolute top-3 right-3 bg-gray-700/50 hover:bg-neon-cyan/20 text-xs px-3 py-1.5 rounded-lg transition-colors z-10 copy-btn"
+                                data-payload-id="@i">
+                            📋 Copy
+                        </button>
+                        <pre id="json-@i" class="p-5 text-xs font-mono text-text-secondary overflow-x-auto max-h-[600px] bg-gray-900/30"><code>@Html.Raw(json)</code></pre>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="px-5 py-4 text-sm text-text-secondary opacity-50 italic border-t border-gray-800">
+                    No data available for this section.
+                </div>
+            }
+        </div>
+    }
+
+    <!-- Response ID (for OpenAI) -->
+    @if (!string.IsNullOrEmpty(log.ResponseId))
+    {
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30 mb-8">
+            <h2 class="text-sm font-semibold text-text-secondary mb-1">Response ID</h2>
+            <p class="font-mono text-xs text-neon-cyan break-all">@log.ResponseId</p>
+        </div>
+    }
+}
+
+<script>
+function togglePayload(id) {
+    const el = document.getElementById('payload-' + id);
+    const icon = document.getElementById('icon-' + id);
+    if (el.classList.contains('hidden')) {
+        el.classList.remove('hidden');
+        icon.style.transform = 'rotate(180deg)';
+    } else {
+        el.classList.add('hidden');
+        icon.style.transform = 'rotate(0deg)';
+    }
+}
+
+function copyPayload(id) {
+    const pre = document.getElementById('json-' + id);
+    navigator.clipboard.writeText(pre.innerText).then(() => {
+        const btn = document.querySelector(`[data-payload-id="${id}"]`);
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
+    });
+}
+</script>

@@ -23,6 +23,7 @@ public class OllamaHandler : IProtocolHandler
     private readonly IRequestQueueService _queue;
     private readonly IStatisticsService _statisticsService;
     private readonly IGgufMetadataReader _ggufReader;
+    private readonly IApiRequestLogger _requestLogger;
 
     public ApiProtocol Protocol => ApiProtocol.Ollama;
     public string PathPrefix => "/api";
@@ -33,7 +34,8 @@ public class OllamaHandler : IProtocolHandler
         IRoutingEngine routingEngine,
         IRequestQueueService queue,
         IStatisticsService statisticsService,
-        IGgufMetadataReader ggufReader)
+        IGgufMetadataReader ggufReader,
+        IApiRequestLogger requestLogger)
     {
         _serverManager = serverManager;
         _presetManager = presetManager;
@@ -41,6 +43,7 @@ public class OllamaHandler : IProtocolHandler
         _queue = queue;
         _statisticsService = statisticsService;
         _ggufReader = ggufReader;
+        _requestLogger = requestLogger;
     }
 
     public async Task<object> HandleListModelsAsync()
@@ -148,6 +151,14 @@ public class OllamaHandler : IProtocolHandler
         // Build internal RouteRequest from the Ollama request
         var routeRequest = BuildRouteRequest(request);
 
+        // Log incoming request
+        Guid logId = Guid.Empty;
+        try { logId = await _requestLogger.LogIncomingAsync(ApiProtocol.Ollama, "/api/chat", body, request.Model); }
+        catch { /* Logging failure shouldn't block the request */ }
+
+        // Log translated payload
+        if (logId != Guid.Empty) { try { await _requestLogger.LogTranslatedPayloadAsync(logId, routeRequest.Payload); } catch { } }
+
         // Try to find a server immediately
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
         if (server != null)
@@ -207,12 +218,24 @@ public class OllamaHandler : IProtocolHandler
                 return Results.Empty;
             }
 
-            var result = await ProcessOnServer(server, request, routeRequest, cancellationToken);
+            var result = await ProcessOnServer(server, request, routeRequest, logId, cancellationToken);
             return Microsoft.AspNetCore.Http.Results.Json(result);
         }
 
         // Queue the request
         var response = await _queue.EnqueueAsync(routeRequest, cancellationToken);
+
+        // Log queued request completion
+        if (logId != Guid.Empty)
+        {
+            try
+            {
+                var preset = routeRequest.PresetId.HasValue ? _presetManager.GetById(routeRequest.PresetId.Value) : null;
+                await _requestLogger.LogCompletionAsync(logId, null, preset, response, 200,
+                    $"Queued: {response.GeneratedTokenCount} tokens", false, true);
+            }
+            catch { /* Logging failure shouldn't block the response */ }
+        }
 
         // Convert RouteResponse back to Ollama format
         return Microsoft.AspNetCore.Http.Results.Json(BuildChatResponse(request.Model, response));
@@ -222,6 +245,7 @@ public class OllamaHandler : IProtocolHandler
         ServerInstance server,
         ChatRequest chatRequest,
         RouteRequest routeRequest,
+        Guid logId,
         CancellationToken cancellationToken)
     {
         var provider = _serverManager.GetProvider(server.Id);
@@ -241,6 +265,18 @@ public class OllamaHandler : IProtocolHandler
             await _statisticsService.RecordRequestAsync(server, preset, response);
         }
         catch { /* Stats recording failure shouldn't block the response */ }
+
+        // Log request completion
+        if (logId != Guid.Empty)
+        {
+            try
+            {
+                var preset = routeRequest.PresetId.HasValue ? _presetManager.GetById(routeRequest.PresetId.Value) : null;
+                await _requestLogger.LogCompletionAsync(logId, server, preset, response, 200,
+                    $"Non-streaming: {response.GeneratedTokenCount} tokens", false, false);
+            }
+            catch { /* Logging failure shouldn't block the response */ }
+        }
 
         return BuildChatResponse(chatRequest.Model, response);
     }

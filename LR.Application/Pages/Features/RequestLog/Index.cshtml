@@ -1,0 +1,181 @@
+@page
+@using LR.Core.Models
+@model LR.Application.Pages.Features.RequestLog.IndexModel
+@{
+    ViewData["Title"] = "Request Log";
+}
+
+<div class="max-w-7xl mx-auto px-4 py-6">
+    <h1 class="text-3xl font-bold mb-6 text-neon-cyan">📋 API Request Log</h1>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30 shadow-neon-cyan">
+            <p class="text-xs text-text-secondary">Total Today</p>
+            <p class="text-2xl font-bold mt-1 text-neon-cyan">@Model.TotalToday</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30" style="box-shadow: 0 0 8px rgba(99,102,241,0.4), 0 0 20px rgba(99,102,241,0.1);">
+            <p class="text-xs text-text-secondary">OpenAI</p>
+            <p class="text-2xl font-bold mt-1" style="color: #818cf8;">@Model.OpenAIToday</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30" style="box-shadow: 0 0 8px rgba(251,146,60,0.4), 0 0 20px rgba(251,146,60,0.1);">
+            <p class="text-xs text-text-secondary">Claude</p>
+            <p class="text-2xl font-bold mt-1" style="color: #fb923c;">@Model.ClaudeToday</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30 shadow-neon-green">
+            <p class="text-xs text-text-secondary">Ollama</p>
+            <p class="text-2xl font-bold mt-1 text-neon-green">@Model.OllamaToday</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30 shadow-neon-magenta">
+            <p class="text-xs text-text-secondary">Avg Latency</p>
+            <p class="text-2xl font-bold mt-1 text-neon-magenta">@string.Format("{0:F0}", Model.AvgLatencyMs) ms</p>
+        </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30 mb-6">
+        <form method="get" class="flex flex-wrap gap-4 items-center">
+            <!-- Protocol filter -->
+            <div>
+                <label class="block text-xs text-text-secondary mb-1">Protocol</label>
+                <select name="protocol" onchange="this.form.requestSubmit()" class="bg-gray-800 text-text-primary border border-gray-600 rounded-lg px-3 py-2 text-sm">
+                    <option value="@(Model.SelectedProtocol == null ? "selected" : "")">All Protocols</option>
+                    @foreach (var proto in Enum.GetValues<ApiProtocol>())
+                    {
+                        bool isSelected = Model.SelectedProtocol == proto;
+                        <option value="@proto" selected="@(isSelected ? "selected" : null)">@proto.ToString()</option>
+                    }
+                </select>
+            </div>
+
+            <!-- Time range filter -->
+            <div>
+                <label class="block text-xs text-text-secondary mb-1">Time Range</label>
+                <div class="flex gap-1">
+                    @foreach (var range in new[] { "1h", "6h", "24h", "7d" })
+                    {
+                        bool isActive = Model.TimeRange == range;
+                        string activeClass = isActive ? "bg-neon-cyan/20 text-neon-cyan border border-neon-cyan shadow-neon-cyan" : "bg-gray-800/50 text-text-secondary border border-transparent hover:bg-neon-cyan/10 hover:text-neon-cyan";
+                        <a href="?protocol=@(Model.SelectedProtocol?.ToString() ?? "")&timeRange=@range"
+class="px-3 py-2 rounded-lg text-xs font-medium transition-colors @activeClass">
+                            @range
+                        </a>
+                    }
+                </div>
+            </div>
+
+            <div class="ml-auto flex items-end">
+                <span class="text-xs text-text-secondary">Showing @(Model.Logs.Count) of @Model.TotalCount entries</span>
+            </div>
+        </form>
+    </div>
+
+    <!-- Request Log Table -->
+    @if (Model.Logs.Any())
+    {
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Time</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Protocol</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Endpoint</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Model</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Server</th>
+                        <th class="text-right px-4 py-3 text-text-secondary font-medium">Latency</th>
+                        <th class="text-center px-4 py-3 text-text-secondary font-medium">Tokens</th>
+                        <th class="text-center px-4 py-3 text-text-secondary font-medium">Status</th>
+                        <th class="text-right px-4 py-3 text-text-secondary font-medium"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var log in Model.Logs)
+                    {
+                        var protocolColor = log.Protocol switch
+                        {
+                            ApiProtocol.OpenAI => "text-indigo-400",
+                            ApiProtocol.Claude => "text-orange-400",
+                            ApiProtocol.Ollama => "text-neon-green",
+                            _ => "text-text-secondary"
+                        };
+
+                        var statusColor = log.ErrorMessage != null ? "text-red-400 bg-red-400/10" : log.StatusCode >= 500 ? "text-orange-400 bg-orange-400/10" : "text-green-400 bg-green-400/10";
+
+                        <tr class="border-b border-gray-700/20 hover:bg-neon-cyan/5 transition-colors" data-log-id="@log.Id">
+                            <td class="px-4 py-3 text-text-secondary whitespace-nowrap">
+                                @log.Timestamp.ToString("HH:mm:ss")
+                                <span class="text-xs opacity-60">@log.Timestamp.ToString("MM-dd")</span>
+                            </td>
+                            <td class="px-4 py-3">
+                                <span class="font-medium @protocolColor">@log.ProtocolBadge</span>
+                                @if (log.IsStreaming)
+                                {
+                                    <span class="ml-1 text-xs opacity-50">⚡</span>
+                                }
+                            </td>
+                            <td class="px-4 py-3 text-text-primary font-mono text-xs">
+                                @log.EndpointPath
+                            </td>
+                            <td class="px-4 py-3 text-text-secondary max-w-[150px] truncate" title="@log.ModelName">
+                                @log.ModelName
+                            </td>
+                            <td class="px-4 py-3 text-text-secondary">
+                                @{
+                                    var server = log.ServerInstance;
+                                    <text>@(server?.Name ?? "—")</text>
+                                }
+                            </td>
+                            <td class="px-4 py-3 text-right font-mono text-xs text-text-secondary">
+                                @(log.TotalLatencyMs.HasValue ? string.Format("{0:F0}ms", log.TotalLatencyMs.Value) : "—")
+                            </td>
+                            <td class="px-4 py-3 text-center text-xs text-text-secondary">
+                                @if (log.PromptTokensProcessed > 0 || log.GeneratedTokenCount > 0)
+                                {
+                                    <text>@(log.PromptTokensProcessed)/@(log.GeneratedTokenCount)</text>
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                            </td>
+                            <td class="px-4 py-3 text-center">
+                                @{
+                                    var isQueued = log.WasQueued;
+                                    <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium @statusColor">@log.StatusDisplay</span>
+                                    @if (isQueued)
+                                    {
+                                        <span class="ml-1 text-xs opacity-40">📥</span>
+                                    }
+                                }
+                            </td>
+                            <td class="px-4 py-3 text-right">
+                                <a href="/Features/RequestLog/Detail?id=@log.Id" class="text-neon-cyan hover:text-neon-magenta transition-colors" title="View details">🔍</a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <div class="bg-cyber-card rounded-xl p-12 border border-gray-700/30 text-center">
+            <p class="text-text-secondary text-lg">No request logs found</p>
+            <p class="text-text-secondary text-sm mt-2 opacity-60">Send a request through any API endpoint to see it here.</p>
+        </div>
+    }
+
+    <!-- Detail link per row (via JS) -->
+    @if (Model.Logs.Any())
+    {
+        <script>
+            document.querySelectorAll('table tbody tr').forEach(row => {
+                row.style.cursor = 'pointer';
+                row.addEventListener('click', () => {
+                    const logId = row.dataset.logId;
+                    if (logId) window.location.href = `/Features/RequestLog/Detail?id=${logId}`;
+                });
+            });
+        </script>
+    }
+</div>

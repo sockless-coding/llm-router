@@ -92,18 +92,20 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         _scopeFactory = scopeFactory;
 
         // Configure SocketsHttpHandler to handle socket resets gracefully:
-        // - Allow auto-retry on connection failures (handles 10053 / connection aborted errors)
+        // - Short pooled connection lifetime avoids stale connections (llama.cpp may close idle ones)
         // - Limit max connections per server to avoid overloading
         var handler = new System.Net.Http.SocketsHttpHandler
         {
             AutomaticDecompression = System.Net.DecompressionMethods.GZip,
             AllowAutoRedirect = false,
             MaxConnectionsPerServer = 10,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            PooledConnectionLifetime = TimeSpan.FromSeconds(30),
         };
 
         _httpClient = new HttpClient(handler);
-        _httpClient.Timeout = TimeSpan.FromSeconds(30);
+        // Timeout for the entire request (send + receive). Streaming responses use this as a
+        // per-chunk timeout — if no data arrives within this window, the read will cancel.
+        _httpClient.Timeout = TimeSpan.FromMinutes(5);
 
         // Initialize sub-components
         var stdoutParser = new LlamaCppStdoutParser();
@@ -218,51 +220,82 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
 
     public async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
     {
-        try
+        const int maxRetries = 2;
+        Exception? lastException = null;
+
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
         {
-            if (string.IsNullOrEmpty(ServerUrl)) return null;
-
-            // Register this request for timing data collection from stdout
-            var routeResponse = new RouteResponse();
-            _timingCoordinator.EnqueuePending(DateTimeOffset.UtcNow, routeResponse);
-            _logger.LogInformation("[Stats] Enqueued non-streaming request.");
-
-            var response = await _httpClient.PostAsJsonAsync(
-                $"{ServerUrl}/v1/chat/completions",
-                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload),
-                cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
+            if (attempt > 0)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                throw new HttpRequestException($"Chat completion failed: {response.StatusCode} - {errorBody}");
+                _logger.LogWarning("[Attempt {Attempt}/{Max}] Retrying non-streaming request to {ServerUrl}",
+                    attempt + 1, maxRetries + 1, ServerUrl);
+                await Task.Delay(TimeSpan.FromMilliseconds(500 * (int)Math.Pow(2, attempt - 1)), cancellationToken);
             }
 
-            var jsonDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-            LlamaCppResponseParser.ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
+            try
+            {
+                if (string.IsNullOrEmpty(ServerUrl)) return null;
 
-            // Non-streaming request: by the time we get here, stdout parsing should have
-            // already captured completion timing. Merge it into our response.
-            _logger.LogInformation("[Stats] Before merge - PromptMs={PromptMs}, GenMs={GenMs}, TotalMs={TotalMs}",
-                routeResponse.PromptProcessingMs, routeResponse.GenerationMs, routeResponse.TotalLatencyMs);
-            _timingCoordinator.MergeTimingData(routeResponse);
-            _logger.LogInformation("[Stats] After merge - PromptMs={PromptMs:F0}, GenMs={GenMs:F0}, TotalMs={TotalMs:F0}, TokensProcessed={Tokens}",
-                routeResponse.PromptProcessingMs, routeResponse.GenerationMs, routeResponse.TotalLatencyMs, routeResponse.PromptTokensProcessed);
+                // Register this request for timing data collection from stdout
+                var routeResponse = new RouteResponse();
+                _timingCoordinator.EnqueuePending(DateTimeOffset.UtcNow, routeResponse);
+                _logger.LogInformation("[Stats] Enqueued non-streaming request.");
 
-            return routeResponse;
+                var response = await _httpClient.PostAsJsonAsync(
+                    $"{ServerUrl}/v1/chat/completions",
+                    JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload),
+                    cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                    throw new HttpRequestException($"Chat completion failed: {response.StatusCode} - {errorBody}");
+                }
+
+                var jsonDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                LlamaCppResponseParser.ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
+
+                // Non-streaming request: by the time we get here, stdout parsing should have
+                // already captured completion timing. Merge it into our response.
+                _logger.LogInformation("[Stats] Before merge - PromptMs={PromptMs}, GenMs={GenMs}, TotalMs={TotalMs}",
+                    routeResponse.PromptProcessingMs, routeResponse.GenerationMs, routeResponse.TotalLatencyMs);
+                _timingCoordinator.MergeTimingData(routeResponse);
+                _logger.LogInformation("[Stats] After merge - PromptMs={PromptMs:F0}, GenMs={GenMs:F0}, TotalMs={TotalMs:F0}, TokensProcessed={Tokens}",
+                    routeResponse.PromptProcessingMs, routeResponse.GenerationMs, routeResponse.TotalLatencyMs, routeResponse.PromptTokensProcessed);
+
+                return routeResponse;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (System.Net.Http.HttpRequestException ex) when (ex.InnerException is System.IO.IOException && ServerUrl != null)
+            {
+                lastException = ex;
+                _logger.LogWarning(ex, "Transport error while sending request to {ServerUrl} (attempt {Attempt}/{Max}). Retrying...",
+                    ServerUrl, attempt + 1, maxRetries + 1);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
+            {
+                _logger.LogError(ex, "Request failed to {ServerUrl}", ServerUrl);
+                await LogProviderMessage(ServerLogLevel.Error,
+                    $"Request failed: {ex.Message}");
+
+                throw;
+            }
         }
-        catch (OperationCanceledException)
+
+        if (lastException != null)
         {
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
-        {
-            _logger.LogError(ex, "Request failed to {ServerUrl}", ServerUrl);
+            _logger.LogError(lastException, "Non-streaming request failed after {MaxRetries} attempts to {ServerUrl}",
+                maxRetries + 1, ServerUrl);
             await LogProviderMessage(ServerLogLevel.Error,
-                $"Request failed: {ex.Message}");
+                $"Request failed after retries: {lastException.Message}");
 
-            throw;
+            throw new InvalidOperationException($"Failed to send request to {ServerUrl} after {maxRetries + 1} attempts: {lastException.Message}", lastException);
         }
+
+        return null;
     }
 
     /// <summary>
@@ -323,36 +356,74 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         _timingCoordinator.EnqueuePending(DateTimeOffset.UtcNow, streamResponse);
         _logger.LogInformation("[Stats] Enqueued streaming request.");
 
-        try
-        {
-            var requestContent = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-            _logger.LogInformation("Sending streaming request to {ServerUrl}/v1/chat/completions?stream=true", ServerUrl);
-            _logger.LogInformation("Streaming request payload: {Payload}", payload);
-            var response = await _httpClient.PostAsync(
-                $"{ServerUrl}/v1/chat/completions?stream=true",
-                requestContent,
-                cancellationToken);
+        const int maxRetries = 2;
+        Exception? lastException = null;
 
-            if (!response.IsSuccessStatusCode)
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            if (attempt > 0)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                throw new HttpRequestException($"Streaming completion failed: {response.StatusCode} - {errorBody}");
+                _logger.LogWarning("[Attempt {Attempt}/{Max}] Retrying streaming request to {ServerUrl}",
+                    attempt + 1, maxRetries + 1, ServerUrl);
+                // Brief backoff before retry — server may be recovering from a crash/restart
+                await Task.Delay(TimeSpan.FromMilliseconds(500 * (int)Math.Pow(2, attempt - 1)), cancellationToken);
             }
 
-            stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            reader = new StreamReader(stream);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
-        {
-            _logger.LogError(ex, "Streaming request failed to {ServerUrl}", ServerUrl);
-            await LogProviderMessage(ServerLogLevel.Error,
-                $"Streaming request failed: {ex.Message}");
+            try
+            {
+                var requestContent = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+                _logger.LogInformation("Sending streaming request to {ServerUrl}/v1/chat/completions?stream=true (attempt {Attempt})",
+                    ServerUrl, attempt + 1);
+                _logger.LogDebug("Streaming request payload: {Payload}", payload);
+                var response = await _httpClient.PostAsync(
+                    $"{ServerUrl}/v1/chat/completions?stream=true",
+                    requestContent,
+                    cancellationToken);
 
-            throw new InvalidOperationException($"Failed to send streaming request to {ServerUrl}: {ex.Message}", ex);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                    throw new HttpRequestException($"Streaming completion failed: {response.StatusCode} - {errorBody}");
+                }
+
+                stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                reader = new StreamReader(stream);
+                lastException = null; // Success — clear any previous exception
+                break;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (System.Net.Http.HttpRequestException ex) when (ex.InnerException is System.IO.IOException && ServerUrl != null)
+            {
+                // Connection aborted by server — likely a stale pooled connection or server restart.
+                // Error chain: HttpRequestException -> IOException -> SocketException(10053)
+                // Transient and retryable.
+                lastException = ex;
+                _logger.LogWarning(ex, "Transport error while sending request to {ServerUrl} (attempt {Attempt}/{Max}). Retrying...",
+                    ServerUrl, attempt + 1, maxRetries + 1);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
+            {
+                lastException = ex;
+                _logger.LogError(ex, "Streaming request failed to {ServerUrl}", ServerUrl);
+                await LogProviderMessage(ServerLogLevel.Error,
+                    $"Streaming request failed: {ex.Message}");
+
+                throw new InvalidOperationException($"Failed to send streaming request to {ServerUrl}: {ex.Message}", ex);
+            }
+        }
+
+        // If all retries exhausted, throw with a meaningful error
+        if (lastException != null)
+        {
+            _logger.LogError(lastException, "Streaming request failed after {MaxRetries} attempts to {ServerUrl}",
+                maxRetries + 1, ServerUrl);
+            await LogProviderMessage(ServerLogLevel.Error,
+                $"Streaming request failed after retries: {lastException.Message}");
+
+            throw new InvalidOperationException($"Failed to send streaming request to {ServerUrl} after {maxRetries + 1} attempts: {lastException.Message}", lastException);
         }
 
         string? accumulatedText = null;
