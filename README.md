@@ -43,11 +43,49 @@ LLM Router provides a unified interface to route requests across heterogeneous b
 
 ### Running the Application
 
+#### Standalone (console)
+
 ```bash
 dotnet run --project LR.Application
 ```
 
 The application will start and serve a Razor Pages dashboard.
+
+#### As a Windows Service
+
+The same executable can run under the Service Control Manager — it detects how it was
+launched and adapts automatically (no separate build or flag required).
+
+1. Publish the app:
+
+   ```powershell
+   dotnet publish LR.Application -c Release -r win-x64 --self-contained false -o publish
+   ```
+
+2. Install the service (run PowerShell as Administrator):
+
+   ```powershell
+   .\install-service.ps1
+   ```
+
+   By default this creates a service named `LLMRouter` pointing at
+   `LR.Application\bin\Release\net10.0\win-x64\publish\LR.Application.exe`. Pass
+   `-PublishDir` if you published elsewhere.
+
+3. Start it:
+
+   ```powershell
+   Start-Service LLMRouter
+   ```
+
+   Logs go to the Windows Event Log (source `LLM Router`, log `Application`) since
+   there's no console attached when running as a service.
+
+4. To remove it (run as Administrator):
+
+   ```powershell
+   .\uninstall-service.ps1
+   ```
 
 ## Configuration
 

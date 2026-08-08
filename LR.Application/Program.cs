@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting.WindowsServices;
 
 using LR.Core.Data;
 using LR.Core.Interfaces;
@@ -9,6 +10,21 @@ using LR.Application.Services;
 using LR.Application.Pages.Api;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Windows Service support — no-ops when launched standalone (console/dotnet run);
+// when launched by the Service Control Manager it fixes the content root (which would
+// otherwise default to C:\Windows\System32) and swaps in a service-aware lifetime.
+builder.Host.UseWindowsService(options =>
+{
+    options.ServiceName = "LLMRouter";
+});
+
+if (OperatingSystem.IsWindows())
+{
+    // Console logging isn't visible when running as a service, so also write to the
+    // Windows Event Log.
+    AddEventLogging(builder.Logging);
+}
 
 // Razor Pages with vertical slice structure
 builder.Services.AddRazorPages();
@@ -174,3 +190,10 @@ if (enabledProtocols.Contains(ApiProtocol.Ollama))
 }
 
 app.Run();
+
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
+static void AddEventLogging(ILoggingBuilder logging)
+{
+    var settings = new Microsoft.Extensions.Logging.EventLog.EventLogSettings { SourceName = "LLM Router" };
+    logging.AddEventLog(settings);
+}
