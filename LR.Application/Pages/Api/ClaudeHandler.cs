@@ -161,19 +161,37 @@ public class ClaudeHandler : IProtocolHandler
                                 catch { /* Logging failure shouldn't block the response */ }
                             }
                         }
-                        else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                        else if (!string.IsNullOrEmpty(chunk.ReasoningContentDelta) || !string.IsNullOrEmpty(chunk.TextDelta))
                         {
-                            // content_block_delta event
-                            await httpResponse.WriteAsync($"event: content_block_delta\ndata: {JsonSerializer.Serialize(new ContentBlockDeltaData
+                            // Send thinking_delta event for reasoning content first (Claude protocol)
+                            if (!string.IsNullOrEmpty(chunk.ReasoningContentDelta))
                             {
-                                Type = "content_block_delta",
-                                Index = 0,
-                                Delta = new DeltaContentBlockDelta
+                                await httpResponse.WriteAsync($"event: content_block_delta\ndata: {JsonSerializer.Serialize(new ContentBlockDeltaData
                                 {
-                                    Type = "text_delta",
-                                    Text = chunk.TextDelta
-                                }
-                            })}\r\n\r\n", cancellationToken);
+                                    Type = "content_block_delta",
+                                    Index = 0,
+                                    Delta = new DeltaContentBlockDelta
+                                    {
+                                        Type = "thinking_delta",
+                                        Thinking = chunk.ReasoningContentDelta
+                                    }
+                                })}\r\n\r\n", cancellationToken);
+                            }
+
+                            // Send text_delta event for regular content
+                            if (!string.IsNullOrEmpty(chunk.TextDelta))
+                            {
+                                await httpResponse.WriteAsync($"event: content_block_delta\ndata: {JsonSerializer.Serialize(new ContentBlockDeltaData
+                                {
+                                    Type = "content_block_delta",
+                                    Index = 0,
+                                    Delta = new DeltaContentBlockDelta
+                                    {
+                                        Type = "text_delta",
+                                        Text = chunk.TextDelta
+                                    }
+                                })}\r\n\r\n", cancellationToken);
+                            }
                         }
 
                         await httpResponse.Body.FlushAsync(cancellationToken);

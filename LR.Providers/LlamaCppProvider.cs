@@ -427,6 +427,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         }
 
         string? accumulatedText = null;
+        int reasoningContentChunkCount = 0;
         bool completed = false;
 
         while (!completed && !cancellationToken.IsCancellationRequested)
@@ -446,8 +447,9 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                 using var jsonDoc = JsonDocument.Parse(data);
                 var root = jsonDoc.RootElement;
 
-                // Extract text delta from choices[0].delta.content
+                // Extract text delta from choices[0].delta.content and reasoning_content
                 string? textDelta = null;
+                string? reasoningContentDelta = null;
                 if (root.TryGetProperty("choices", out JsonElement choices) && choices.GetArrayLength() > 0)
                 {
                     var firstChoice = choices[0];
@@ -455,6 +457,11 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                     {
                         textDelta = delta.TryGetProperty("content", out JsonElement content)
                             ? content.GetString()
+                            : null;
+
+                        // Extract reasoning_content for models with thinking/reasoning capabilities
+                        reasoningContentDelta = delta.TryGetProperty("reasoning_content", out JsonElement reasoningContent)
+                            ? reasoningContent.GetString()
                             : null;
                     }
 
@@ -466,13 +473,26 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                     if (!string.IsNullOrEmpty(textDelta))
                     {
                         accumulatedText += textDelta;
-                        chunk = new RouteStreamChunk { TextDelta = textDelta, IsFinal = false };
+                        chunk = new RouteStreamChunk { TextDelta = textDelta, ReasoningContentDelta = reasoningContentDelta, IsFinal = false };
+                    }
+
+                    // Track reasoning content chunks for token counting
+                    if (!string.IsNullOrEmpty(reasoningContentDelta))
+                    {
+                        reasoningContentChunkCount++;
+                    }
+
+                    else if (!string.IsNullOrEmpty(reasoningContentDelta))
+                    {
+                        // Yield reasoning content even when there's no regular text delta
+                        chunk = new RouteStreamChunk { TextDelta = string.Empty, ReasoningContentDelta = reasoningContentDelta, IsFinal = false };
                     }
 
                     // If finish_reason is set and we have usage data, send final chunk
                     if (finishReason != null)
                     {
                         LlamaCppResponseParser.BuildRouteResponseFromStreamInto(accumulatedText ?? string.Empty, root, streamResponse);
+                        streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
                         _logger.LogInformation("[Stats] Stream complete - Before merge PromptMs={PromptMs}, GenMs={GenMs}",
                             streamResponse.PromptProcessingMs, streamResponse.GenerationMs);
                         // Merge timing data from stdout parsing

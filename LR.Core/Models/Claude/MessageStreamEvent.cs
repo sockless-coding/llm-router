@@ -82,8 +82,18 @@ public class DeltaContentBlockDelta
     [JsonPropertyName("type")]
     public string Type { get; set; } = "text_delta";
 
+    /// <summary>
+    /// Text content for text_delta type.
+    /// </summary>
     [JsonPropertyName("text")]
-    public string Text { get; set; } = string.Empty;
+    public string? Text { get; set; }
+
+    /// <summary>
+    /// Thinking/reasoning content for thinking_delta type.
+    /// Used when the model has reasoning capabilities enabled.
+    /// </summary>
+    [JsonPropertyName("thinking")]
+    public string? Thinking { get; set; }
 }
 
 /// <summary>

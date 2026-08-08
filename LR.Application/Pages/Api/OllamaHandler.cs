@@ -215,13 +215,15 @@ public class OllamaHandler : IProtocolHandler
                         }
                         catch { /* Stats recording failure shouldn't block the response */ }
                     }
-                    else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                    else if (!string.IsNullOrEmpty(chunk.TextDelta) || !string.IsNullOrEmpty(chunk.ReasoningContentDelta))
                     {
+                        // Concatenate reasoning content with text for Ollama's simple Content field
+                        var content = string.Concat(chunk.ReasoningContentDelta, chunk.TextDelta);
                         await httpResponse.WriteAsync(JsonSerializer.Serialize(new ChatResponse
                         {
                             Model = request.Model,
                             CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                            Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = chunk.TextDelta },
+                            Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = content },
                             Done = false
                         }) + "\n", cancellationToken);
                     }
@@ -351,13 +353,15 @@ public class OllamaHandler : IProtocolHandler
                         }
                         catch { /* Stats recording failure shouldn't block the response */ }
                     }
-                    else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                    else if (!string.IsNullOrEmpty(chunk.TextDelta) || !string.IsNullOrEmpty(chunk.ReasoningContentDelta))
                     {
+                        // Concatenate reasoning content with text for Ollama's simple Response field
+                        var responseText = string.Concat(chunk.ReasoningContentDelta, chunk.TextDelta);
                         await httpResponse.WriteAsync(JsonSerializer.Serialize(new GenerateResponse
                         {
                             Model = request.Model,
                             CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                            Response = chunk.TextDelta,
+                            Response = responseText,
                             Done = false
                         }) + "\n", cancellationToken);
                     }

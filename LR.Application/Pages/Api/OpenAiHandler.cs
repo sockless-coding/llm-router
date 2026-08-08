@@ -194,7 +194,7 @@ public class OpenAiHandler : IProtocolHandler
                                 catch { /* Logging failure shouldn't block the response */ }
                             }
                         }
-                        else if (!string.IsNullOrEmpty(chunk.TextDelta))
+                        else if (!string.IsNullOrEmpty(chunk.TextDelta) || !string.IsNullOrEmpty(chunk.ReasoningContentDelta))
                         {
                             await httpResponse.WriteAsync($"data: {JsonSerializer.Serialize(new ChatCompletionChunk
                             {
@@ -206,7 +206,11 @@ public class OpenAiHandler : IProtocolHandler
                                     new ChunkChoice
                                     {
                                         Index = 0,
-                                        Delta = new DeltaMessage { Content = ChatMessageContent.FromText(chunk.TextDelta) }
+                                        Delta = new DeltaMessage
+                                        {
+                                            Content = !string.IsNullOrEmpty(chunk.TextDelta) ? ChatMessageContent.FromText(chunk.TextDelta) : null,
+                                            ReasoningContent = chunk.ReasoningContentDelta
+                                        }
                                     }
                                 }
                             })}\r\n\r\n", cancellationToken);
