@@ -84,6 +84,19 @@ public class ServerManager : IServerManager
         if (instance.Status == ServerStatus.Running)
             return true;
 
+        return await StartOrRestartAsync(instance, isRestart: false, cancellationToken);
+    }
+
+    /// <summary>
+    /// Shared implementation behind <see cref="StartAsync"/> and the live-swap path of
+    /// <see cref="RestartWithPresetAsync"/>. When <paramref name="isRestart"/> is true, the
+    /// provider's <see cref="IBackendProvider.RestartProcessAsync"/> is used instead of
+    /// <see cref="IBackendProvider.StartProcessAsync"/> — for wrapper-backed providers this
+    /// swaps the model on the already-connected wrapper without disturbing companion/support
+    /// processes, instead of tearing everything down first.
+    /// </summary>
+    private async Task<bool> StartOrRestartAsync(ServerInstance instance, bool isRestart, CancellationToken cancellationToken)
+    {
         var provider = GetOrCreateProvider(instance);
 
         // Re-configure the provider with the latest config from the database
@@ -118,19 +131,22 @@ public class ServerManager : IServerManager
         // Set status to Starting and persist immediately — then offload to background task
         instance.Status = ServerStatus.Starting;
         await LogLifecycleEvent(instance, ServerLogLevel.Info,
-            $"Starting server '{instance.Name}' on port {instance.Port}...");
+            $"{(isRestart ? "Restarting" : "Starting")} server '{instance.Name}' on port {instance.Port}...");
 
         var progressEvent = new StartupProgressEvent
         {
             InstanceId = instance.Id,
             EventType = StartupEventType.Starting,
-            Message = $"Server '{instance.Name}' is starting...",
+            Message = $"Server '{instance.Name}' is {(isRestart ? "restarting" : "starting")}...",
             ElapsedSeconds = 0
         };
         await BroadcastStartupProgress(progressEvent);
 
         // Offload the actual startup to a background task so the API returns immediately
         var scopeFactory = _scopeFactory;
+        Func<ModelPreset, int?, Func<StartupProgressEvent, Task>?, CancellationToken, Task<bool>> invokeProvider =
+            isRestart ? provider.RestartProcessAsync : provider.StartProcessAsync;
+
         _ = Task.Run(async () =>
         {
             try
@@ -138,9 +154,9 @@ public class ServerManager : IServerManager
                 using var scope = scopeFactory.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
 
-                bool started = await provider.StartProcessAsync(
+                bool started = await invokeProvider(
                     preset!, instance.Port,
-                    onProgress: async (e) =>
+                    async (e) =>
                     {
                         e.InstanceId = instance.Id; // ensure correct ID
                         if (e.EventType == StartupEventType.Healthy)
@@ -250,14 +266,21 @@ public class ServerManager : IServerManager
 
     public async Task<bool> RestartWithPresetAsync(Guid instanceId, Guid presetId, CancellationToken cancellationToken = default)
     {
-        var instance = await GetInstanceOrThrow(instanceId);
-        var preset = await _context.ModelPresets.FindAsync(presetId) ?? throw new ArgumentException("Preset not found.", nameof(presetId));
-
-        if (instance.Status == ServerStatus.Running)
-            await StopAsync(instanceId, cancellationToken);
+        var instance = await _context.ServerInstances
+            .Include(s => s.Config)
+            .FirstOrDefaultAsync(s => s.Id == instanceId)
+            ?? throw new KeyNotFoundException($"Server instance {instanceId} not found.");
+        _ = await _context.ModelPresets.FindAsync(presetId) ?? throw new ArgumentException("Preset not found.", nameof(presetId));
 
         instance.ActivePresetId = presetId;
-        return await StartAsync(instanceId, cancellationToken);
+        await _context.SaveChangesAsync();
+
+        if (instance.Status != ServerStatus.Running)
+            return await StartAsync(instanceId, cancellationToken);
+
+        // Live-swap the model without a full stop, so companion/support processes (e.g. a GPU
+        // VRAM keeper) aren't disturbed by the preset change.
+        return await StartOrRestartAsync(instance, isRestart: true, cancellationToken);
     }
 
     public async Task<bool> StartWithPresetAsync(Guid instanceId, Guid presetId, CancellationToken cancellationToken = default)

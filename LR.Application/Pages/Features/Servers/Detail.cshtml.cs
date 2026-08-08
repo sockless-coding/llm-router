@@ -12,6 +12,12 @@ public class ServerDetailModel : PageModel
     public Core.Models.ServerInstance? Server { get; set; }
     public IReadOnlyList<Core.Models.ServerLog> Logs { get; set; } = new List<Core.Models.ServerLog>();
 
+    /// <summary>Wrapper process ID, if a wrapper is currently connected for this server. Diagnostics only.</summary>
+    public int? WrapperPid { get; set; }
+
+    /// <summary>Managed server process ID, if currently running. Diagnostics only.</summary>
+    public int? ServerPid { get; set; }
+
     [BindProperty(SupportsGet = true)]
     public Guid Id { get; set; }
 
@@ -29,6 +35,12 @@ public class ServerDetailModel : PageModel
         if (Server != null)
         {
             Logs = await _logService.GetLogsAsync(Server.Id, 200);
+
+            if (_serverManager.GetProvider(Server.Id) is IWrapperDiagnostics diagnostics)
+            {
+                WrapperPid = diagnostics.WrapperPid;
+                ServerPid = diagnostics.ServerPid;
+            }
         }
     }
 

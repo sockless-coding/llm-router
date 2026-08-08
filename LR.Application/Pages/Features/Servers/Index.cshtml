@@ -57,6 +57,7 @@
                                     <span class="w-2 h-2 rounded-full
                                         @if (server.Status == ServerStatus.Running) { <text>bg-neon-green</text> }
                                         else if (server.Status == ServerStatus.Starting || server.Status == ServerStatus.Stopping) { <text>bg-yellow-500 animate-pulse</text> }
+                                        else if (server.Status == ServerStatus.Reconnecting) { <text>bg-blue-400 animate-pulse</text> }
                                         else if (server.Status == ServerStatus.Error) { <text>bg-neon-red</text> }
                                         else { <text>bg-gray-400</text> }"></span>
                                     @server.Status
@@ -76,7 +77,7 @@
                                     Stop
                                 </button>
                             }
-                            else if (server.Status != ServerStatus.Starting)
+                            else if (server.Status != ServerStatus.Starting && server.Status != ServerStatus.Reconnecting)
                             {
                                 <button type="button" onclick="startServer('@server.Id')" id="btn-start-@server.Id"
                                         class="text-neon-green hover:text-neon-green/80 transition-colors mr-3 inline-flex items-center gap-1" title="Start server">
@@ -89,6 +90,13 @@
                                 <span class="text-yellow-500 mr-3 inline-flex items-center gap-1">
                                     <svg class="w-4 h-4 animate-spin" aria-hidden="true" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
                                     Starting
+                                </span>
+                            }
+                            else if (server.Status == ServerStatus.Reconnecting)
+                            {
+                                <span class="text-blue-400 mr-3 inline-flex items-center gap-1">
+                                    <svg class="w-4 h-4 animate-spin" aria-hidden="true" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                    Reconnecting
                                 </span>
                             }
                             <a href="/Features/Servers/Edit?Id=@server.Id" class="text-neon-cyan hover:text-neon-cyan/80 transition-colors mr-3">Edit</a>

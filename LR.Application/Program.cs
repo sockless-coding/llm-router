@@ -41,6 +41,10 @@ builder.Services.AddScoped<LR.Core.Interfaces.ISignalRProgressPublisher, SignalR
 builder.Services.AddScoped<IServerLogService, LR.Core.Services.ServerLogService>();
 builder.Services.AddScoped<IAutoRestartService, AutoRestartService>();
 
+// Boot-time reconciliation for wrapper processes that outlived a previous router process
+// (Scoped — needs DbContext; invoked explicitly below, not a BackgroundService).
+builder.Services.AddScoped<LR.Application.Services.WrapperReconciliationService>();
+
 // API Request Logger (Scoped — needs DbContext for reads/writes)
 builder.Services.AddScoped<IApiRequestLogger, ApiRequestLogger>();
 
@@ -99,6 +103,14 @@ using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
     context.Database.Migrate();
+}
+
+// Re-attach to any wrapper processes that outlived a previous router process before accepting
+// requests, so the DB/UI reflect reality (not stale pre-restart state) from the first page load.
+using (var scope = app.Services.CreateScope())
+{
+    var reconciliation = scope.ServiceProvider.GetRequiredService<LR.Application.Services.WrapperReconciliationService>();
+    await reconciliation.ReconcileAsync();
 }
 
 app.UseStaticFiles();

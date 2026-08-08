@@ -12,4 +12,10 @@ public enum ServerStatus
     Running = 2,
     Stopping = 3,
     Error = 4,
+
+    /// <summary>
+    /// Transient status set while the router's boot-time reconciliation pass is
+    /// re-attaching to a wrapper process that outlived a previous router process.
+    /// </summary>
+    Reconnecting = 5,
 }

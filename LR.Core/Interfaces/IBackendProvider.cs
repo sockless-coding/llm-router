@@ -27,6 +27,22 @@ public interface IBackendProvider
     Task StopProcessAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Restarts the server process with a new preset without disturbing any companion/support
+    /// processes the provider may be managing alongside it (e.g. a GPU companion app). Falls
+    /// back to full start semantics if nothing is currently running. Same progress/timeout
+    /// contract as <see cref="StartProcessAsync"/>.
+    /// </summary>
+    Task<bool> RestartProcessAsync(ModelPreset preset, int? port = null, Func<StartupProgressEvent, Task>? onProgress = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Attempts to re-attach to a process this provider previously started, which may still be
+    /// running after the router itself restarted. Returns true if a live, running server was
+    /// found and reattached (with output/health monitoring resumed); false if there was nothing
+    /// to reattach to. Providers with no such out-of-process persistence mechanism return false.
+    /// </summary>
+    Task<bool> TryReconnectAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Checks whether the server is alive and responsive.
     /// Returns true if healthy, false otherwise.
     /// </summary>

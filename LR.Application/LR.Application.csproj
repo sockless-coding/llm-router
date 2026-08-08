@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\LR.Core\LR.Core.csproj" />
     <ProjectReference Include="..\LR.Providers\LR.Providers.csproj" />
+    <ProjectReference Include="..\LR.Wrapper\LR.Wrapper.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

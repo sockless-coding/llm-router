@@ -14,9 +14,15 @@ namespace LR.Providers;
 /// Thin orchestrator for llama.cpp-based backend providers.
 /// Delegates to specialized components: ArgBuilder, ProcessManager, ResponseParser, TimingCoordinator.
 /// </summary>
-public class LlamaCppProvider : IBackendProvider, IDisposable
+public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposable
 {
     public ServerEngine Engine => ServerEngine.LlamaCpp;
+
+    /// <inheritdoc />
+    public int? WrapperPid => _processManager.WrapperPid;
+
+    /// <inheritdoc />
+    public int? ServerPid => _processManager.ServerPid;
 
     /// <summary>
     /// Path to the folder containing the llama.cpp server executable (e.g., "llama-server").
@@ -66,7 +72,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
     protected BackendType? GpuBackendType { get; set; }
 
     private readonly LlamaCppArgBuilder _argBuilder;
-    private readonly LlamaCppProcessManager _processManager;
+    private readonly WrapperProcessManager _processManager;
     private readonly LlamaCppTimingCoordinator _timingCoordinator;
 
     /// <summary>
@@ -121,10 +127,10 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
         {
             var serviceProvider = scope.ServiceProvider;
             var timingLogger = serviceProvider.GetRequiredService<ILogger<LlamaCppTimingCoordinator>>();
-            var processManagerLogger = serviceProvider.GetRequiredService<ILogger<LlamaCppProcessManager>>();
+            var processManagerLogger = serviceProvider.GetRequiredService<ILogger<WrapperProcessManager>>();
 
             _timingCoordinator = new LlamaCppTimingCoordinator(timingLogger);
-            _processManager = new LlamaCppProcessManager(processManagerLogger, scopeFactory, _timingCoordinator, stdoutParser);
+            _processManager = new WrapperProcessManager(processManagerLogger, scopeFactory, _timingCoordinator, stdoutParser);
         }
     }
 
@@ -195,6 +201,25 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
             await LogProviderMessage(ServerLogLevel.Info, $"Server started successfully on {ServerUrl}.");
 
         return result;
+    }
+
+    /// <summary>
+    /// Restarts the server with a new preset without disturbing the companion app — the wrapper's
+    /// start command is idempotent with respect to the companion, so this is identical to
+    /// <see cref="StartProcessAsync"/> under the hood.
+    /// </summary>
+    public Task<bool> RestartProcessAsync(ModelPreset preset, int? port = null, Func<StartupProgressEvent, Task>? onProgress = null, CancellationToken cancellationToken = default)
+        => StartProcessAsync(preset, port, onProgress, cancellationToken);
+
+    public async Task<bool> TryReconnectAsync(CancellationToken cancellationToken = default)
+    {
+        bool reconnected = await _processManager.TryReconnectAsync(cancellationToken);
+        if (reconnected)
+        {
+            Port = _processManager.Port;
+            await LogProviderMessage(ServerLogLevel.Info, $"Reattached to an already-running server on {ServerUrl}.");
+        }
+        return reconnected;
     }
 
     public async Task StopProcessAsync(CancellationToken cancellationToken = default)

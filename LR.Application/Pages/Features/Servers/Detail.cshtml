@@ -33,6 +33,7 @@ else
                     <span aria-hidden="true" class="w-2 h-2 rounded-full
                         @if (Model.Server.Status == ServerStatus.Running) { <text>bg-neon-green</text> }
                         else if (Model.Server.Status == ServerStatus.Starting || Model.Server.Status == ServerStatus.Stopping) { <text>bg-yellow-500 animate-pulse</text> }
+                        else if (Model.Server.Status == ServerStatus.Reconnecting) { <text>bg-blue-400 animate-pulse</text> }
                         else if (Model.Server.Status == ServerStatus.Error) { <text>bg-neon-red</text> }
                         else { <text>bg-gray-400</text> }"></span>
                     <span class="text-sm text-text-primary">@Model.Server.Status</span>
@@ -45,6 +46,12 @@ else
             <div>
                 <span class="text-xs text-text-secondary uppercase tracking-wider">Restarts</span>
                 <p class="text-sm text-text-primary mt-1">@Model.Server.RestartCount / @Model.Server.MaxRestarts</p>
+            </div>
+            <div>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Process IDs</span>
+                <p class="text-sm text-text-primary mt-1" title="Wrapper process / managed server process">
+                    @(Model.WrapperPid?.ToString() ?? "—") / @(Model.ServerPid?.ToString() ?? "—")
+                </p>
             </div>
         </div>
 
