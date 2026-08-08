@@ -86,6 +86,10 @@ public class ClaudeHandler : IProtocolHandler
             if (request.Stream)
             {
                     httpResponse.StatusCode = 200;
+                    httpResponse.Headers.ContentType = "text/event-stream";
+                    httpResponse.Headers.CacheControl = "no-cache";
+                    // Disable Kestrel response buffering so writes go directly to the socket
+                    httpResponse.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
 
                 var provider = _serverManager.GetProvider(server.Id);
                 if (provider is null)

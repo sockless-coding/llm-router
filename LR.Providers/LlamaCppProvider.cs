@@ -375,9 +375,17 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                 _logger.LogInformation("Sending streaming request to {ServerUrl}/v1/chat/completions?stream=true (attempt {Attempt})",
                     ServerUrl, attempt + 1);
                 _logger.LogDebug("Streaming request payload: {Payload}", payload);
-                var response = await _httpClient.PostAsync(
-                    $"{ServerUrl}/v1/chat/completions?stream=true",
-                    requestContent,
+
+                // Use SendAsync with ResponseHeadersRead so the call returns as soon as headers arrive,
+                // allowing chunks to flow through the stream incrementally instead of buffering
+                // the entire response before yielding.
+                var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{ServerUrl}/v1/chat/completions?stream=true")
+                {
+                    Content = requestContent
+                };
+                var response = await _httpClient.SendAsync(
+                    httpRequest,
+                    HttpCompletionOption.ResponseHeadersRead,
                     cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
@@ -441,7 +449,9 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
             string data = line.Substring(5).Trim();
             if (string.IsNullOrEmpty(data) || data == "[DONE]") continue;
 
-            RouteStreamChunk? chunk = null;
+            // A single SSE frame can carry the last content token AND finish_reason together
+            // (common for short answers) — collect both so neither is dropped.
+            var chunksToYield = new List<RouteStreamChunk>(2);
             try
             {
                 using var jsonDoc = JsonDocument.Parse(data);
@@ -473,19 +483,18 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                     if (!string.IsNullOrEmpty(textDelta))
                     {
                         accumulatedText += textDelta;
-                        chunk = new RouteStreamChunk { TextDelta = textDelta, ReasoningContentDelta = reasoningContentDelta, IsFinal = false };
+                        chunksToYield.Add(new RouteStreamChunk { TextDelta = textDelta, ReasoningContentDelta = reasoningContentDelta, IsFinal = false });
+                    }
+                    else if (!string.IsNullOrEmpty(reasoningContentDelta))
+                    {
+                        // Yield reasoning content even when there's no regular text delta
+                        chunksToYield.Add(new RouteStreamChunk { TextDelta = string.Empty, ReasoningContentDelta = reasoningContentDelta, IsFinal = false });
                     }
 
                     // Track reasoning content chunks for token counting
                     if (!string.IsNullOrEmpty(reasoningContentDelta))
                     {
                         reasoningContentChunkCount++;
-                    }
-
-                    else if (!string.IsNullOrEmpty(reasoningContentDelta))
-                    {
-                        // Yield reasoning content even when there's no regular text delta
-                        chunk = new RouteStreamChunk { TextDelta = string.Empty, ReasoningContentDelta = reasoningContentDelta, IsFinal = false };
                     }
 
                     // If finish_reason is set and we have usage data, send final chunk
@@ -499,7 +508,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                         _timingCoordinator.MergeTimingData(streamResponse);
                         _logger.LogInformation("[Stats] Stream complete - After merge PromptMs={PromptMs}, GenMs={GenMs}, TotalMs={TotalMs}",
                             streamResponse.PromptProcessingMs, streamResponse.GenerationMs, streamResponse.TotalLatencyMs);
-                        chunk = new RouteStreamChunk { IsFinal = true, Response = streamResponse };
+                        chunksToYield.Add(new RouteStreamChunk { IsFinal = true, Response = streamResponse });
                         completed = true;
                     }
                 }
@@ -510,7 +519,7 @@ public class LlamaCppProvider : IBackendProvider, IDisposable
                 continue;
             }
 
-            if (chunk != null)
+            foreach (var chunk in chunksToYield)
                 yield return chunk;
         }
 

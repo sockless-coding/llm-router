@@ -182,6 +182,8 @@ public class OllamaHandler : IProtocolHandler
                 httpResponse.StatusCode = 200;
                 httpResponse.Headers.ContentType = "application/x-ndjson";
                 httpResponse.Headers.CacheControl = "no-cache";
+                // Disable Kestrel response buffering so writes go directly to the socket
+                httpResponse.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
 
                 var provider = _serverManager.GetProvider(server.Id);
                 if (provider is null)
@@ -324,6 +326,8 @@ public class OllamaHandler : IProtocolHandler
                 httpResponse.StatusCode = 200;
                 httpResponse.Headers.ContentType = "application/x-ndjson";
                 httpResponse.Headers.CacheControl = "no-cache";
+                // Disable Kestrel response buffering so writes go directly to the socket
+                httpResponse.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
 
                 await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
                 {

@@ -120,10 +120,15 @@ public class OpenAiHandler : IProtocolHandler
             if (request.Stream)
             {
                     httpResponse.StatusCode = 200;
+                    httpResponse.Headers.ContentType = "text/event-stream";
+                    httpResponse.Headers.CacheControl = "no-cache";
 
                 var provider = _serverManager.GetProvider(server.Id);
                 if (provider is null)
                     return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
+
+                // Write directly to BodyWriter to bypass HttpResponseStreamWriter's internal buffer
+                var bodyWriter = httpResponse.BodyWriter;
 
                 var completionId = $"chatcmpl-{Guid.NewGuid():N}";
                     var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -132,7 +137,7 @@ public class OpenAiHandler : IProtocolHandler
                     if (logId != Guid.Empty) { try { await _requestLogger.LogResponseIdAsync(logId, completionId); } catch { } }
 
                     // Yield first chunk with role
-                    await httpResponse.WriteAsync($"data: {JsonSerializer.Serialize(new ChatCompletionChunk
+                    var firstChunk = $"data: {JsonSerializer.Serialize(new ChatCompletionChunk
                     {
                         Id = completionId,
                         Created = created,
@@ -145,8 +150,9 @@ public class OpenAiHandler : IProtocolHandler
                                 Delta = new DeltaMessage { Role = "assistant", Content = ChatMessageContent.FromText(string.Empty) }
                             }
                         }
-                    })}\r\n\r\n", cancellationToken);
-                    await httpResponse.Body.FlushAsync(cancellationToken);
+                    })}\r\n\r\n";
+                    await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(firstChunk), cancellationToken);
+                    await bodyWriter.FlushAsync(cancellationToken);
 
                     await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, backendToken))
                     {
@@ -154,9 +160,9 @@ public class OpenAiHandler : IProtocolHandler
 
                         if (chunk.IsFinal && chunk.Response is not null)
                         {
-                            // Final chunk with finish_reason and timings
+                            // Final chunk with finish_reason, usage, and timings
                             var timing = BuildTimings(chunk.Response);
-                            await httpResponse.WriteAsync($"data: {JsonSerializer.Serialize(new ChatCompletionChunk
+                            var finalChunkText = $"data: {JsonSerializer.Serialize(new ChatCompletionChunk
                             {
                                 Id = completionId,
                                 Created = created,
@@ -170,8 +176,16 @@ public class OpenAiHandler : IProtocolHandler
                                         FinishReason = "stop"
                                     }
                                 },
+                                Usage = new Usage
+                                {
+                                    PromptTokens = chunk.Response.PromptTokensProcessed,
+                                    CompletionTokens = chunk.Response.GeneratedTokenCount,
+                                    TotalTokens = chunk.Response.PromptTokensProcessed + chunk.Response.GeneratedTokenCount
+                                },
                                 Timings = timing
-                            })}\r\n\r\n", cancellationToken);
+                            })}\r\n\r\n";
+                            await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(finalChunkText), cancellationToken);
+                            await bodyWriter.FlushAsync(cancellationToken);
 
                             // Record statistics from final response
                             try
@@ -196,7 +210,7 @@ public class OpenAiHandler : IProtocolHandler
                         }
                         else if (!string.IsNullOrEmpty(chunk.TextDelta) || !string.IsNullOrEmpty(chunk.ReasoningContentDelta))
                         {
-                            await httpResponse.WriteAsync($"data: {JsonSerializer.Serialize(new ChatCompletionChunk
+                            var dataText = $"data: {JsonSerializer.Serialize(new ChatCompletionChunk
                             {
                                 Id = completionId,
                                 Created = created,
@@ -213,15 +227,16 @@ public class OpenAiHandler : IProtocolHandler
                                         }
                                     }
                                 }
-                            })}\r\n\r\n", cancellationToken);
+                            })}\r\n\r\n";
+                            await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(dataText), cancellationToken);
                         }
 
-                        await httpResponse.Body.FlushAsync(cancellationToken);
+                        await bodyWriter.FlushAsync(cancellationToken);
                     }
 
                     // Signal end of stream
-                    await httpResponse.WriteAsync("data: [DONE]\r\n\r\n", cancellationToken);
-                    await httpResponse.Body.FlushAsync(cancellationToken);
+                    await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes("data: [DONE]\r\n\r\n"), cancellationToken);
+                    await bodyWriter.FlushAsync(cancellationToken);
 
                 return Results.Empty;
             }
