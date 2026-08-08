@@ -25,8 +25,14 @@ public class RoutingEngine : IRoutingEngine
 
     public async Task<ServerInstance?> RouteAsync(RouteRequest request, CancellationToken cancellationToken = default)
     {
-        // 1. Evaluate rules by priority from database
-        var rules = await _context.RoutingRules.OrderBy(r => r.Priority).ToListAsync();
+        // Resolve which preset (i.e. which model) this request actually wants, up front.
+        // Every path below uses this so we always route to — and (re)start if necessary —
+        // the one server instance that owns the requested model, instead of silently handing
+        // the request to whatever instance happens to already be running a different model.
+        var targetPreset = await ResolveTargetPresetAsync(request, cancellationToken);
+
+        // 1. Evaluate rules by priority from database (admin-defined overrides)
+        var rules = await _context.RoutingRules.OrderBy(r => r.Priority).ToListAsync(cancellationToken);
 
         foreach (var rule in rules)
         {
@@ -37,25 +43,32 @@ public class RoutingEngine : IRoutingEngine
             if (instance is null)
                 continue;
 
-            // Server matches the rule and is running/healthy — return it immediately
-            // IsBusy is [NotMapped] so meaningless across requests; queue handles concurrency.
-            if (instance.Status == ServerStatus.Running && instance.IsHealthy)
-                return instance;
+            var ready = await EnsureInstanceServesPresetAsync(instance, targetPreset, cancellationToken);
+            if (ready is not null)
+                return ready;
+        }
 
-            // Server matches but is idle/errored — try to auto-start it
-            if (await _serverManager.TryAutoStartAsync(rule.TargetServerInstanceId, cancellationToken))
+        // 2. Known model — route straight to (and start/restart as needed) the server instance
+        // that owns the matching preset, whether it's idle, errored, or currently running a
+        // different model.
+        if (targetPreset is not null)
+        {
+            var instance = await GetInstanceAsync(targetPreset.ServerInstanceId, cancellationToken);
+            if (instance is not null)
             {
-                var startedInstance = await GetInstanceAsync(rule.TargetServerInstanceId, cancellationToken);
-                if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
-                    return startedInstance;
+                var ready = await EnsureInstanceServesPresetAsync(instance, targetPreset, cancellationToken);
+                if (ready is not null)
+                    return ready;
             }
         }
 
-        // 2. Fallback: round-robin among healthy running servers
+        // 3. Fallback: round-robin among healthy running servers already serving the requested
+        // model (or any healthy server if we couldn't resolve which model was requested).
         // IsBusy is [NotMapped] so meaningless across requests; queue handles concurrency.
         var allInstances = _serverManager.GetAllInstances();
         var healthyInstances = allInstances
             .Where(s => s.Status == ServerStatus.Running && s.IsHealthy)
+            .Where(s => targetPreset is null || s.ActivePresetId == targetPreset.Id)
             .ToList();
 
         if (healthyInstances.Count > 0)
@@ -65,82 +78,101 @@ public class RoutingEngine : IRoutingEngine
             return instance;
         }
 
-        // 3. No running server found — try to auto-start an idle one that matches the request by PresetId
+        // 4. Still nothing, and we don't even know which model was requested — try starting
+        // any idle server with a valid preset so *something* can serve the request. (When a
+        // model WAS resolved, step 2 above already tried its designated instance — starting an
+        // unrelated idle server here would just serve the wrong model.)
+        if (targetPreset is null)
+        {
+            var idleInstances = allInstances
+                .Where(s => s.Status == ServerStatus.Idle || s.Status == ServerStatus.Error)
+                .ToList();
+
+            foreach (var instance in idleInstances)
+            {
+                if (await _serverManager.TryAutoStartAsync(instance.Id, cancellationToken))
+                {
+                    var startedInstance = await GetInstanceAsync(instance.Id, cancellationToken);
+                    if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
+                        return startedInstance;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves the ModelPreset a request targets, preferring an explicit PresetId and
+    /// falling back to a case-sensitive model name lookup. Returns null if the request
+    /// doesn't map to any known preset.
+    /// </summary>
+    private async Task<ModelPreset?> ResolveTargetPresetAsync(RouteRequest request, CancellationToken cancellationToken)
+    {
         if (request.PresetId.HasValue)
         {
-            var preset = await _context.ModelPresets.FindAsync(request.PresetId.Value);
+            var preset = await _context.ModelPresets.FindAsync([request.PresetId.Value], cancellationToken);
             if (preset is not null)
-            {
-                var instance = await GetInstanceAsync(preset.ServerInstanceId, cancellationToken);
-                // If the server is already running and healthy, return it directly
-                if (instance is not null && instance.Status == ServerStatus.Running && instance.IsHealthy)
-                    return instance;
-
-                if (instance is not null && instance.Status != ServerStatus.Running)
-                {
-                    // Set this preset as active before starting
-                    if (instance.ActivePresetId != request.PresetId.Value)
-                    {
-                        instance.ActivePresetId = request.PresetId.Value;
-                        await _context.SaveChangesAsync();
-                    }
-
-                    if (await _serverManager.TryAutoStartAsync(preset.ServerInstanceId, cancellationToken))
-                    {
-                        var startedInstance = await GetInstanceAsync(preset.ServerInstanceId, cancellationToken);
-                        if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
-                            return startedInstance;
-                    }
-                }
-            }
+                return preset;
         }
 
-        // 4. Try by model name — find any server with a matching preset
         if (!string.IsNullOrWhiteSpace(request.ModelName))
+            return await _context.ModelPresets.FirstOrDefaultAsync(p => p.Name == request.ModelName, cancellationToken);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Ensures the given instance is running the requested preset's model, (re)starting it if
+    /// needed. Returns the instance immediately if it's already running the correct model and
+    /// healthy. Otherwise kicks off a start/restart in the background (model loading can take a
+    /// while) and returns null so the caller queues the request until the instance comes up.
+    /// </summary>
+    private async Task<ServerInstance?> EnsureInstanceServesPresetAsync(ServerInstance instance, ModelPreset? targetPreset, CancellationToken cancellationToken)
+    {
+        // No specific model resolved for this request — any running, healthy instance will do.
+        if (targetPreset is null)
         {
-            var matchingPreset = await _context.ModelPresets
-                .FirstOrDefaultAsync(p => p.Name == request.ModelName, cancellationToken);
+            if (instance.Status == ServerStatus.Running && instance.IsHealthy)
+                return instance;
 
-            if (matchingPreset is not null)
+            if (instance.Status == ServerStatus.Idle || instance.Status == ServerStatus.Error)
             {
-                var instance = await GetInstanceAsync(matchingPreset.ServerInstanceId, cancellationToken);
-                // If the server is already running and healthy, return it directly
-                if (instance is not null && instance.Status == ServerStatus.Running && instance.IsHealthy)
-                    return instance;
-
-                if (instance is not null && instance.Status != ServerStatus.Running)
+                if (await _serverManager.TryAutoStartAsync(instance.Id, cancellationToken))
                 {
-                    if (instance.ActivePresetId != matchingPreset.Id)
-                    {
-                        instance.ActivePresetId = matchingPreset.Id;
-                        await _context.SaveChangesAsync();
-                    }
-
-                    if (await _serverManager.TryAutoStartAsync(matchingPreset.ServerInstanceId, cancellationToken))
-                    {
-                        var startedInstance = await GetInstanceAsync(matchingPreset.ServerInstanceId, cancellationToken);
-                        if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
-                            return startedInstance;
-                    }
+                    var started = await GetInstanceAsync(instance.Id, cancellationToken);
+                    if (started?.Status == ServerStatus.Running && started.IsHealthy)
+                        return started;
                 }
             }
+
+            return null;
         }
 
-        // 5. Last resort: try to auto-start any idle server with a valid preset
-        var idleInstances = allInstances
-            .Where(s => s.Status == ServerStatus.Idle || s.Status == ServerStatus.Error)
-            .ToList();
+        // Already running the requested model — use it directly.
+        if (instance.Status == ServerStatus.Running && instance.IsHealthy && instance.ActivePresetId == targetPreset.Id)
+            return instance;
 
-        foreach (var instance in idleInstances)
+        // Running, but a DIFFERENT model is loaded — stop it and restart with the correct preset.
+        if (instance.Status == ServerStatus.Running && instance.ActivePresetId != targetPreset.Id)
         {
-            if (await _serverManager.TryAutoStartAsync(instance.Id, cancellationToken))
-            {
-                var startedInstance = await GetInstanceAsync(instance.Id, cancellationToken);
-                if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
-                    return startedInstance;
-            }
+            await _serverManager.RestartWithPresetAsync(instance.Id, targetPreset.Id, cancellationToken);
+            return null; // restart runs in the background — caller should queue/retry
         }
 
+        // Idle/errored — activate the requested preset and start it.
+        if (instance.Status == ServerStatus.Idle || instance.Status == ServerStatus.Error)
+        {
+            if (instance.ActivePresetId != targetPreset.Id)
+            {
+                instance.ActivePresetId = targetPreset.Id;
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            await _serverManager.TryAutoStartAsync(instance.Id, cancellationToken);
+        }
+
+        // Starting/Stopping (already in flight, possibly from the branches above) — wait it out.
         return null;
     }
 

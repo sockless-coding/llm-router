@@ -20,10 +20,11 @@ public class ChatRequest
     public List<ChatMessage> Messages { get; set; } = new();
 
     /// <summary>
-    /// Whether to stream the response as JSON lines.
+    /// Whether to stream the response as JSON lines. Defaults to true, matching Ollama's API behavior
+    /// (a client that omits "stream" expects a streamed response).
     /// </summary>
     [JsonPropertyName("stream")]
-    public bool Stream { get; set; }
+    public bool Stream { get; set; } = true;
 
     /// <summary>
     /// Additional options for model inference.
@@ -54,6 +55,21 @@ public class ChatOptions
 
     [JsonPropertyName("top_p")]
     public double? TopP { get; set; }
+
+    [JsonPropertyName("min_p")]
+    public double? MinP { get; set; }
+
+    [JsonPropertyName("repeat_penalty")]
+    public double? RepeatPenalty { get; set; }
+
+    [JsonPropertyName("presence_penalty")]
+    public double? PresencePenalty { get; set; }
+
+    [JsonPropertyName("frequency_penalty")]
+    public double? FrequencyPenalty { get; set; }
+
+    [JsonPropertyName("seed")]
+    public int? Seed { get; set; }
 
     [JsonPropertyName("stop")]
     public string[]? Stop { get; set; }

@@ -174,6 +174,21 @@ public class ChatCompletionRequest
     /// </summary>
     [JsonPropertyName("prediction")]
     public ChatPrediction? Prediction { get; set; }
+
+    // --- llama.cpp server extensions (not part of the official OpenAI spec, but accepted
+    // by llama.cpp's /v1/chat/completions as top-level sampling params) ---
+
+    /// <summary>Limits next-token selection to the K most probable tokens.</summary>
+    [JsonPropertyName("top_k")]
+    public int? TopK { get; set; }
+
+    /// <summary>Minimum probability (relative to the most likely token) for a token to be considered.</summary>
+    [JsonPropertyName("min_p")]
+    public float? MinP { get; set; }
+
+    /// <summary>Penalizes tokens that have already appeared, to reduce repetition.</summary>
+    [JsonPropertyName("repeat_penalty")]
+    public float? RepeatPenalty { get; set; }
 }
 
 /// <summary>

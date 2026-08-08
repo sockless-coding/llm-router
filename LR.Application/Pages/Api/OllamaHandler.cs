@@ -527,6 +527,12 @@ public class OllamaHandler : IProtocolHandler
             Stream = ollamaRequest.Stream,
             Temperature = ollamaRequest.Options != null && ollamaRequest.Options.Temperature.HasValue ? (float)ollamaRequest.Options.Temperature.Value : null,
             TopP = ollamaRequest.Options != null && ollamaRequest.Options.TopP.HasValue ? (float)ollamaRequest.Options.TopP.Value : null,
+            TopK = ollamaRequest.Options?.TopK,
+            MinP = ollamaRequest.Options != null && ollamaRequest.Options.MinP.HasValue ? (float)ollamaRequest.Options.MinP.Value : null,
+            RepeatPenalty = ollamaRequest.Options != null && ollamaRequest.Options.RepeatPenalty.HasValue ? (float)ollamaRequest.Options.RepeatPenalty.Value : null,
+            PresencePenalty = ollamaRequest.Options != null && ollamaRequest.Options.PresencePenalty.HasValue ? (float)ollamaRequest.Options.PresencePenalty.Value : null,
+            FrequencyPenalty = ollamaRequest.Options != null && ollamaRequest.Options.FrequencyPenalty.HasValue ? (float)ollamaRequest.Options.FrequencyPenalty.Value : null,
+            Seed = ollamaRequest.Options?.Seed,
             MaxTokens = ollamaRequest.Options?.NumPredict,
             Stop = ollamaRequest.Options?.Stop,
             Messages = ollamaRequest.Messages.Select(m => new LR.Core.Models.OpenAI.ChatMessage
@@ -535,6 +541,14 @@ public class OllamaHandler : IProtocolHandler
                 Content = ChatMessageContent.FromText(m.Content)
             }).ToList()
         };
+
+        // llama.cpp (like OpenAI) only includes token usage in the SSE stream when
+        // stream_options.include_usage is set. Force it on so prompt_eval_count/eval_count
+        // are populated in the final streamed chunk instead of always reading 0.
+        if (openAiRequest.Stream)
+        {
+            openAiRequest.StreamOptions = new StreamOptions { IncludeUsage = true };
+        }
 
         return new RouteRequest
         {
@@ -566,10 +580,24 @@ public class OllamaHandler : IProtocolHandler
             Stream = generateRequest.Stream,
             Temperature = generateRequest.Options != null && generateRequest.Options.Temperature.HasValue ? (float)generateRequest.Options.Temperature.Value : null,
             TopP = generateRequest.Options != null && generateRequest.Options.TopP.HasValue ? (float)generateRequest.Options.TopP.Value : null,
+            TopK = generateRequest.Options?.TopK,
+            MinP = generateRequest.Options != null && generateRequest.Options.MinP.HasValue ? (float)generateRequest.Options.MinP.Value : null,
+            RepeatPenalty = generateRequest.Options != null && generateRequest.Options.RepeatPenalty.HasValue ? (float)generateRequest.Options.RepeatPenalty.Value : null,
+            PresencePenalty = generateRequest.Options != null && generateRequest.Options.PresencePenalty.HasValue ? (float)generateRequest.Options.PresencePenalty.Value : null,
+            FrequencyPenalty = generateRequest.Options != null && generateRequest.Options.FrequencyPenalty.HasValue ? (float)generateRequest.Options.FrequencyPenalty.Value : null,
+            Seed = generateRequest.Options?.Seed,
             MaxTokens = generateRequest.Options?.NumPredict,
             Stop = generateRequest.Options?.Stop,
             Messages = messages
         };
+
+        // llama.cpp (like OpenAI) only includes token usage in the SSE stream when
+        // stream_options.include_usage is set. Force it on so prompt_eval_count/eval_count
+        // are populated in the final streamed chunk instead of always reading 0.
+        if (openAiRequest.Stream)
+        {
+            openAiRequest.StreamOptions = new StreamOptions { IncludeUsage = true };
+        }
 
         return new RouteRequest
         {

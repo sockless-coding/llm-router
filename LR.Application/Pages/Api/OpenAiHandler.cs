@@ -93,24 +93,12 @@ public class OpenAiHandler : IProtocolHandler
             backendCts.CancelAfter(TimeSpan.FromSeconds(_gatewaySettings.BackendTimeoutSeconds));
         }
 
-        // Use the HTTP context token for routing (fast DB query — safe to cancel on client disconnect)
+        // Use the HTTP context token for routing (fast DB query — safe to cancel on client disconnect).
+        // RouteAsync itself takes care of starting/restarting the server for the requested model
+        // when needed; if it returns null here, that (re)start is running in the background and
+        // we queue the request below — same as the Ollama and Claude handlers — instead of
+        // failing the request outright.
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
-        if (server is null)
-        {
-            // No available servers — check if any are running at all for a better error message
-            var instances = await _serverManager.GetAllInstancesAsync();
-            bool anyRunning = instances.Any(s => s.Status == Core.Models.ServerStatus.Running);
-            string errorMsg = !anyRunning
-                ? "No inference servers are currently running. Start a server before sending requests."
-                : "All inference servers are busy or unhealthy. Try again later.";
-            int errorStatus = 503;
-
-            if (logId != Guid.Empty) { try { await _requestLogger.LogErrorAsync(logId, errorMsg, errorStatus); } catch { } }
-
-            if (!anyRunning)
-                return Results.Problem(errorMsg, statusCode: errorStatus);
-            return Results.Problem(errorMsg, statusCode: errorStatus);
-        }
 
         // Backend token — survives client disconnect but respects the backend timeout
         var backendToken = backendCts?.Token ?? CancellationToken.None;

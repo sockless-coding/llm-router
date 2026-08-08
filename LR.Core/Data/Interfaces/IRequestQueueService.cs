@@ -19,9 +19,12 @@ public interface IRequestQueueService
     void ServerAvailable(Guid serverId);
 
     /// <summary>
-    /// Try to dequeue a pending request. Returns true if a request was dequeued.
+    /// Try to dequeue the oldest pending request that can be served by a server whose active
+    /// preset is <paramref name="activePresetId"/>. A request with no resolved preset (unknown
+    /// model) matches any server. Requests that don't match are left in the queue in their
+    /// original relative order. Returns true if a request was dequeued.
     /// </summary>
-    bool TryDequeue(out (RouteRequest Request, TaskCompletionSource<RouteResponse> Tcs) item);
+    bool TryDequeueMatching(Guid? activePresetId, out (RouteRequest Request, TaskCompletionSource<RouteResponse> Tcs) item);
 
     /// <summary>
     /// Check if there are any pending requests in the queue.

@@ -59,12 +59,40 @@ public class RequestQueueService : IRequestQueueService, IDisposable
     }
 
     /// <summary>
-    /// Try to dequeue a pending request. Returns true if a request was dequeued.
+    /// Try to dequeue the oldest pending request that can be served by a server whose active
+    /// preset is <paramref name="activePresetId"/>. A request with no resolved preset (unknown
+    /// model) matches any server. Non-matching requests are drained and put back so their
+    /// relative order is preserved — Channel&lt;T&gt; has no peek/skip API, so this is O(queue depth)
+    /// per call, which is acceptable given the queue is only ever a handful of in-flight requests.
     /// </summary>
-    public bool TryDequeue(out (RouteRequest Request, TaskCompletionSource<RouteResponse> Tcs) item)
+    public bool TryDequeueMatching(Guid? activePresetId, out (RouteRequest Request, TaskCompletionSource<RouteResponse> Tcs) item)
     {
         item = default!;
-        return _channel?.Reader.TryRead(out item!) == true;
+        if (_channel == null) return false;
+
+        var requeue = new List<(RouteRequest Request, TaskCompletionSource<RouteResponse> Tcs)>();
+        bool found = false;
+
+        while (_channel.Reader.TryRead(out var candidate))
+        {
+            // Already abandoned by the caller (client disconnected / queue timeout) — drop it.
+            if (candidate.Tcs.Task.IsCanceled)
+                continue;
+
+            if (!found && (candidate.Request.PresetId is null || candidate.Request.PresetId == activePresetId))
+            {
+                item = candidate;
+                found = true;
+                continue;
+            }
+
+            requeue.Add(candidate);
+        }
+
+        foreach (var pending in requeue)
+            _channel.Writer.TryWrite(pending);
+
+        return found;
     }
 
     /// <summary>

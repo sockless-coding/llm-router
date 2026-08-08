@@ -46,14 +46,14 @@ public class RequestDispatcherService : BackgroundService
 
                 foreach (var server in availableServers)
                 {
-                    if (_queue.TryDequeue(out var item))
+                    // Only dispatch a queued request to a server that's actually running the
+                    // model it asked for (or, for requests with no resolvable model, any server).
+                    // Otherwise a request for model B could be silently answered by a server
+                    // currently running model A.
+                    if (_queue.TryDequeueMatching(server.ActivePresetId, out var item))
                     {
-                        // Check that the request wasn't cancelled while waiting
-                        if (!item.Tcs.Task.IsCanceled)
-                        {
-                            _ = ProcessRequestOnServer(server, item.Request, serverManager,
-                                item.Tcs, statisticsService, stoppingToken);
-                        }
+                        _ = ProcessRequestOnServer(server, item.Request, serverManager,
+                            item.Tcs, statisticsService, stoppingToken);
                     }
                 }
             }
