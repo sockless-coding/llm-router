@@ -5,130 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] — Sockless LLM Router</title>
 
-    <!-- Tailwind CSS via CDN (for dev only — for production, install as PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation ) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- Chart.js for statistics dashboard -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <!-- Applied before first paint so a saved light-mode preference doesn't flash dark first -->
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        neon: {
-                            cyan: 'var(--neon-cyan)',
-                            magenta: 'var(--neon-magenta)',
-                            green: 'var(--neon-green)',
-                            red: 'var(--neon-red)',
-                        },
-                        cyber: {
-                            card: 'var(--bg-card)',
-                            surface: 'var(--bg-surface)',
-                        }
-                    }
-                }
-            }
+        if (localStorage.getItem('theme') === 'light') {
+            document.documentElement.classList.remove('dark');
         }
     </script>
-    <style>
-        /* ── Custom theme variables (for responsive dark/light) ── */
-        :root {
-            --bg-main: #f0f0f5;
-            --bg-surface: #ffffff;
-            --bg-card: #fafafe;
-            --text-primary: #1a1a2e;
-            --text-secondary: #6b7280;
-            /* Darkened/desaturated so neon accents keep >= 4.5:1 contrast against light backgrounds (WCAG AA) */
-            --neon-cyan: #0e7490;
-            --neon-magenta: #a21caf;
-            --neon-green: #047857;
-            --neon-red: #b91c1c;
-        }
 
-        html.dark {
-            --bg-main: #0a0a0f;
-            --bg-surface: #12121c;
-            --bg-card: #1a1a2e;
-            --text-primary: #f0f0f5;
-            --text-secondary: #9ca3af;
-            /* Full-brightness neon on near-black backgrounds — contrast is already high here */
-            --neon-cyan: #00f5ff;
-            --neon-magenta: #ff00ff;
-            --neon-green: #00ff88;
-            --neon-red: #ff2e63;
-        }
-
-        /* Cyberpunk scrollbar */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: var(--bg-card); }
-        ::-webkit-scrollbar-thumb { background: rgba(0, 245, 255, 0.267); border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(0, 245, 255, 0.533); }
-
-        /* ── Neon text utilities (var-based so they stay WCAG AA-contrast in light mode) ── */
-        .text-neon-cyan { color: var(--neon-cyan); }
-        .text-neon-magenta { color: var(--neon-magenta); }
-        .text-neon-green { color: var(--neon-green); }
-        .text-neon-red { color: var(--neon-red); }
-        html.dark .text-neon-cyan { text-shadow: 0 0 10px rgba(0,245,255,0.3); }
-        html.dark .text-neon-magenta { text-shadow: 0 0 10px rgba(255,0,255,0.3); }
-        html.dark .text-neon-green { text-shadow: 0 0 10px rgba(0,255,136,0.3); }
-
-        /* ── Theme-aware text colors (auto dark/light) ── */
-        .text-text-primary { color: var(--text-primary); }
-        .text-text-secondary { color: var(--text-secondary); }
-
-        /* ── Cyberpunk background utilities (CSS variable-based, auto dark/light) ── */
-        .bg-cyber-card { background-color: var(--bg-card); }
-        .bg-cyber-surface { background-color: var(--bg-surface); }
-        .bg-cyber-bg-dark { background-color: var(--bg-main); }
-
-        /* ── Neon box shadows ── */
-        .shadow-neon-cyan { box-shadow: 0 0 8px rgba(0,245,255,0.4), 0 0 20px rgba(0,245,255,0.1); }
-        .shadow-neon-magenta { box-shadow: 0 0 8px rgba(255,0,255,0.4), 0 0 20px rgba(255,0,255,0.1); }
-        .shadow-neon-green { box-shadow: 0 0 8px rgba(0,255,136,0.4), 0 0 20px rgba(0,255,136,0.1); }
-
-        /* Glow animation */
-        @@keyframes glow {
-            0% { box-shadow: 0 0 5px rgba(0,245,255,0.2); }
-            100% { box-shadow: 0 0 20px rgba(0,245,255,0.6), 0 0 40px rgba(0,245,255,0.2); }
-        }
-        .animate-glow { animation: glow 2s ease-in-out infinite alternate; }
-
-        /* ── Accessible focus ring (kept visible even where outline-none removes the UA default) ── */
-        a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
-        textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
-            outline: 2px solid var(--neon-cyan);
-            outline-offset: 2px;
-            border-radius: 2px;
-        }
-
-        /* ── Skip link: hidden until keyboard-focused ── */
-        .skip-link {
-            position: absolute;
-            left: -9999px;
-            top: 0;
-            z-index: 100;
-            padding: 0.75rem 1.25rem;
-            background-color: var(--bg-surface);
-            color: var(--neon-cyan);
-            border: 1px solid var(--neon-cyan);
-            border-radius: 0.375rem;
-            font-weight: 600;
-        }
-        .skip-link:focus {
-            left: 1rem;
-            top: 1rem;
-        }
-    </style>
+    <!-- Self-hosted Tailwind build + theme (see Styles/site.css, built via `npm run build:css`) -->
+    <link rel="stylesheet" href="~/css/site.css" />
 </head>
-<body style="background-color: var(--bg-main); color: var(--text-primary)" class="min-h-screen transition-colors duration-300">
+<body style="background-color: var(--bg-main); color: var(--text-primary)" class="h-screen overflow-hidden transition-colors duration-300">
 
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
-    <div class="flex min-h-screen">
-        <!-- Sidebar -->
-        <aside style="background-color: var(--bg-surface); border-right: 1px solid rgba(0,245,255,0.1)" class="w-64 flex flex-col">
+    <div class="flex h-screen overflow-hidden">
+        <!-- Sidebar (fixed to viewport height — scrolls internally if the nav ever overflows, but never scrolls with page content) -->
+        <aside style="background-color: var(--bg-surface); border-right: 1px solid rgba(0,245,255,0.1)" class="w-64 flex flex-col h-full shrink-0">
             <!-- Logo -->
             <div class="p-5" style="border-bottom: 1px solid rgba(0,245,255,0.1)">
                 <h1 class="text-lg font-bold text-neon-cyan tracking-wider"><span aria-hidden="true">⚡</span> Sockless</h1>
@@ -149,7 +42,7 @@
     string inactiveClasses = "hover:text-neon-cyan ";
 }
             <!-- Navigation -->
-            <nav class="flex-1 p-3 space-y-1" aria-label="Main navigation">
+            <nav class="flex-1 overflow-y-auto p-3 space-y-1" aria-label="Main navigation">
                 <a href="/" aria-current="@(isDashboard ? "page" : null)" class="@(isDashboard ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isDashboard ? activeStyle : inactiveStyle)">
                     <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1" /></svg>
                     <span class="text-sm font-medium">Dashboard</span>
@@ -184,7 +77,7 @@
             </nav>
 
             <!-- Theme Toggle -->
-            <div class="p-3" style="border-top: 1px solid rgba(0,245,255,0.1)">
+            <div class="p-3 shrink-0" style="border-top: 1px solid rgba(0,245,255,0.1)">
                 <button id="themeToggle" type="button" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:text-neon-magenta transition-all"
                         style="color: var(--text-secondary)"
                         aria-pressed="true"
@@ -196,9 +89,9 @@
         </aside>
 
         <!-- Main Content -->
-        <main class="flex-1 overflow-auto">
+        <main class="flex-1 flex flex-col overflow-hidden">
             <!-- Top Bar -->
-            <header style="background-color: var(--bg-surface); border-bottom: 1px solid rgba(0,245,255,0.1)" class="px-6 py-4 flex items-center justify-between">
+            <header style="background-color: var(--bg-surface); border-bottom: 1px solid rgba(0,245,255,0.1)" class="px-6 py-4 flex items-center justify-between shrink-0">
                 <h2 style="color: var(--text-primary)" class="text-xl font-semibold">@ViewData["Title"]</h2>
                 <div class="flex items-center gap-4">
                     <!-- Status indicator -->
@@ -209,8 +102,8 @@
                 </div>
             </header>
 
-            <!-- Page Content -->
-            <div id="main-content" class="p-6" tabindex="-1">
+            <!-- Page Content (the only region that scrolls) -->
+            <div id="main-content" class="flex-1 overflow-y-auto p-6" tabindex="-1">
                 @RenderBody()
             </div>
         </main>
@@ -237,19 +130,13 @@
             }
         }
 
-        // Restore theme preference on load
+        // Sync the toggle button's label/state with the theme applied in <head> (see inline
+        // pre-paint script above) — the class itself is already set by the time this runs.
         (function () {
-            const saved = localStorage.getItem('theme');
+            const isDark = document.documentElement.classList.contains('dark');
             const toggleBtn = document.getElementById('themeToggle');
-            if (saved === 'light') {
-                document.documentElement.classList.remove('dark');
-                document.getElementById('themeLabel').textContent = 'Dark Mode';
-                toggleBtn.setAttribute('aria-pressed', 'false');
-            } else {
-                document.documentElement.classList.add('dark');
-                document.getElementById('themeLabel').textContent = 'Light Mode';
-                toggleBtn.setAttribute('aria-pressed', 'true');
-            }
+            document.getElementById('themeLabel').textContent = isDark ? 'Light Mode' : 'Dark Mode';
+            toggleBtn.setAttribute('aria-pressed', String(isDark));
         })();
     </script>
 </body>

@@ -1,0 +1,13 @@
+{
+  "name": "lr-application-assets",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Self-hosted CSS build for the LLM Router UI (no CDN dependencies at runtime).",
+  "scripts": {
+    "build:css": "tailwindcss -i ./Styles/site.css -o ./wwwroot/css/site.css --minify",
+    "watch:css": "tailwindcss -i ./Styles/site.css -o ./wwwroot/css/site.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.14"
+  }
+}
