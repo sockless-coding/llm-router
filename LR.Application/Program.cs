@@ -93,6 +93,11 @@ builder.Services.AddScoped<IApiRequestLogger, ApiRequestLogger>();
 // API Request Logger (Scoped — needs DbContext for reads/writes)
 builder.Services.AddScoped<IApiRequestLogger, ApiRequestLogger>();
 
+// Responses API conversation-chain reconstruction (Scoped — needs DbContext) and the
+// singleton registry of in-flight background responses' cancellation tokens.
+builder.Services.AddScoped<ResponseChainBuilder>();
+builder.Services.AddSingleton<IBackgroundResponseRegistry, BackgroundResponseRegistry>();
+
 // Backend provider factory (mock by default)
 builder.Services.AddSingleton<IBackendProviderFactory>(sp =>
 {
@@ -127,6 +132,7 @@ builder.Services.AddSingleton<IRequestQueueService, RequestQueueService>();
 builder.Services.AddScoped<LR.Application.Pages.Api.OpenAiHandler>();
 builder.Services.AddScoped<LR.Application.Pages.Api.ClaudeHandler>();
 builder.Services.AddScoped<LR.Application.Pages.Api.OllamaHandler>();
+builder.Services.AddScoped<LR.Application.Pages.Api.ResponsesHandler>();
 
 // Background services
 builder.Services.AddHostedService<ServerHealthMonitorService>();
@@ -214,6 +220,7 @@ var enabledProtocols = gatewaySettings.EnabledProtocols.Length > 0
 if (enabledProtocols.Contains(ApiProtocol.OpenAI))
 {
     app.MapOpenAiEndpoints();
+    app.MapResponsesEndpoints();
 }
 
 if (enabledProtocols.Contains(ApiProtocol.Claude))

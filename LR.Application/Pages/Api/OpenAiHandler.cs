@@ -160,8 +160,8 @@ public class OpenAiHandler : IProtocolHandler
                                     new ChunkChoice
                                     {
                                         Index = 0,
-                                        Delta = new DeltaMessage(),
-                                        FinishReason = "stop"
+                                        Delta = new DeltaMessage { ToolCalls = chunk.Response.ToolCalls },
+                                        FinishReason = chunk.Response.FinishReason ?? "stop"
                                     }
                                 },
                                 Usage = new Usage
@@ -196,7 +196,7 @@ public class OpenAiHandler : IProtocolHandler
                                 catch { /* Logging failure shouldn't block the response */ }
                             }
                         }
-                        else if (!string.IsNullOrEmpty(chunk.TextDelta) || !string.IsNullOrEmpty(chunk.ReasoningContentDelta))
+                        else if (!string.IsNullOrEmpty(chunk.TextDelta) || !string.IsNullOrEmpty(chunk.ReasoningContentDelta) || chunk.ToolCallDeltas is not null)
                         {
                             var dataText = $"data: {JsonSerializer.Serialize(new ChatCompletionChunk
                             {
@@ -211,7 +211,8 @@ public class OpenAiHandler : IProtocolHandler
                                         Delta = new DeltaMessage
                                         {
                                             Content = !string.IsNullOrEmpty(chunk.TextDelta) ? ChatMessageContent.FromText(chunk.TextDelta) : null,
-                                            ReasoningContent = chunk.ReasoningContentDelta
+                                            ReasoningContent = chunk.ReasoningContentDelta,
+                                            ToolCalls = chunk.ToolCallDeltas
                                         }
                                     }
                                 }
@@ -368,8 +369,14 @@ public class OpenAiHandler : IProtocolHandler
                 new Choice
                 {
                     Index = 0,
-                    Message = new ChatMessage { Role = "assistant", Content = ChatMessageContent.FromText(response.Payload) },
-                    FinishReason = "stop"
+                    Message = new ChatMessage
+                    {
+                        Role = "assistant",
+                        Content = response.ToolCalls is null ? ChatMessageContent.FromText(response.Payload) : null,
+                        ToolCalls = response.ToolCalls,
+                        ReasoningContent = response.ReasoningContent
+                    },
+                    FinishReason = response.FinishReason ?? "stop"
                 }
             },
             Usage = new Usage

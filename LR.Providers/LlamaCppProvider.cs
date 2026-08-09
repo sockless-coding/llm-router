@@ -467,6 +467,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         string? accumulatedText = null;
         int reasoningContentChunkCount = 0;
         bool completed = false;
+        var accumulatedToolCalls = new Dictionary<int, ChatToolCall>();
 
         while (!completed && !cancellationToken.IsCancellationRequested)
         {
@@ -490,6 +491,9 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                 // (llama.cpp/OpenAI send stream_options usage as its own frame with empty
                 // choices, which the code below folds into streamResponse as it's seen).
                 streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
+                streamResponse.ToolCalls = accumulatedToolCalls.Count > 0
+                    ? accumulatedToolCalls.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList()
+                    : null;
                 _timingCoordinator.MergeTimingData(streamResponse);
                 completed = true;
                 yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
@@ -511,6 +515,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                     // Extract text delta from choices[0].delta.content and reasoning_content
                     string? textDelta = null;
                     string? reasoningContentDelta = null;
+                    List<ChatToolCall>? toolCallDeltas = null;
                     var firstChoice = choices[0];
                     if (firstChoice.TryGetProperty("delta", out JsonElement delta))
                     {
@@ -522,6 +527,44 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                         reasoningContentDelta = delta.TryGetProperty("reasoning_content", out JsonElement reasoningContent)
                             ? reasoningContent.GetString()
                             : null;
+
+                        // Tool calls stream incrementally, index-keyed, the same way OpenAI does:
+                        // each frame carries a fragment of one call's id/name/arguments.
+                        if (delta.TryGetProperty("tool_calls", out JsonElement toolCallsDelta) && toolCallsDelta.ValueKind == JsonValueKind.Array)
+                        {
+                            toolCallDeltas = new List<ChatToolCall>();
+                            foreach (var tc in toolCallsDelta.EnumerateArray())
+                            {
+                                int index = tc.TryGetProperty("index", out JsonElement idxEl) ? idxEl.GetInt32() : 0;
+                                if (!accumulatedToolCalls.TryGetValue(index, out var entry))
+                                {
+                                    accumulatedToolCalls[index] = entry = new ChatToolCall { Function = new ChatToolCallFunction() };
+                                }
+
+                                if (tc.TryGetProperty("id", out JsonElement idEl) && idEl.GetString() is { } id)
+                                    entry.Id = id;
+                                if (tc.TryGetProperty("type", out JsonElement typeEl) && typeEl.GetString() is { } type)
+                                    entry.Type = type;
+                                if (tc.TryGetProperty("function", out JsonElement fnEl))
+                                {
+                                    if (fnEl.TryGetProperty("name", out JsonElement nameEl) && nameEl.GetString() is { } name)
+                                        entry.Function.Name += name;
+                                    if (fnEl.TryGetProperty("arguments", out JsonElement argEl) && argEl.GetString() is { } args)
+                                        entry.Function.Arguments += args;
+                                }
+
+                                toolCallDeltas.Add(new ChatToolCall
+                                {
+                                    Id = entry.Id,
+                                    Type = entry.Type,
+                                    Function = new ChatToolCallFunction
+                                    {
+                                        Name = tc.TryGetProperty("function", out JsonElement fnDeltaEl) && fnDeltaEl.TryGetProperty("name", out JsonElement nameDeltaEl) ? nameDeltaEl.GetString() ?? string.Empty : string.Empty,
+                                        Arguments = tc.TryGetProperty("function", out JsonElement fnArgEl) && fnArgEl.TryGetProperty("arguments", out JsonElement argDeltaEl) ? argDeltaEl.GetString() ?? string.Empty : string.Empty
+                                    }
+                                });
+                            }
+                        }
                     }
 
                     // Check for finish_reason to detect end of stream
@@ -529,10 +572,10 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                         ? fr.GetString()
                         : null;
 
-                    if (!string.IsNullOrEmpty(textDelta))
+                    if (!string.IsNullOrEmpty(textDelta) || toolCallDeltas is not null)
                     {
                         accumulatedText += textDelta;
-                        chunksToYield.Add(new RouteStreamChunk { TextDelta = textDelta, ReasoningContentDelta = reasoningContentDelta, IsFinal = false });
+                        chunksToYield.Add(new RouteStreamChunk { TextDelta = textDelta ?? string.Empty, ReasoningContentDelta = reasoningContentDelta, ToolCallDeltas = toolCallDeltas, IsFinal = false });
                     }
                     else if (!string.IsNullOrEmpty(reasoningContentDelta))
                     {
@@ -552,6 +595,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                     if (finishReason != null)
                     {
                         LlamaCppResponseParser.BuildRouteResponseFromStreamInto(accumulatedText ?? string.Empty, root, streamResponse);
+                        streamResponse.FinishReason = finishReason;
                         _logger.LogInformation("[Stats] Stream finish_reason seen - PromptMs={PromptMs}, GenMs={GenMs}",
                             streamResponse.PromptProcessingMs, streamResponse.GenerationMs);
                     }
@@ -579,6 +623,9 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         {
             streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
             streamResponse.Payload = accumulatedText ?? string.Empty;
+            streamResponse.ToolCalls = accumulatedToolCalls.Count > 0
+                ? accumulatedToolCalls.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList()
+                : null;
             _timingCoordinator.MergeTimingData(streamResponse);
             yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
         }

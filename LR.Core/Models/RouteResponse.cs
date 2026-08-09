@@ -19,6 +19,12 @@ public class RouteStreamChunk
     public string? ReasoningContentDelta { get; set; }
 
     /// <summary>
+    /// Incremental tool call fragments for this chunk, in OpenAI's index-keyed delta shape.
+    /// Populated when the backend streams tool_calls incrementally.
+    /// </summary>
+    public List<OpenAI.ChatToolCall>? ToolCallDeltas { get; set; }
+
+    /// <summary>
     /// True if this is the final chunk containing full response metadata.
     /// </summary>
     public bool IsFinal { get; set; }
@@ -55,6 +61,22 @@ public class RouteResponse
     /// This is a count of SSE chunks containing reasoning content, not individual token count.
     /// </summary>
     public int ReasoningTokenCount { get; set; }
+
+    /// <summary>
+    /// Full reasoning/thinking text, when the backend returns it as a single non-streamed field
+    /// (message.reasoning_content on a non-streaming response).
+    /// </summary>
+    public string? ReasoningContent { get; set; }
+
+    /// <summary>
+    /// Tool calls the model requested, if any. Null when the model produced only text content.
+    /// </summary>
+    public List<OpenAI.ChatToolCall>? ToolCalls { get; set; }
+
+    /// <summary>
+    /// The reason generation stopped ("stop", "tool_calls", "length", etc.), as reported by the backend.
+    /// </summary>
+    public string? FinishReason { get; set; }
 
     /// <summary>
     /// Time in milliseconds spent processing the input prompt (tokenization + evaluation).

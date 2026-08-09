@@ -15,6 +15,7 @@ public class LRDbContext : DbContext
     public DbSet<Models.ModelStatistics> ModelStatistics => Set<Models.ModelStatistics>();
     public DbSet<Models.ServerLog> ServerLogs => Set<Models.ServerLog>();
     public DbSet<Models.ApiRequestLog> ApiRequestLogs => Set<Models.ApiRequestLog>();
+    public DbSet<Models.StoredResponse> StoredResponses => Set<Models.StoredResponse>();
     public DbSet<Models.LocalModel> LocalModels => Set<Models.LocalModel>();
     public DbSet<Models.ModelLibrarySettings> ModelLibrarySettings => Set<Models.ModelLibrarySettings>();
 
@@ -171,6 +172,17 @@ public class LRDbContext : DbContext
 
             // Composite index for filtering by protocol + time range
             entity.HasIndex(e => new { e.Protocol, e.Timestamp });
+        });
+
+        // StoredResponse configurations (OpenAI Responses API conversation state)
+        modelBuilder.Entity<Models.StoredResponse>(entity =>
+        {
+            entity.ToTable("StoredResponses");
+            entity.HasKey(e => e.Id);
+
+            // Used to walk previous_response_id chains and for retention cleanup.
+            entity.HasIndex(e => e.PreviousResponseId);
+            entity.HasIndex(e => e.CreatedAt);
         });
     }
 }

@@ -3,16 +3,19 @@ using System;
 using LR.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace LR.Core.Migrations
+namespace LR.Core.Data.Migrations
 {
     [DbContext(typeof(LRDbContext))]
-    partial class LRDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260809111333_AddStoredResponses")]
+    partial class AddStoredResponses
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");

@@ -33,10 +33,23 @@ public static class LlamaCppResponseParser
             var firstChoice = choices[0];
             if (firstChoice.TryGetProperty("message", out JsonElement message))
             {
-                response.Payload = message.TryGetProperty("content", out JsonElement content)
+                response.Payload = message.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.String
                     ? content.GetString() ?? string.Empty
                     : string.Empty;
+
+                response.ReasoningContent = message.TryGetProperty("reasoning_content", out JsonElement reasoning) && reasoning.ValueKind == JsonValueKind.String
+                    ? reasoning.GetString()
+                    : null;
+
+                if (message.TryGetProperty("tool_calls", out JsonElement toolCalls) && toolCalls.ValueKind == JsonValueKind.Array)
+                {
+                    response.ToolCalls = JsonSerializer.Deserialize<List<ChatToolCall>>(toolCalls.GetRawText());
+                }
             }
+
+            response.FinishReason = firstChoice.TryGetProperty("finish_reason", out JsonElement finishReason) && finishReason.ValueKind == JsonValueKind.String
+                ? finishReason.GetString()
+                : null;
         }
 
         // Extract usage data
