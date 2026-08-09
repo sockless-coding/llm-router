@@ -52,13 +52,39 @@
                 <span asp-validation-for="ViewModel.Name" class="text-xs text-red-400"></span>
             </div>
 
-            <!-- Model Path -->
+            <!-- Model -->
             <div>
-                <label asp-for="ViewModel.ModelPath" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                <input asp-for="ViewModel.ModelPath" required placeholder="/path/to/model.gguf"
-                       class="@inpCls @Html.Raw(ViewData.ModelState["ViewModel.ModelPath"]?.Errors?.Any() == true ? "border-red-500/60" : "")" />
+                <label asp-for="ViewModel.ModelId" class="block text-sm font-medium text-text-secondary mb-1">Model</label>
+                <select asp-for="ViewModel.ModelId" id="model-select" class="@selCls">
+                    <option value="">— Select a model from the library —</option>
+                    @foreach (var m in Model.Models)
+                    {
+                        <option value="@m.Id"
+                                data-arch="@m.Architecture"
+                                data-params="@m.ParameterSize"
+                                data-quant="@m.QuantizationLevel"
+                                data-context="@m.ContextLength"
+                                selected="@(Model.ViewModel.ModelId == m.Id)">@m.Name</option>
+                    }
+                </select>
+                <div id="model-gguf-info" class="hidden mt-2 flex flex-wrap gap-1.5"></div>
+                <p class="text-xs text-text-secondary mt-1">
+                    Don't see your model? <a href="/Features/Models/Create" class="text-neon-cyan hover:underline">Import it into the library</a>,
+                    or enter a path manually below.
+                </p>
                 <span asp-validation-for="ViewModel.ModelPath" class="text-xs text-red-400"></span>
             </div>
+
+            <details class="group">
+                <summary class="cursor-pointer text-sm text-text-secondary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                    <svg class="w-4 h-4 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                    Advanced: override path manually
+                </summary>
+                <div class="pt-3">
+                    <input asp-for="ViewModel.ModelPath" placeholder="/path/to/model.gguf (overrides the model selected above)"
+                           class="@inpCls @Html.Raw(ViewData.ModelState["ViewModel.ModelPath"]?.Errors?.Any() == true ? "border-red-500/60" : "")" />
+                </div>
+            </details>
         </div>
 
         <!-- ==================== CORE SETTINGS (Always Visible) ==================== -->
@@ -69,7 +95,7 @@
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label asp-for="ViewModel.ContextSize" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                    <input asp-for="ViewModel.ContextSize" type="number" min="0"
+                    <input asp-for="ViewModel.ContextSize" type="number" min="0" id="context-size-input"
                            placeholder="from model"
                            class="@inpCls" />
                 </div>
@@ -685,4 +711,45 @@
         </div>
     </form>
 </div>
+
+<script>
+(function () {
+    const select = document.getElementById('model-select');
+    const info = document.getElementById('model-gguf-info');
+    const ctxInput = document.getElementById('context-size-input');
+    if (!select || !info) return;
+
+    function badge(label, value) {
+        return `<span class="text-xs px-2 py-0.5 rounded bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/20">${label}: ${value}</span>`;
+    }
+
+    function render() {
+        const opt = select.options[select.selectedIndex];
+        const arch = opt?.dataset.arch;
+        const params = opt?.dataset.params;
+        const quant = opt?.dataset.quant;
+        const context = opt?.dataset.context;
+
+        if (!opt || !opt.value || (!arch && !params && !quant && !context)) {
+            info.classList.add('hidden');
+            info.innerHTML = '';
+            if (ctxInput) ctxInput.placeholder = 'from model';
+            return;
+        }
+
+        let html = '';
+        if (arch) html += badge('Arch', arch);
+        if (params) html += badge('Params', params);
+        if (quant) html += badge('Quant', quant);
+        if (context) html += badge('Context', context);
+        info.innerHTML = html;
+        info.classList.remove('hidden');
+
+        if (ctxInput) ctxInput.placeholder = context ? `from model (${context})` : 'from model';
+    }
+
+    select.addEventListener('change', render);
+    render();
+})();
+</script>
 

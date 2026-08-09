@@ -3,16 +3,19 @@ using System;
 using LR.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace LR.Core.Migrations
+namespace LR.Core.Data.Migrations
 {
     [DbContext(typeof(LRDbContext))]
-    partial class LRDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260809072529_AddLocalModelAndPresetLink")]
+    partial class AddLocalModelAndPresetLink
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -247,26 +250,6 @@ namespace LR.Core.Migrations
                         .IsUnique();
 
                     b.ToTable("LocalModels", (string)null);
-                });
-
-            modelBuilder.Entity("LR.Core.Models.ModelLibrarySettings", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("HuggingFaceApiToken")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RootFolder")
-                        .IsRequired()
-                        .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ModelLibrarySettings", (string)null);
                 });
 
             modelBuilder.Entity("LR.Core.Models.ModelPreset", b =>

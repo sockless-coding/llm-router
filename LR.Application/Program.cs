@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Http;
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting.WindowsServices;
 
@@ -52,6 +55,29 @@ builder.Services.AddSingleton<IGgufMetadataReader, GgufMetadataReader>();
 
 // SignalR progress publisher (bridges LR.Core and LR.Application)
 builder.Services.AddScoped<LR.Core.Interfaces.ISignalRProgressPublisher, SignalRProgressPublisher>();
+
+// --- Model library (registry + Hugging Face integration) ---
+// Root folder / HF token are UI-controlled settings the app writes at runtime, so they're
+// persisted to the DB (single-row table) rather than appsettings.json — see
+// ModelLibrarySettingsService.
+builder.Services.AddSingleton<IModelLibrarySettingsService, ModelLibrarySettingsService>();
+builder.Services.AddScoped<IModelLibrary, ModelLibraryManager>();
+builder.Services.AddHttpClient<IHuggingFaceClient, HuggingFaceClient>(client =>
+{
+    // Downloads can take a long time; cancellation is controlled by the caller's CancellationToken
+    // instead of a fixed client timeout (see ModelDownloadService).
+    client.Timeout = Timeout.InfiniteTimeSpan;
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = true,
+    AutomaticDecompression = DecompressionMethods.GZip,
+});
+builder.Services.AddSingleton<IModelDownloadProgressPublisher, ModelDownloadProgressPublisher>();
+builder.Services.AddSingleton<ModelDownloadService>();
+
+// Boot-time reconciliation for presets whose model file isn't in the registry yet
+// (Scoped — needs DbContext; invoked explicitly below, not a BackgroundService).
+builder.Services.AddScoped<ModelLibraryReconciliationService>();
 
 // Logging & auto-restart services (Scoped — need DbContext access per request)
 builder.Services.AddScoped<IServerLogService, LR.Core.Services.ServerLogService>();
@@ -129,11 +155,22 @@ using (var scope = app.Services.CreateScope())
     await reconciliation.ReconcileAsync();
 }
 
+// Register existing preset model files into the model library so it's populated without a
+// manual import step on upgrade.
+using (var scope = app.Services.CreateScope())
+{
+    var modelReconciliation = scope.ServiceProvider.GetRequiredService<ModelLibraryReconciliationService>();
+    await modelReconciliation.ReconcileAsync();
+}
+
 app.UseStaticFiles();
 app.MapRazorPages();
 
 // SignalR hub for server lifecycle events
 app.MapHub<LR.Application.Hubs.ServerHub>("/serverHub");
+
+// SignalR hub for model download progress
+app.MapHub<LR.Application.Hubs.ModelDownloadHub>("/modelDownloadHub");
 
 // --- Health endpoint for agents ---
 app.MapGet("/health", async (IServerManager serverManager) =>

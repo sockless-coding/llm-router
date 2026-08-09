@@ -1,0 +1,72 @@
+@page
+@model LR.Application.Pages.Features.Models.ModelsCreateModel
+@{
+    ViewData["Title"] = "Import Model";
+}
+
+@{ var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500"; }
+
+<div class="max-w-3xl mx-auto">
+    <form method="post" class="space-y-6">
+        @Html.AntiForgeryToken()
+
+        @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+        {
+            <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4" role="alert">
+                <p class="text-sm text-red-300">@Model.ErrorMessage</p>
+            </div>
+        }
+
+        <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
+            <h2 class="text-lg font-semibold text-text-primary">Import Local File</h2>
+
+            <div>
+                <label asp-for="FilePath" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                <input asp-for="FilePath" required placeholder="C:\models\llama-3-8b-q4_k_m.gguf" class="@inpCls" />
+            </div>
+            <div>
+                <label asp-for="Name" class="block text-sm font-medium text-text-secondary mb-1">Display Name (optional)</label>
+                <input asp-for="Name" placeholder="defaults to the filename" class="@inpCls" />
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button type="submit" class="px-6 py-2.5 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all font-medium text-sm">
+                    Import
+                </button>
+                <a href="/Features/Models/Index" class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
+                    Cancel
+                </a>
+            </div>
+        </div>
+    </form>
+
+    @if (Model.ScannedCandidates.Any())
+    {
+        <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 mt-6 space-y-3">
+            <h2 class="text-lg font-semibold text-text-primary">Found in Root Folder</h2>
+            <p class="text-sm text-text-secondary">These .gguf files were found in your configured root folder but aren't registered yet. Click one to fill in the path above.</p>
+            <ul class="space-y-1">
+                @foreach (var candidate in Model.ScannedCandidates)
+                {
+                    <li>
+                        <button type="button" class="pick-candidate text-sm text-neon-cyan hover:underline text-left" data-path="@candidate">
+                            @candidate
+                        </button>
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+</div>
+
+@section Scripts {
+    <script>
+        document.querySelectorAll('.pick-candidate').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const input = document.querySelector('[name=FilePath]');
+                input.value = btn.dataset.path;
+                input.scrollIntoView();
+            });
+        });
+    </script>
+}

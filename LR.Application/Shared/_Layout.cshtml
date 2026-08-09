@@ -32,6 +32,7 @@
     var path = Context.Request.Path.ToString();
     bool isDashboard = path == "/" || path == "";
     bool isServers = path.StartsWith("/Features/Servers");
+    bool isModels = path.StartsWith("/Features/Models");
     bool isPresets = path.StartsWith("/Features/Presets");
     bool isRequestLog = path.StartsWith("/Features/RequestLog");
     bool isStats = path.StartsWith("/Features/Stats");
@@ -51,6 +52,11 @@
                 <a href="/Features/Servers/Index" aria-current="@(isServers ? "page" : null)" class="@(isServers ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isServers ? activeStyle : inactiveStyle)">
                     <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" /></svg>
                     <span class="text-sm font-medium">Servers</span>
+                </a>
+
+                <a href="/Features/Models/Index" aria-current="@(isModels ? "page" : null)" class="@(isModels ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isModels ? activeStyle : inactiveStyle)">
+                    <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 3.75c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" /></svg>
+                    <span class="text-sm font-medium">Models</span>
                 </a>
 
                 <a href="/Features/Presets/Index" aria-current="@(isPresets ? "page" : null)" class="@(isPresets ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isPresets ? activeStyle : inactiveStyle)">

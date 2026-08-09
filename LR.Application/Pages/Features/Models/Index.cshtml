@@ -1,0 +1,204 @@
+@page
+@using LR.Core.Models
+@model LR.Application.Pages.Features.Models.ModelsIndexModel
+@{
+    ViewData["Title"] = "Models";
+}
+
+@functions {
+    string Truncate(string? s, int max)
+        => (s?.Length ?? 0) > max ? s[..(max - 3)] + "..." : (s ?? "");
+
+    string FormatSize(long? bytes)
+    {
+        if (bytes is null) return "—";
+        double gb = bytes.Value / 1024.0 / 1024.0 / 1024.0;
+        return gb >= 1 ? $"{gb:F1} GB" : $"{bytes.Value / 1024.0 / 1024.0:F0} MB";
+    }
+}
+
+<form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+<div class="flex items-center justify-between mb-6">
+    <p class="text-text-secondary">Register, inspect, and fetch the model files used by your presets.</p>
+    <div class="flex items-center gap-2">
+        <a href="/Features/Models/HuggingFace" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+            Browse Hugging Face
+        </a>
+        <a href="/Features/Models/Create" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all text-sm font-medium">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+            Import Local File
+        </a>
+    </div>
+</div>
+
+<!-- Library Settings -->
+<details class="bg-cyber-card rounded-xl border border-gray-600/20 group mb-6">
+    <summary class="cursor-pointer px-6 py-4 text-base font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+        <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+        Library Settings
+    </summary>
+    <div class="px-6 pb-6 space-y-4">
+        @if (!string.IsNullOrEmpty(Model.StatusMessage))
+        {
+            <div class="text-sm text-neon-green">@Model.StatusMessage</div>
+        }
+        <form method="post" asp-page-handler="SaveSettings" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            @Html.AntiForgeryToken()
+            <div>
+                <label asp-for="RootFolder" class="block text-sm font-medium text-text-secondary mb-1">Root Folder</label>
+                <input asp-for="RootFolder" placeholder="C:\models" class="w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all" />
+                <p class="text-xs text-text-secondary mt-1">Used for "scan folder" imports and as the download destination for Hugging Face models.</p>
+            </div>
+            <div>
+                <label asp-for="HuggingFaceApiToken" class="block text-sm font-medium text-text-secondary mb-1">Hugging Face API Token (optional)</label>
+                <input asp-for="HuggingFaceApiToken" type="password" placeholder="hf_..." class="w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all" />
+                <p class="text-xs text-text-secondary mt-1">Needed for gated repos, or to avoid anonymous rate limits.</p>
+            </div>
+            <div class="md:col-span-2">
+                <button type="submit" class="px-5 py-2 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all text-sm font-medium">
+                    Save Settings
+                </button>
+            </div>
+        </form>
+    </div>
+</details>
+
+@if (!Model.Models.Any())
+{
+    <div class="text-center py-16 bg-cyber-card rounded-xl border border-neon-cyan/10">
+        <svg class="w-12 h-12 mx-auto text-text-secondary mb-3" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375" /></svg>
+        <p class="text-text-secondary">No models registered</p>
+        <p class="text-text-secondary text-sm mt-1">Import a local .gguf file or browse Hugging Face to get started.</p>
+    </div>
+}
+else
+{
+    <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Source</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Quant</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Params</th>
+                    <th class="text-right px-4 py-3 text-text-secondary font-medium">Context</th>
+                    <th class="text-right px-4 py-3 text-text-secondary font-medium">Size</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Status</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Used By</th>
+                    <th class="text-right px-4 py-3 text-text-secondary font-medium"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var lm in Model.Models)
+                {
+                    var usageCount = Model.PresetUsageCounts.GetValueOrDefault(lm.Id, 0);
+                    <tr class="border-b border-gray-700/30 hover:bg-gray-800/20">
+                        <td class="px-4 py-3">
+                            <a href="/Features/Models/Details?id=@lm.Id" class="text-text-primary font-medium hover:text-neon-magenta transition-colors">@Truncate(lm.Name, 48)</a>
+                            @if (lm.Status == ModelStatus.Missing)
+                            {
+                                <p class="text-xs text-neon-red mt-0.5">File missing on disk</p>
+                            }
+                        </td>
+                        <td class="px-4 py-3">
+                            @if (lm.Source == ModelSource.HuggingFace)
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/20">Hugging Face</span>
+                            }
+                            else
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-gray-700/30 text-text-secondary border border-gray-600/20">Local</span>
+                            }
+                        </td>
+                        <td class="px-4 py-3 text-text-primary">@(lm.QuantizationLevel ?? "—")</td>
+                        <td class="px-4 py-3 text-text-primary">@(lm.ParameterSize ?? "—")</td>
+                        <td class="px-4 py-3 text-right text-text-primary">@(lm.ContextLength?.ToString() ?? "—")</td>
+                        <td class="px-4 py-3 text-right text-text-primary">@FormatSize(lm.FileSizeBytes)</td>
+                        <td class="px-4 py-3 text-center">
+                            @if (lm.Status == ModelStatus.Ready)
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20">Ready</span>
+                            }
+                            else if (lm.Status == ModelStatus.Downloading)
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 download-status" data-model-id="@lm.Id">Downloading…</span>
+                            }
+                            else if (lm.Status == ModelStatus.Error)
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-red-500/10 text-neon-red border border-red-500/20" title="@lm.StatusMessage">Error</span>
+                            }
+                            else
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-gray-700/30 text-text-secondary border border-gray-600/20">Missing</span>
+                            }
+                        </td>
+                        <td class="px-4 py-3 text-center text-text-primary">@usageCount</td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap">
+                            <button type="button" onclick="refreshModel('@lm.Id')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Refresh</button>
+                            @if (lm.Source == ModelSource.HuggingFace)
+                            {
+                                <button type="button" onclick="checkUpdate('@lm.Id')" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check Update</button>
+                            }
+                            <button type="button" onclick="deleteModel('@lm.Id', '@lm.Name', @usageCount)" class="text-xs px-2 py-1 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Delete</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@section Scripts {
+    <script src="~/lib/signalr/signalr.min.js"></script>
+    <script>
+        const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+
+        async function postAction(fields) {
+            const formData = new FormData();
+            for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+            formData.append('__RequestVerificationToken', token());
+            const resp = await fetch('/Features/Models/Actions', { method: 'POST', body: formData });
+            return resp.json();
+        }
+
+        async function refreshModel(modelId) {
+            const result = await postAction({ Command: 'Refresh', ModelId: modelId });
+            if (result.success) location.reload();
+            else alert(result.message || 'Refresh failed.');
+        }
+
+        async function deleteModel(modelId, name, usageCount) {
+            let msg = `Delete model "${name}"?`;
+            if (usageCount > 0) msg += ` It is referenced by ${usageCount} preset(s) — they will keep their current path but lose the registry link.`;
+            if (!confirm(msg)) return;
+            const deleteFile = confirm('Also delete the underlying file from disk?');
+            const result = await postAction({ Command: 'Delete', ModelId: modelId, DeleteFile: deleteFile });
+            if (result.success) location.reload();
+            else alert(result.message || 'Delete failed.');
+        }
+
+        async function checkUpdate(modelId) {
+            const result = await postAction({ Command: 'CheckUpdate', ModelId: modelId });
+            if (!result.success) { alert(result.message || 'Could not check for updates.'); return; }
+            alert(result.updateAvailable ? `Update available (revision ${result.latestRevision}).` : 'Already up to date.');
+        }
+
+        // Live progress for any model currently downloading
+        const downloadBadges = document.querySelectorAll('.download-status');
+        if (downloadBadges.length > 0) {
+            const connection = new signalR.HubConnectionBuilder().withUrl('/modelDownloadHub').build();
+            connection.on('ReceiveDownloadProgress', (progress) => {
+                const badge = document.querySelector(`.download-status[data-model-id="${progress.modelId}"]`);
+                if (!badge) return;
+                if (progress.status === 'completed' || progress.status === 'error') {
+                    location.reload();
+                } else if (progress.percentComplete != null) {
+                    badge.textContent = `Downloading… ${progress.percentComplete}%`;
+                }
+            });
+            connection.start().catch(() => {});
+        }
+    </script>
+}

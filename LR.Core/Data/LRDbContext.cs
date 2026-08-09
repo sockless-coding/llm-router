@@ -15,6 +15,8 @@ public class LRDbContext : DbContext
     public DbSet<Models.ModelStatistics> ModelStatistics => Set<Models.ModelStatistics>();
     public DbSet<Models.ServerLog> ServerLogs => Set<Models.ServerLog>();
     public DbSet<Models.ApiRequestLog> ApiRequestLogs => Set<Models.ApiRequestLog>();
+    public DbSet<Models.LocalModel> LocalModels => Set<Models.LocalModel>();
+    public DbSet<Models.ModelLibrarySettings> ModelLibrarySettings => Set<Models.ModelLibrarySettings>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -75,6 +77,26 @@ public class LRDbContext : DbContext
             entity.Property(e => e.Flags).HasConversion(
                 v => System.Text.Json.JsonSerializer.Serialize(v),
                 v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v) ?? new Dictionary<string, string>());
+
+            // Optional link to the model registry — a deleted model just clears the link,
+            // the preset's own ModelPath keeps working.
+            entity.HasOne(p => p.Model)
+                .WithMany(m => m.Presets)
+                .HasForeignKey(p => p.ModelId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // LocalModel configurations
+        modelBuilder.Entity<Models.LocalModel>(entity =>
+        {
+            entity.ToTable("LocalModels");
+            entity.HasIndex(e => e.FilePath).IsUnique();
+        });
+
+        // ModelLibrarySettings configurations
+        modelBuilder.Entity<Models.ModelLibrarySettings>(entity =>
+        {
+            entity.ToTable("ModelLibrarySettings");
         });
 
         // RoutingRule configurations

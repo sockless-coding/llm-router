@@ -25,10 +25,19 @@ public class ModelPreset
     // ==================== CORE (Always Visible) ====================
 
     /// <summary>
-    /// Path to the model file (-m).
+    /// Path to the model file (-m). When <see cref="ModelId"/> is set, this is kept in sync with
+    /// the linked <see cref="LocalModel.FilePath"/>; when null, this is a manually-typed override.
+    /// This is what <c>LlamaCppArgBuilder</c> actually consumes — it's unaffected by whether the
+    /// path came from the registry or a manual entry.
     /// </summary>
     [Required, MaxLength(1024)]
     public string ModelPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional link to a registered model in the model library (see <see cref="LocalModel"/>).
+    /// Null means <see cref="ModelPath"/> was entered manually and isn't tracked in the registry.
+    /// </summary>
+    public Guid? ModelId { get; set; }
 
     /// <summary>
     /// Prompt context size (-c). 0 = loaded from model.
@@ -524,4 +533,9 @@ public class ModelPreset
     /// Navigation: parent server instance.
     /// </summary>
     public ServerInstance? ServerInstance { get; set; }
+
+    /// <summary>
+    /// Navigation: the registry model this preset resolves its path/GGUF metadata from, if any.
+    /// </summary>
+    public LocalModel? Model { get; set; }
 }

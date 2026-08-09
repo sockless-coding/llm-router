@@ -42,14 +42,42 @@ public class PresetManager : IPresetManager
         if (preset.Id == Guid.Empty)
             throw new ArgumentException("Preset must have a valid ID.", nameof(preset));
 
+        // A registry model link takes precedence over whatever ModelPath was passed in —
+        // resolve it to the model's file path and copy its already-read GGUF metadata instead
+        // of re-parsing the file.
+        if (preset.ModelId.HasValue)
+            await ApplyLinkedModelAsync(preset, preset.ModelId.Value);
+
         _context.ModelPresets.Add(preset);
         await _context.SaveChangesAsync();
 
-        // Read GGUF metadata from the model file and populate fields
-        if (_ggufReader != null)
+        // No registry link — read GGUF metadata directly from the manually-entered path.
+        if (!preset.ModelId.HasValue && _ggufReader != null)
             await ReadGgufMetadataAsync(preset, preset.ModelPath);
 
         return preset;
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="modelId"/> against the model registry and copies its file path +
+    /// GGUF metadata onto the preset. No-ops (leaving ModelPath/GGUF fields untouched) if the
+    /// model can't be found, so a stale link never blanks out a working preset.
+    /// </summary>
+    private async Task ApplyLinkedModelAsync(ModelPreset preset, Guid modelId)
+    {
+        var model = await _context.LocalModels.FindAsync(modelId);
+        if (model is null)
+            return;
+
+        preset.ModelPath = model.FilePath;
+        preset.GgufArchitecture = model.Architecture;
+        preset.GgufModelName = model.GgufModelName;
+        preset.GgufParameterSize = model.ParameterSize;
+        preset.GgufQuantizationLevel = model.QuantizationLevel;
+        preset.GgufContextLength = model.ContextLength;
+        preset.GgufEmbeddingLength = model.EmbeddingLength;
+        preset.GgufRopeFreqBase = model.RopeFreqBase;
+        preset.GgufChatTemplate = model.ChatTemplate;
     }
 
     private async Task ReadGgufMetadataAsync(ModelPreset preset, string? modelPath)
@@ -84,6 +112,7 @@ public class PresetManager : IPresetManager
 
         existing.Name = updated.Name;
         existing.ModelPath = updated.ModelPath;
+        existing.ModelId = updated.ModelId;
 
         // Core settings
         existing.ContextSize = updated.ContextSize;
@@ -201,11 +230,16 @@ public class PresetManager : IPresetManager
         // Fallback flags
         existing.Flags = updated.Flags;
 
+        // A registry link takes precedence: resolve it to the model's file path + metadata,
+        // overwriting whatever ModelPath/Gguf* values were just assigned above.
+        if (existing.ModelId.HasValue)
+            await ApplyLinkedModelAsync(existing, existing.ModelId.Value);
+
         await _context.SaveChangesAsync();
 
-        // Re-read GGUF metadata if model path changed
-        if (pathChanged)
-            await ReadGgufMetadataAsync(existing, updated.ModelPath);
+        // No registry link — re-read GGUF metadata directly if the manually-entered path changed.
+        if (!existing.ModelId.HasValue && pathChanged && _ggufReader != null)
+            await ReadGgufMetadataAsync(existing, existing.ModelPath);
 
         return true;
     }

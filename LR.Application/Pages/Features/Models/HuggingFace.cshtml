@@ -1,0 +1,137 @@
+@page
+@model LR.Application.Pages.Features.Models.ModelsHuggingFaceModel
+@{
+    ViewData["Title"] = "Browse Hugging Face";
+}
+
+<form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+<div class="flex items-center justify-between mb-6">
+    <p class="text-text-secondary">Search the Hugging Face hub for GGUF models and download them into your library.</p>
+    <a href="/Features/Models/Index" class="px-4 py-2 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all text-sm font-medium">
+        Back to Models
+    </a>
+</div>
+
+<div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 mb-6">
+    <div class="flex gap-3">
+        <input id="searchQuery" type="text" placeholder="e.g. llama-3, qwen2.5, mistral..."
+               class="flex-1 px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all" />
+        <button id="searchBtn" type="button" class="px-6 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium text-sm">
+            Search
+        </button>
+    </div>
+</div>
+
+<div id="results" class="space-y-3"></div>
+
+@section Scripts {
+    <script>
+        const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+
+        async function postAction(fields) {
+            const formData = new FormData();
+            for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+            formData.append('__RequestVerificationToken', token());
+            const resp = await fetch('/Features/Models/Actions', { method: 'POST', body: formData });
+            return resp.json();
+        }
+
+        function formatBytes(bytes) {
+            if (bytes == null) return '—';
+            const gb = bytes / 1024 / 1024 / 1024;
+            return gb >= 1 ? gb.toFixed(2) + ' GB' : (bytes / 1024 / 1024).toFixed(0) + ' MB';
+        }
+
+        async function runSearch() {
+            const q = document.getElementById('searchQuery').value.trim();
+            const resultsEl = document.getElementById('results');
+            if (!q) { resultsEl.innerHTML = ''; return; }
+
+            resultsEl.innerHTML = '<p class="text-text-secondary text-sm">Searching…</p>';
+            const resp = await fetch('?handler=Search&q=' + encodeURIComponent(q));
+            const repos = await resp.json();
+
+            if (!Array.isArray(repos) || repos.length === 0) {
+                resultsEl.innerHTML = '<p class="text-text-secondary text-sm">No results.</p>';
+                return;
+            }
+
+            resultsEl.innerHTML = '';
+            for (const repo of repos) {
+                const card = document.createElement('div');
+                card.className = 'bg-cyber-card rounded-xl p-4 border border-gray-700/30';
+                card.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-text-primary font-medium repo-name"></p>
+                            <p class="text-xs text-text-secondary mt-0.5">${repo.downloads ?? 0} downloads · ${repo.likes ?? 0} likes</p>
+                        </div>
+                        <button type="button" class="load-files-btn text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium">
+                            Show Files
+                        </button>
+                    </div>
+                    <div class="files-container mt-3 space-y-1 hidden"></div>
+                `;
+                // Set untrusted values via text/dataset properties (not string-interpolated HTML/attributes)
+                // to avoid a markup/attribute-breakout injection from a malicious repo id.
+                card.querySelector('.repo-name').textContent = repo.id;
+                card.querySelector('.load-files-btn').dataset.repoId = repo.id;
+                resultsEl.appendChild(card);
+            }
+
+            resultsEl.querySelectorAll('.load-files-btn').forEach(btn => {
+                btn.addEventListener('click', () => loadFiles(btn));
+            });
+        }
+
+        async function loadFiles(btn) {
+            const repoId = btn.dataset.repoId;
+            const container = btn.closest('div.bg-cyber-card').querySelector('.files-container');
+
+            if (!container.classList.contains('hidden')) {
+                container.classList.add('hidden');
+                return;
+            }
+
+            container.classList.remove('hidden');
+            container.innerHTML = '<p class="text-xs text-text-secondary">Loading files…</p>';
+
+            const resp = await fetch('?handler=Files&repoId=' + encodeURIComponent(repoId));
+            const files = await resp.json();
+
+            if (!Array.isArray(files) || files.length === 0) {
+                container.innerHTML = '<p class="text-xs text-text-secondary">No .gguf files found in this repo.</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            for (const file of files) {
+                const row = document.createElement('div');
+                row.className = 'flex items-center justify-between text-sm border-t border-gray-700/30 pt-2';
+                row.innerHTML = `
+                    <span class="text-text-primary filename-label"></span>
+                    <button type="button" class="download-btn text-xs px-3 py-1 rounded-md bg-neon-green/10 text-neon-green hover:bg-neon-green/20 transition-all font-medium">Download</button>
+                `;
+                row.querySelector('.filename-label').textContent = `${file.filename} (${formatBytes(file.sizeBytes)})`;
+                row.querySelector('.download-btn').addEventListener('click', () => downloadFile(repoId, file.filename));
+                container.appendChild(row);
+            }
+        }
+
+        async function downloadFile(repoId, filename) {
+            const result = await postAction({ Command: 'Download', RepoId: repoId, Filename: filename, Revision: 'main' });
+            if (result.success) {
+                alert('Download started. Track progress on the Models page.');
+                window.location.href = '/Features/Models/Index';
+            } else {
+                alert(result.message || 'Failed to start download.');
+            }
+        }
+
+        document.getElementById('searchBtn').addEventListener('click', runSearch);
+        document.getElementById('searchQuery').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') runSearch();
+        });
+    </script>
+}

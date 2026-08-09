@@ -12,15 +12,18 @@ public class PresetsListModel : PageModel
     private readonly LRDbContext _context;
     private readonly IPresetManager _presetManager;
     private readonly IServerManager _serverManager;
+    private readonly IModelLibrary _modelLibrary;
 
     public IReadOnlyList<Core.Models.ModelPreset> Presets { get; set; } = new List<Core.Models.ModelPreset>();
     public IReadOnlyList<Core.Models.ServerInstance> Servers { get; set; } = new List<Core.Models.ServerInstance>();
+    public Dictionary<Guid, Core.Models.LocalModel> ModelsById { get; set; } = new();
 
-    public PresetsListModel(LRDbContext context, IPresetManager presetManager, IServerManager serverManager)
+    public PresetsListModel(LRDbContext context, IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary)
     {
         _context = context;
         _presetManager = presetManager;
         _serverManager = serverManager;
+        _modelLibrary = modelLibrary;
     }
 
     public async Task OnGetAsync([FromQuery] Guid? serverId = null)
@@ -32,6 +35,7 @@ public class PresetsListModel : PageModel
             Presets = (await _context.ModelPresets.ToListAsync()).AsReadOnly();
 
         Servers = _serverManager.GetAllInstances();
+        ModelsById = (await _modelLibrary.GetAllAsync()).ToDictionary(m => m.Id);
     }
 
     public async Task<IActionResult> OnPostDeleteAsync([FromQuery] Guid id)

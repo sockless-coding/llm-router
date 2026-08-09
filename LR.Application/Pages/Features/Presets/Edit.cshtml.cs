@@ -8,16 +8,19 @@ public class PresetEditModel : PageModel
 {
     private readonly IPresetManager _presetManager;
     private readonly IServerManager _serverManager;
+    private readonly IModelLibrary _modelLibrary;
 
     [BindProperty]
     public PresetViewModel ViewModel { get; set; } = new();
 
     public IReadOnlyList<Core.Models.ServerInstance> Servers { get; set; } = new List<Core.Models.ServerInstance>();
+    public IReadOnlyList<Core.Models.LocalModel> Models { get; set; } = new List<Core.Models.LocalModel>();
 
-    public PresetEditModel(IPresetManager presetManager, IServerManager serverManager)
+    public PresetEditModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary)
     {
         _presetManager = presetManager;
         _serverManager = serverManager;
+        _modelLibrary = modelLibrary;
     }
 
     public async Task<IActionResult> OnGetAsync([FromQuery] Guid Id)
@@ -27,6 +30,7 @@ public class PresetEditModel : PageModel
             return BadRequest($"Preset with id {Id} not found.");
 
         Servers = _serverManager.GetAllInstances();
+        Models = await _modelLibrary.GetAllAsync();
         MapToViewModel(preset);
 
         return Page();
@@ -34,9 +38,13 @@ public class PresetEditModel : PageModel
 
     public async Task<IActionResult> OnPostAsync([FromQuery] Guid Id)
     {
+        if (!ViewModel.ModelId.HasValue && string.IsNullOrWhiteSpace(ViewModel.ModelPath))
+            ModelState.AddModelError("ViewModel.ModelPath", "Select a model from the library, or enter a path manually.");
+
         if (!ModelState.IsValid)
         {
             Servers = _serverManager.GetAllInstances();
+            Models = await _modelLibrary.GetAllAsync();
             return Page();
         }
 
@@ -58,7 +66,10 @@ public class PresetEditModel : PageModel
     {
         ViewModel.ServerInstanceId = preset.ServerInstanceId;
         ViewModel.Name = preset.Name;
-        ViewModel.ModelPath = preset.ModelPath;
+        ViewModel.ModelId = preset.ModelId;
+        // Only show the raw path in the manual-override field when there's no registry link —
+        // otherwise it'd look like an override is active when the model dropdown is really driving it.
+        ViewModel.ModelPath = preset.ModelId.HasValue ? "" : preset.ModelPath;
         ViewModel.ContextSize = preset.ContextSize;
         ViewModel.GpuLayers = preset.GpuLayers;
         ViewModel.CacheTypeK = preset.CacheTypeK;
@@ -141,6 +152,8 @@ public class PresetEditModel : PageModel
     private void MapViewModelToEntity(Core.Models.ModelPreset entity)
     {
         entity.Name = ViewModel.Name;
+        // A filled-in manual override always wins over a selected registry model.
+        entity.ModelId = string.IsNullOrWhiteSpace(ViewModel.ModelPath) ? ViewModel.ModelId : null;
         entity.ModelPath = ViewModel.ModelPath;
         entity.ContextSize = ViewModel.ContextSize;
         entity.GpuLayers = ViewModel.GpuLayers;

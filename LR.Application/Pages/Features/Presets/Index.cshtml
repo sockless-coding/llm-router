@@ -59,7 +59,22 @@ else
                 }
 
                 <div class="space-y-1 text-sm text-text-primary">
-                    <p><span class="text-text-secondary">Model:</span> @Truncate(preset.ModelPath, 80)</p>
+                    @{ var linkedModel = preset.ModelId.HasValue ? Model.ModelsById.GetValueOrDefault(preset.ModelId.Value) : null; }
+                    @if (linkedModel is not null)
+                    {
+                        <p>
+                            <span class="text-text-secondary">Model:</span>
+                            <a href="/Features/Models/Details?id=@linkedModel.Id" class="hover:text-neon-magenta transition-colors">@Truncate(linkedModel.Name, 60)</a>
+                            @if (!string.IsNullOrEmpty(linkedModel.QuantizationLevel))
+                            {
+                                <span class="text-xs px-1.5 py-0.5 rounded bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/20 ml-1">@linkedModel.QuantizationLevel</span>
+                            }
+                        </p>
+                    }
+                    else
+                    {
+                        <p><span class="text-text-secondary">Model:</span> @Truncate(preset.ModelPath, 80)</p>
+                    }
                     <p><span class="text-text-secondary">Context Size:</span> @(preset.ContextSize?.ToString() ?? "auto")</p>
                     <p><span class="text-text-secondary">GPU Layers:</span> @(preset.GpuLayers?.ToString() ?? "auto")</p>
                 </div>

@@ -1,0 +1,90 @@
+@page
+@using LR.Core.Models
+@model LR.Application.Pages.Features.Models.ModelsDetailsModel
+@{
+    ViewData["Title"] = Model.LocalModel.Name;
+
+    string FormatSize(long? bytes)
+    {
+        if (bytes is null) return "—";
+        double gb = bytes.Value / 1024.0 / 1024.0 / 1024.0;
+        return gb >= 1 ? $"{gb:F2} GB" : $"{bytes.Value / 1024.0 / 1024.0:F1} MB";
+    }
+}
+
+<div class="max-w-4xl mx-auto space-y-6">
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-text-primary">@Model.LocalModel.Name</h1>
+        <a href="/Features/Models/Index" class="px-4 py-2 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all text-sm font-medium">
+            Back to Models
+        </a>
+    </div>
+
+    <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-3">
+        <h2 class="text-lg font-semibold text-text-primary mb-2">Overview</h2>
+        <dl class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div><dt class="text-text-secondary">File Path</dt><dd class="text-text-primary break-all">@Model.LocalModel.FilePath</dd></div>
+            <div><dt class="text-text-secondary">Source</dt><dd class="text-text-primary">@Model.LocalModel.Source</dd></div>
+            <div><dt class="text-text-secondary">Status</dt><dd class="text-text-primary">@Model.LocalModel.Status @(Model.LocalModel.StatusMessage is not null ? $"({Model.LocalModel.StatusMessage})" : "")</dd></div>
+            <div><dt class="text-text-secondary">File Size</dt><dd class="text-text-primary">@FormatSize(Model.LocalModel.FileSizeBytes)</dd></div>
+            @if (Model.LocalModel.Source == ModelSource.HuggingFace)
+            {
+                <div><dt class="text-text-secondary">Repo</dt><dd class="text-text-primary">@Model.LocalModel.HfRepoId / @Model.LocalModel.HfFilename</dd></div>
+                <div><dt class="text-text-secondary">Revision</dt><dd class="text-text-primary break-all">@Model.LocalModel.HfRevision</dd></div>
+            }
+        </dl>
+    </div>
+
+    <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-3">
+        <h2 class="text-lg font-semibold text-text-primary mb-2">GGUF Metadata</h2>
+        <dl class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div><dt class="text-text-secondary">Architecture</dt><dd class="text-text-primary">@(Model.LocalModel.Architecture ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">Model Name</dt><dd class="text-text-primary">@(Model.LocalModel.GgufModelName ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">Parameters</dt><dd class="text-text-primary">@(Model.LocalModel.ParameterSize ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">Quantization</dt><dd class="text-text-primary">@(Model.LocalModel.QuantizationLevel ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">Context Length</dt><dd class="text-text-primary">@(Model.LocalModel.ContextLength?.ToString() ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">Embedding Length</dt><dd class="text-text-primary">@(Model.LocalModel.EmbeddingLength?.ToString() ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">Feed Forward Length</dt><dd class="text-text-primary">@(Model.LocalModel.FeedForwardLength?.ToString() ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">Block Count</dt><dd class="text-text-primary">@(Model.LocalModel.BlockCount?.ToString() ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">Head Count</dt><dd class="text-text-primary">@(Model.LocalModel.HeadCount?.ToString() ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">KV Head Count</dt><dd class="text-text-primary">@(Model.LocalModel.KvHeadCount?.ToString() ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">RoPE Freq Base</dt><dd class="text-text-primary">@(Model.LocalModel.RopeFreqBase?.ToString() ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">BOS / EOS Token</dt><dd class="text-text-primary">@(Model.LocalModel.BosTokenId?.ToString() ?? "—") / @(Model.LocalModel.EosTokenId?.ToString() ?? "—")</dd></div>
+        </dl>
+
+        @if (!string.IsNullOrEmpty(Model.LocalModel.ChatTemplate))
+        {
+            <div>
+                <p class="text-text-secondary text-sm mb-1">Chat Template</p>
+                <pre class="text-xs bg-cyber-bg-dark rounded-lg p-3 overflow-x-auto text-text-primary">@Model.LocalModel.ChatTemplate</pre>
+            </div>
+        }
+
+        @if (Model.KvPairs is not null)
+        {
+            <details class="mt-2">
+                <summary class="cursor-pointer text-sm text-neon-cyan">Raw GGUF key-value pairs (@Model.KvPairs.Count)</summary>
+                <pre class="text-xs bg-cyber-bg-dark rounded-lg p-3 mt-2 overflow-x-auto text-text-primary">@System.Text.Json.JsonSerializer.Serialize(Model.KvPairs, new System.Text.Json.JsonSerializerOptions { WriteIndented = true })</pre>
+            </details>
+        }
+    </div>
+
+    <div class="bg-cyber-card rounded-xl p-6 border border-gray-600/20 space-y-3">
+        <h2 class="text-lg font-semibold text-text-primary mb-2">Used By Presets (@Model.UsedByPresets.Count)</h2>
+        @if (!Model.UsedByPresets.Any())
+        {
+            <p class="text-text-secondary text-sm">No presets currently reference this model.</p>
+        }
+        else
+        {
+            <ul class="space-y-1">
+                @foreach (var preset in Model.UsedByPresets)
+                {
+                    <li>
+                        <a href="/Features/Presets/Edit?Id=@preset.Id" class="text-sm text-neon-magenta hover:underline">@preset.Name</a>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>

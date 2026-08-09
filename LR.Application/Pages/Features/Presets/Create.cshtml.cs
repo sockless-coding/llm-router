@@ -10,33 +10,48 @@ public class PresetCreateModel : PageModel
 {
     private readonly IPresetManager _presetManager;
     private readonly IServerManager _serverManager;
+    private readonly IModelLibrary _modelLibrary;
 
     [BindProperty]
     public PresetViewModel ViewModel { get; set; } = new();
 
     public IReadOnlyList<Core.Models.ServerInstance> Servers { get; set; } = new List<Core.Models.ServerInstance>();
+    public IReadOnlyList<Core.Models.LocalModel> Models { get; set; } = new List<Core.Models.LocalModel>();
 
-    public PresetCreateModel(IPresetManager presetManager, IServerManager serverManager)
+    public PresetCreateModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary)
     {
         _presetManager = presetManager;
         _serverManager = serverManager;
+        _modelLibrary = modelLibrary;
     }
 
-    public void OnGet()
+    public async Task OnGetAsync()
     {
         Servers = _serverManager.GetAllInstances();
+        Models = await _modelLibrary.GetAllAsync();
     }
 
     public async Task<IActionResult> OnPostAsync()
     {
+        if (!ViewModel.ModelId.HasValue && string.IsNullOrWhiteSpace(ViewModel.ModelPath))
+            ModelState.AddModelError("ViewModel.ModelPath", "Select a model from the library, or enter a path manually.");
+
         if (!ModelState.IsValid)
+        {
+            Servers = _serverManager.GetAllInstances();
+            Models = await _modelLibrary.GetAllAsync();
             return Page();
+        }
+
+        // A filled-in manual override always wins over a selected registry model.
+        var modelId = string.IsNullOrWhiteSpace(ViewModel.ModelPath) ? ViewModel.ModelId : null;
 
         var preset = new Core.Models.ModelPreset
         {
             Id = Guid.NewGuid(),
             ServerInstanceId = ViewModel.ServerInstanceId,
             Name = ViewModel.Name,
+            ModelId = modelId,
             ModelPath = ViewModel.ModelPath,
             ContextSize = ViewModel.ContextSize,
             GpuLayers = ViewModel.GpuLayers,
@@ -129,7 +144,17 @@ public class PresetViewModel
     [Required, MaxLength(256)]
     public string Name { get; set; } = "";
 
-    [Required, MaxLength(1024)]
+    /// <summary>
+    /// Selected model from the registry. When set, this takes precedence over
+    /// <see cref="ModelPath"/> — see <c>PresetManager.ApplyLinkedModelAsync</c>.
+    /// </summary>
+    public Guid? ModelId { get; set; }
+
+    /// <summary>
+    /// Manual path override, used when no registry model is selected. Not [Required] here because
+    /// validity depends on ModelId — enforced explicitly in the page handlers.
+    /// </summary>
+    [MaxLength(1024)]
     public string ModelPath { get; set; } = "";
 
     // Core
