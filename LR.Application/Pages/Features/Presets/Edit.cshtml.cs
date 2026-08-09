@@ -154,7 +154,7 @@ public class PresetEditModel : PageModel
         entity.Name = ViewModel.Name;
         // A filled-in manual override always wins over a selected registry model.
         entity.ModelId = string.IsNullOrWhiteSpace(ViewModel.ModelPath) ? ViewModel.ModelId : null;
-        entity.ModelPath = ViewModel.ModelPath;
+        entity.ModelPath = ViewModel.ModelPath ?? "";
         entity.ContextSize = ViewModel.ContextSize;
         entity.GpuLayers = ViewModel.GpuLayers;
         entity.CacheTypeK = ViewModel.CacheTypeK;

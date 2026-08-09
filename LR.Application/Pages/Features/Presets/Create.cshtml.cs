@@ -52,7 +52,7 @@ public class PresetCreateModel : PageModel
             ServerInstanceId = ViewModel.ServerInstanceId,
             Name = ViewModel.Name,
             ModelId = modelId,
-            ModelPath = ViewModel.ModelPath,
+            ModelPath = ViewModel.ModelPath ?? "",
             ContextSize = ViewModel.ContextSize,
             GpuLayers = ViewModel.GpuLayers,
             CacheTypeK = ViewModel.CacheTypeK,
@@ -151,11 +151,14 @@ public class PresetViewModel
     public Guid? ModelId { get; set; }
 
     /// <summary>
-    /// Manual path override, used when no registry model is selected. Not [Required] here because
-    /// validity depends on ModelId — enforced explicitly in the page handlers.
+    /// Manual path override, used when no registry model is selected. Nullable (not [Required])
+    /// because validity depends on ModelId — enforced explicitly in the page handlers. Must stay
+    /// nullable: with Nullable enabled project-wide, a non-nullable string here would make the
+    /// tag helpers render an implicit "required" attribute on the input, blocking submission
+    /// whenever a model is picked from the dropdown instead of typed manually.
     /// </summary>
     [MaxLength(1024)]
-    public string ModelPath { get; set; } = "";
+    public string? ModelPath { get; set; }
 
     // Core
     public int? ContextSize { get; set; }
