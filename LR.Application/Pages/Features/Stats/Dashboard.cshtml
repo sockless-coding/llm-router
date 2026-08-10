@@ -134,7 +134,7 @@ const presets = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Preset
 // average formula GetAvgTotalLatencyAsync uses, since both share the same 24h/all-servers scope.
 let liveTotalRequests = @Model.TotalRequests;
 let liveTotalTokens = @Model.TotalTokens;
-let liveAvgLatencyMs = @Model.AvgLatencyMs;
+let liveAvgLatencyMs = @Model.AvgLatencyMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
 // Line colors, read straight from the active theme's --neon-* variables (site.css picks
 // values that clear >= 3:1 contrast against the canvas background per WCAG 1.4.11 already).
