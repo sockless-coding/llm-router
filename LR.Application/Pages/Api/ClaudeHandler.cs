@@ -22,6 +22,7 @@ public class ClaudeHandler : IProtocolHandler
     private readonly IStatisticsService _statisticsService;
     private readonly IApiRequestLogger _requestLogger;
     private readonly GatewaySettings _gatewaySettings;
+    private readonly IApiKeyRequestContext _apiKeyContext;
 
     public ApiProtocol Protocol => ApiProtocol.Claude;
     public string PathPrefix => "/v1";
@@ -33,7 +34,8 @@ public class ClaudeHandler : IProtocolHandler
         IRequestQueueService queue,
         IStatisticsService statisticsService,
         IApiRequestLogger requestLogger,
-        GatewaySettings gatewaySettings)
+        GatewaySettings gatewaySettings,
+        IApiKeyRequestContext apiKeyContext)
     {
         _serverManager = serverManager;
         _presetManager = presetManager;
@@ -42,6 +44,7 @@ public class ClaudeHandler : IProtocolHandler
         _statisticsService = statisticsService;
         _requestLogger = requestLogger;
         _gatewaySettings = gatewaySettings;
+        _apiKeyContext = apiKeyContext;
     }
 
     public Task<object> HandleListModelsAsync()
@@ -56,6 +59,19 @@ public class ClaudeHandler : IProtocolHandler
         var body = await reader.ReadToEndAsync(cancellationToken);
         var request = JsonSerializer.Deserialize<CreateMessageRequest>(body);
         if (request is null) return Microsoft.AspNetCore.Http.Results.BadRequest("Invalid JSON in request body");
+
+        // Reject models this API key isn't scoped to before touching the routing engine —
+        // RoutingEngine's round-robin fallback would otherwise happily route an unresolved
+        // model name to any healthy server, silently bypassing the scoping.
+        var requestedPreset = _presetManager.GetAllPresets().FirstOrDefault(p => p.Name == request.Model);
+        if (requestedPreset is not null && !_apiKeyContext.IsModelAllowed(requestedPreset.Id))
+        {
+            return Microsoft.AspNetCore.Http.Results.Json(new
+            {
+                type = "error",
+                error = new { type = "permission_error", message = $"Model '{request.Model}' is not accessible with this API key." }
+            }, statusCode: 403);
+        }
 
         // Build internal RouteRequest from the Claude request
         var routeRequest = BuildRouteRequest(request);

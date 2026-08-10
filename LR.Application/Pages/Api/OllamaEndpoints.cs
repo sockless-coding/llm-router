@@ -22,13 +22,15 @@ public static class OllamaEndpoints
     /// </summary>
     public static IEndpointRouteBuilder MapOllamaEndpoints(this IEndpointRouteBuilder app)
     {
+        var group = app.MapGroup("").AddEndpointFilter<ApiKeyAuthFilter>();
+
         // GET /api/version — reports the Ollama-compatible server version.
         // Required by some clients (e.g. VS Code Copilot Chat's Ollama provider) which gate
         // model discovery on a minimum server version before models reach the model picker.
-        app.MapGet("/api/version", () => Results.Json(new { version = "0.9.0" }));
+        group.MapGet("/api/version", () => Results.Json(new { version = "0.9.0" }));
 
         // POST /api/chat — chat completions with messages array
-        app.MapPost("/api/chat", async (
+        group.MapPost("/api/chat", async (
                 OllamaHandler handler,
                 HttpRequest httpRequest,
                 HttpResponse httpResponse,
@@ -38,7 +40,7 @@ public static class OllamaEndpoints
             });
 
         // GET /api/tags — list available models
-        app.MapGet("/api/tags", async (
+        group.MapGet("/api/tags", async (
                 OllamaHandler handler) =>
             {
                 var result = await handler.HandleListModelsAsync();
@@ -46,7 +48,7 @@ public static class OllamaEndpoints
             });
 
         // POST /api/show — show model information
-        app.MapPost("/api/show", async (OllamaHandler handler, HttpRequest httpRequest) =>
+        group.MapPost("/api/show", async (OllamaHandler handler, HttpRequest httpRequest) =>
         {
             using var reader = new StreamReader(httpRequest.Body);
             var body = await reader.ReadToEndAsync();
@@ -66,7 +68,7 @@ public static class OllamaEndpoints
         });
 
         // POST /api/generate — text generation with a single prompt
-        app.MapPost("/api/generate", async (
+        group.MapPost("/api/generate", async (
                 OllamaHandler handler,
                 HttpRequest httpRequest,
                 HttpResponse httpResponse,
@@ -76,7 +78,7 @@ public static class OllamaEndpoints
             });
 
         // POST /api/embed — generate embeddings from a model
-        app.MapPost("/api/embed", async (OllamaHandler handler, HttpRequest httpRequest) =>
+        group.MapPost("/api/embed", async (OllamaHandler handler, HttpRequest httpRequest) =>
         {
             using var reader = new StreamReader(httpRequest.Body);
             var body = await reader.ReadToEndAsync();
@@ -93,7 +95,7 @@ public static class OllamaEndpoints
         });
 
         // GET /api/ps — list models currently loaded in memory
-        app.MapGet("/api/ps", async (
+        group.MapGet("/api/ps", async (
                 OllamaHandler handler) =>
             {
                 var result = await handler.HandlePsAsync();

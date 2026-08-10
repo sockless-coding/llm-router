@@ -1,0 +1,110 @@
+@page
+@using LR.Application.Pages.Features.ApiKeys
+@model ApiKeyCreateModel
+@{
+    ViewData["Title"] = "New API Key";
+}
+
+@{ var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500"; }
+
+<div class="max-w-2xl mx-auto px-4 py-6">
+    <h1 class="text-3xl font-bold mb-6 text-neon-cyan"><span aria-hidden="true">🔑</span> New API Key</h1>
+
+    @if (Model.CreatedRawKey is not null)
+    {
+        <div class="bg-cyber-card rounded-xl p-6 border border-neon-green/30 shadow-neon-green space-y-4">
+            <h2 class="text-lg font-semibold text-neon-green">Key created: @Model.CreatedKeyName</h2>
+            <p class="text-sm text-text-secondary">Copy this key now — for security it won't be shown again. If you lose it, regenerate a new one from the API Keys list.</p>
+            <code class="block bg-cyber-bg-dark border border-gray-600/30 rounded-lg p-3 text-sm text-neon-green break-all">@Model.CreatedRawKey</code>
+            <a href="/Features/ApiKeys/Index" class="inline-block px-6 py-2.5 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium text-sm">
+                Done
+            </a>
+        </div>
+    }
+    else
+    {
+        <form method="post" class="space-y-6">
+            @Html.AntiForgeryToken()
+
+            @if (!ViewData.ModelState.IsValid)
+            {
+                <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 space-y-2" role="alert">
+                    <h3 class="text-sm font-semibold text-red-400">Please fix the following errors:</h3>
+                    <ul class="list-disc list-inside text-sm text-red-300 space-y-1">
+                        @foreach (var entry in ViewData.ModelState.Values.Where(e => e?.Errors != null && e.Errors.Any()))
+                        {
+                            @foreach (var error in entry.Errors)
+                            {
+                                <li>@error.ErrorMessage</li>
+                            }
+                        }
+                    </ul>
+                </div>
+            }
+
+            <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
+                <h2 class="text-lg font-semibold text-text-primary">Identity</h2>
+
+                <div>
+                    <label asp-for="ViewModel.Name" class="block text-sm font-medium text-text-secondary mb-1">Name</label>
+                    <input asp-for="ViewModel.Name" required placeholder="e.g. vscode-copilot, ci-pipeline" class="@inpCls" />
+                    <span asp-validation-for="ViewModel.Name" class="text-xs text-red-400"></span>
+                </div>
+            </div>
+
+            <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
+                <h2 class="text-lg font-semibold text-text-primary">Model Access</h2>
+
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="allow-all-toggle" name="ViewModel.AllowAllModels" value="true"
+                           checked="@(Model.ViewModel.AllowAllModels ? "checked" : null)"
+                           class="w-4 h-4 rounded border-gray-600 text-neon-magenta focus:ring-neon-magenta/30" />
+                    <!-- Always send false when unchecked — a plain unchecked checkbox submits nothing at all -->
+                    <input type="hidden" name="ViewModel.AllowAllModels" value="false" />
+                    <span class="text-sm text-text-primary">Allow all models</span>
+                </label>
+
+                <div id="preset-picker" class="@(Model.ViewModel.AllowAllModels ? "hidden" : "") space-y-2 pt-2 border-t border-gray-700/20">
+                    <p class="text-xs text-text-secondary">Select the specific presets this key may use:</p>
+                    @if (!Model.Presets.Any())
+                    {
+                        <p class="text-sm text-text-secondary">No presets configured yet.</p>
+                    }
+                    else
+                    {
+                        <div class="grid grid-cols-2 gap-2">
+                            @foreach (var preset in Model.Presets)
+                            {
+                                <label class="flex items-center gap-2 text-sm text-text-primary cursor-pointer">
+                                    <input type="checkbox" name="ViewModel.SelectedPresetIds" value="@preset.Id"
+                                           class="w-4 h-4 rounded border-gray-600 text-neon-magenta focus:ring-neon-magenta/30" />
+                                    @preset.Name
+                                </label>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button type="submit"
+                        class="px-6 py-2.5 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all font-medium text-sm shadow-neon-magenta">
+                    Create Key
+                </button>
+                <a href="/Features/ApiKeys/Index"
+                   class="px-6 py-2.5 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium text-sm">
+                    Cancel
+                </a>
+            </div>
+        </form>
+
+        <script>
+            (function () {
+                const toggle = document.getElementById('allow-all-toggle');
+                const picker = document.getElementById('preset-picker');
+                if (!toggle || !picker) return;
+                toggle.addEventListener('change', () => picker.classList.toggle('hidden', toggle.checked));
+            })();
+        </script>
+    }
+</div>

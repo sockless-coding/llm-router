@@ -58,4 +58,13 @@ public class GatewaySettings
     /// Default: 300 (5 minutes). Set to -1 for no timeout.
     /// </summary>
     public int BackendTimeoutSeconds { get; set; } = 300;
+
+    // ── API key authentication ───────────────────────────────────────
+
+    /// <summary>
+    /// Whether protocol endpoints require a valid API key (Authorization: Bearer or x-api-key).
+    /// When disabled, all requests pass through unauthenticated regardless of configured keys.
+    /// Default: false.
+    /// </summary>
+    public bool RequireApiKey { get; set; } = false;
 }

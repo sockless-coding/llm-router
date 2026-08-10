@@ -18,6 +18,8 @@ public class LRDbContext : DbContext
     public DbSet<Models.StoredResponse> StoredResponses => Set<Models.StoredResponse>();
     public DbSet<Models.LocalModel> LocalModels => Set<Models.LocalModel>();
     public DbSet<Models.ModelLibrarySettings> ModelLibrarySettings => Set<Models.ModelLibrarySettings>();
+    public DbSet<Models.ApiKey> ApiKeys => Set<Models.ApiKey>();
+    public DbSet<Models.ApiKeyModelPreset> ApiKeyModelPresets => Set<Models.ApiKeyModelPreset>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -183,6 +185,32 @@ public class LRDbContext : DbContext
             // Used to walk previous_response_id chains and for retention cleanup.
             entity.HasIndex(e => e.PreviousResponseId);
             entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // ApiKey configurations
+        modelBuilder.Entity<Models.ApiKey>(entity =>
+        {
+            entity.ToTable("ApiKeys");
+            entity.HasIndex(e => e.KeyHash).IsUnique();
+        });
+
+        // ApiKeyModelPreset configurations (many-to-many join: key <-> allowed preset)
+        modelBuilder.Entity<Models.ApiKeyModelPreset>(entity =>
+        {
+            entity.ToTable("ApiKeyModelPresets");
+            entity.HasKey(e => new { e.ApiKeyId, e.ModelPresetId });
+
+            // Deleting a key drops its scoping rows; deleting a preset drops any rows that
+            // reference it (the key itself keeps existing, just with one less allowed model).
+            entity.HasOne(e => e.ApiKey)
+                .WithMany(k => k.AllowedPresets)
+                .HasForeignKey(e => e.ApiKeyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ModelPreset)
+                .WithMany()
+                .HasForeignKey(e => e.ModelPresetId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

@@ -15,7 +15,9 @@ public static class OpenAiEndpoints
     /// </summary>
     public static IEndpointRouteBuilder MapOpenAiEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/v1/chat/completions", async (
+        var group = app.MapGroup("").AddEndpointFilter<ApiKeyAuthFilter>();
+
+        group.MapPost("/v1/chat/completions", async (
                 OpenAiHandler handler,
                 HttpRequest httpRequest,
                 HttpResponse httpResponse,
@@ -24,7 +26,7 @@ public static class OpenAiEndpoints
                 return await handler.HandleChatCompletionAsync(httpRequest, httpResponse, ct);
             });
 
-        app.MapGet("/v1/models", async (
+        group.MapGet("/v1/models", async (
                 OpenAiHandler handler) =>
             {
                 var result = await handler.HandleListModelsAsync();

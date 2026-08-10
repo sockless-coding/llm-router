@@ -17,7 +17,9 @@ public static class ResponsesEndpoints
     /// </summary>
     public static IEndpointRouteBuilder MapResponsesEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/v1/responses", async (
+        var group = app.MapGroup("").AddEndpointFilter<ApiKeyAuthFilter>();
+
+        group.MapPost("/v1/responses", async (
                 ResponsesHandler handler,
                 HttpRequest httpRequest,
                 HttpResponse httpResponse,
@@ -26,7 +28,7 @@ public static class ResponsesEndpoints
                 return await handler.HandleCreateAsync(httpRequest, httpResponse, ct);
             });
 
-        app.MapGet("/v1/responses/{id}", async (
+        group.MapGet("/v1/responses/{id}", async (
                 ResponsesHandler handler,
                 string id,
                 CancellationToken ct) =>
@@ -34,7 +36,7 @@ public static class ResponsesEndpoints
                 return await handler.HandleRetrieveAsync(id, ct);
             });
 
-        app.MapDelete("/v1/responses/{id}", async (
+        group.MapDelete("/v1/responses/{id}", async (
                 ResponsesHandler handler,
                 string id,
                 CancellationToken ct) =>
@@ -42,7 +44,7 @@ public static class ResponsesEndpoints
                 return await handler.HandleDeleteAsync(id, ct);
             });
 
-        app.MapPost("/v1/responses/{id}/cancel", async (
+        group.MapPost("/v1/responses/{id}/cancel", async (
                 ResponsesHandler handler,
                 string id,
                 CancellationToken ct) =>

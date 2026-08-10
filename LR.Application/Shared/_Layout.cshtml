@@ -36,6 +36,7 @@
     bool isPresets = path.StartsWith("/Features/Presets");
     bool isRequestLog = path.StartsWith("/Features/RequestLog");
     bool isStats = path.StartsWith("/Features/Stats");
+    bool isApiKeys = path.StartsWith("/Features/ApiKeys");
     bool isSettings = path.StartsWith("/Features/Settings");
     string activeStyle = @"color: var(--neon-cyan); background-color: rgba(0,245,255,0.1); border-left-color: var(--neon-cyan)";
     string inactiveStyle = @"color: var(--text-secondary)";
@@ -75,6 +76,11 @@
                 </a>
 
                 <div class="pt-2 mt-2 border-t" style="border-color: rgba(0,245,255,0.1)">
+                    <a href="/Features/ApiKeys/Index" aria-current="@(isApiKeys ? "page" : null)" class="@(isApiKeys ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isApiKeys ? activeStyle : inactiveStyle)">
+                        <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
+                        <span class="text-sm font-medium">API Keys</span>
+                    </a>
+
                     <a href="/Features/Settings/Index" aria-current="@(isSettings ? "page" : null)" class="@(isSettings ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isSettings ? activeStyle : inactiveStyle)">
                         <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         <span class="text-sm font-medium">Settings</span>

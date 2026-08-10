@@ -33,6 +33,9 @@ public class IndexModel : PageModel
     [BindProperty]
     public int QueueTimeoutSeconds { get; set; } = 300;
 
+    [BindProperty]
+    public bool RequireApiKey { get; set; }
+
     // Path to appsettings.json for persisting changes
     private static string ConfigPath =>
         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
@@ -53,6 +56,7 @@ public class IndexModel : PageModel
         RequestLogRetentionDays = s.RequestLogRetentionDays;
         MaxQueueSize = s.MaxQueueSize;
         QueueTimeoutSeconds = s.QueueTimeoutSeconds;
+        RequireApiKey = s.RequireApiKey;
     }
 
     public async Task<IActionResult> OnPostAsync([FromForm] string? action)
@@ -98,6 +102,7 @@ public class IndexModel : PageModel
                         gatewayDict["RequestLogRetentionDays"] = RequestLogRetentionDays;
                         gatewayDict["MaxQueueSize"] = MaxQueueSize;
                         gatewayDict["QueueTimeoutSeconds"] = QueueTimeoutSeconds;
+                        gatewayDict["RequireApiKey"] = RequireApiKey;
                         config["Gateway"] = gatewayDict;
                     }
                 }
@@ -119,6 +124,7 @@ public class IndexModel : PageModel
         RequestLogRetentionDays = s.RequestLogRetentionDays;
         MaxQueueSize = s.MaxQueueSize;
         QueueTimeoutSeconds = s.QueueTimeoutSeconds;
+        RequireApiKey = s.RequireApiKey;
 
         return Page();
     }

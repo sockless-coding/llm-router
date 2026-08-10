@@ -72,6 +72,26 @@ class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3
         <div class="bg-cyber-card rounded-xl p-6 border border-gray-700/30 mb-6">
             <h2 class="text-lg font-semibold text-neon-magenta mb-4"><span aria-hidden="true">🌐</span> API Gateway</h2>
 
+            <!-- Require API Key -->
+            <div class="flex items-center justify-between py-3 border-b border-gray-700/20">
+                <div id="requireApiKeyLabel">
+                    <p class="text-sm text-text-primary font-medium">Require API Key</p>
+                    <p class="text-xs text-text-secondary mt-0.5">
+                        Reject OpenAI/Responses/Claude/Ollama requests without a valid key. Manage keys under
+                        <a href="/Features/ApiKeys/Index" class="text-neon-cyan hover:underline">API Keys</a>.
+                    </p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" name="RequireApiKey" value="true" checked="@(Model.RequireApiKey ? "checked" : null)"
+class="sr-only peer" aria-labelledby="requireApiKeyLabel"
+                               asp-for="RequireApiKey" />
+                    <!-- Always send false when unchecked -->
+                    <input type="hidden" name="RequireApiKey" value="false" />
+                    <div class="w-11 h-6 bg-gray-700 rounded-full peer-checked:bg-neon-cyan/40 peer-focus:ring-2 peer-focus:ring-neon-cyan/30 transition-colors"></div>
+                    <span class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-md transform peer-checked:translate-x-5 transition-transform"></span>
+                </label>
+            </div>
+
             <!-- Max Queue Size -->
             <div class="flex items-center justify-between py-3 border-b border-gray-700/20">
                 <div id="maxQueueSizeLabel">

@@ -25,6 +25,7 @@ public class OllamaHandler : IProtocolHandler
     private readonly IGgufMetadataReader _ggufReader;
     private readonly IApiRequestLogger _requestLogger;
     private readonly GatewaySettings _gatewaySettings;
+    private readonly IApiKeyRequestContext _apiKeyContext;
 
     public ApiProtocol Protocol => ApiProtocol.Ollama;
     public string PathPrefix => "/api";
@@ -37,7 +38,8 @@ public class OllamaHandler : IProtocolHandler
         IStatisticsService statisticsService,
         IGgufMetadataReader ggufReader,
         IApiRequestLogger requestLogger,
-        GatewaySettings gatewaySettings)
+        GatewaySettings gatewaySettings,
+        IApiKeyRequestContext apiKeyContext)
     {
         _serverManager = serverManager;
         _presetManager = presetManager;
@@ -47,12 +49,13 @@ public class OllamaHandler : IProtocolHandler
         _ggufReader = ggufReader;
         _requestLogger = requestLogger;
         _gatewaySettings = gatewaySettings;
+        _apiKeyContext = apiKeyContext;
     }
 
     public async Task<object> HandleListModelsAsync()
     {
         var presets = await _presetManager.GetAllPresetsAsync();
-        var models = presets.Select(p =>
+        var models = _apiKeyContext.FilterAllowed(presets).Select(p =>
         {
             var architecture = p.GgufArchitecture ?? "llama";
 
@@ -107,7 +110,7 @@ public class OllamaHandler : IProtocolHandler
     {
         var presets = await _presetManager.GetAllPresetsAsync();
         var preset = presets.FirstOrDefault(p => p.Name == modelName);
-        if (preset is null)
+        if (preset is null || !_apiKeyContext.IsModelAllowed(preset.Id))
             return Microsoft.AspNetCore.Http.Results.NotFound($"Model '{modelName}' not found");
 
         // Read GGUF metadata from the model file for accurate, real-time data
@@ -218,6 +221,15 @@ public class OllamaHandler : IProtocolHandler
         var body = await reader.ReadToEndAsync(cancellationToken);
         var request = JsonSerializer.Deserialize<ChatRequest>(body);
         if (request is null) return Microsoft.AspNetCore.Http.Results.BadRequest("Invalid JSON in request body");
+
+        // Reject models this API key isn't scoped to before touching the routing engine —
+        // RoutingEngine's round-robin fallback would otherwise happily route an unresolved
+        // model name to any healthy server, silently bypassing the scoping.
+        var requestedPreset = _presetManager.GetAllPresets().FirstOrDefault(p => p.Name == request.Model);
+        if (requestedPreset is not null && !_apiKeyContext.IsModelAllowed(requestedPreset.Id))
+        {
+            return Microsoft.AspNetCore.Http.Results.Json(new { error = $"Model '{request.Model}' is not accessible with this API key." }, statusCode: 403);
+        }
 
         // Build internal RouteRequest from the Ollama request
         var routeRequest = BuildRouteRequest(request);
@@ -378,6 +390,15 @@ public class OllamaHandler : IProtocolHandler
         var request = JsonSerializer.Deserialize<GenerateRequest>(body);
         if (request is null) return Microsoft.AspNetCore.Http.Results.BadRequest("Invalid JSON in request body");
 
+        // Reject models this API key isn't scoped to before touching the routing engine —
+        // RoutingEngine's round-robin fallback would otherwise happily route an unresolved
+        // model name to any healthy server, silently bypassing the scoping.
+        var requestedPreset = _presetManager.GetAllPresets().FirstOrDefault(p => p.Name == request.Model);
+        if (requestedPreset is not null && !_apiKeyContext.IsModelAllowed(requestedPreset.Id))
+        {
+            return Microsoft.AspNetCore.Http.Results.Json(new { error = $"Model '{request.Model}' is not accessible with this API key." }, statusCode: 403);
+        }
+
         // Convert generate request to chat-style internal request
         var routeRequest = BuildRouteRequestFromGenerate(request);
 
@@ -506,7 +527,7 @@ public class OllamaHandler : IProtocolHandler
         // Find a running server for the requested model
         var presets = await _presetManager.GetAllPresetsAsync();
         var preset = presets.FirstOrDefault(p => p.Name == request.Model);
-        if (preset is null)
+        if (preset is null || !_apiKeyContext.IsModelAllowed(preset.Id))
             return Microsoft.AspNetCore.Http.Results.NotFound($"Model '{request.Model}' not found");
 
         // For now, return a placeholder embedding response.
@@ -542,7 +563,7 @@ public class OllamaHandler : IProtocolHandler
                 continue;
 
             var preset = _presetManager.GetById(presetId.Value);
-            if (preset is null)
+            if (preset is null || !_apiKeyContext.IsModelAllowed(preset.Id))
                 continue;
 
             // Get actual model file size

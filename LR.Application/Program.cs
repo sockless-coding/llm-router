@@ -50,6 +50,10 @@ builder.Services.AddScoped<IPresetManager, PresetManager>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<IRoutingEngine, RoutingEngine>();
 
+// API key authentication (Scoped — need DbContext for validation, and per-request state for scoping)
+builder.Services.AddScoped<IApiKeyManager, ApiKeyManager>();
+builder.Services.AddScoped<IApiKeyRequestContext, ApiKeyRequestContext>();
+
 // GGUF metadata reader (Singleton — stateless file reader)
 builder.Services.AddSingleton<IGgufMetadataReader, GgufMetadataReader>();
 

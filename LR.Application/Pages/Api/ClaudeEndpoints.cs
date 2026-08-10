@@ -14,7 +14,9 @@ public static class ClaudeEndpoints
     /// </summary>
     public static IEndpointRouteBuilder MapClaudeEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/v1/messages", async (
+        var group = app.MapGroup("").AddEndpointFilter<ApiKeyAuthFilter>();
+
+        group.MapPost("/v1/messages", async (
                 ClaudeHandler handler,
                 HttpRequest httpRequest,
                 HttpResponse httpResponse,

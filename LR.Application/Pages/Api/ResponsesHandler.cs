@@ -48,6 +48,7 @@ public class ResponsesHandler
     private readonly ResponseChainBuilder _chainBuilder;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IBackgroundResponseRegistry _registry;
+    private readonly IApiKeyRequestContext _apiKeyContext;
 
     public ResponsesHandler(
         ILogger<ResponsesHandler> logger,
@@ -61,7 +62,8 @@ public class ResponsesHandler
         LRDbContext db,
         ResponseChainBuilder chainBuilder,
         IServiceScopeFactory scopeFactory,
-        IBackgroundResponseRegistry registry)
+        IBackgroundResponseRegistry registry,
+        IApiKeyRequestContext apiKeyContext)
     {
         _logger = logger;
         _serverManager = serverManager;
@@ -75,6 +77,7 @@ public class ResponsesHandler
         _chainBuilder = chainBuilder;
         _scopeFactory = scopeFactory;
         _registry = registry;
+        _apiKeyContext = apiKeyContext;
     }
 
     public async Task<IResult> HandleCreateAsync(HttpRequest httpRequest, HttpResponse httpResponse, CancellationToken cancellationToken)
@@ -113,6 +116,12 @@ public class ResponsesHandler
             return Results.BadRequest(new { error = new { message = "`input` (or a valid `previous_response_id` conversation) is required." } });
 
         var preset = _presetManager.GetAllPresets().FirstOrDefault(p => p.Name == request.Model);
+
+        // Reject models this API key isn't scoped to before touching the routing engine —
+        // RoutingEngine's round-robin fallback would otherwise happily route an unresolved
+        // model name to any healthy server, silently bypassing the scoping.
+        if (preset is not null && !_apiKeyContext.IsModelAllowed(preset.Id))
+            return Results.Json(new { error = new { message = $"Model '{request.Model}' is not accessible with this API key." } }, statusCode: 403);
 
         // Background + non-streaming: fire-and-forget, return "queued" immediately so the caller
         // can poll GET /v1/responses/{id} or cancel it — llama.cpp itself is always synchronous

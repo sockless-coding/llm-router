@@ -1,0 +1,141 @@
+@page
+@using LR.Application.Pages.Features.ApiKeys
+@model ApiKeysListModel
+@{
+    ViewData["Title"] = "API Keys";
+}
+
+<div class="max-w-5xl mx-auto px-4 py-6">
+    <form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-3xl font-bold text-neon-cyan"><span aria-hidden="true">🔑</span> API Keys</h1>
+            <p class="text-text-secondary mt-1">Manage keys that authenticate clients against the OpenAI, Responses, Claude, and Ollama endpoints.</p>
+        </div>
+        <a href="/Features/ApiKeys/Create" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all text-sm font-medium">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+            New API Key
+        </a>
+    </div>
+
+    <div class="mb-6 rounded-xl p-4 border border-neon-cyan/20 bg-neon-cyan/5">
+        <p class="text-sm text-text-primary">
+            Keys are only enforced when <strong>Require API Key</strong> is turned on in
+            <a href="/Features/Settings/Index" class="text-neon-cyan hover:underline">Settings</a>.
+        </p>
+    </div>
+
+    @if (!Model.Keys.Any())
+    {
+        <div class="text-center py-16 bg-cyber-card rounded-xl border border-neon-cyan/10">
+            <svg class="w-12 h-12 mx-auto text-text-secondary mb-3" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
+            <p class="text-text-secondary">No API keys yet</p>
+            <p class="text-text-secondary text-sm mt-1">Create one to start authenticating requests.</p>
+        </div>
+    }
+    else
+    {
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Key</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Models</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Last Used</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Status</th>
+                        <th class="text-right px-4 py-3 text-text-secondary font-medium">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var key in Model.Keys)
+                    {
+                        <tr class="border-b border-gray-700/20 hover:bg-gray-800/20">
+                            <td class="px-4 py-3 text-text-primary font-medium">@key.Name</td>
+                            <td class="px-4 py-3 text-text-secondary font-mono text-xs">@(key.KeyPrefix)…</td>
+                            <td class="px-4 py-3 text-text-secondary">
+                                @(key.AllowAllModels ? "All models" : $"{key.AllowedPresets.Count} model(s)")
+                            </td>
+                            <td class="px-4 py-3 text-text-secondary">@(key.LastUsedAt?.ToLocalTime().ToString("g") ?? "Never")</td>
+                            <td class="px-4 py-3">
+                                <button type="button" onclick="toggleKey('@key.Id')"
+                                        class="text-xs px-2.5 py-1 rounded-full border font-medium transition-all
+                                        @(key.IsEnabled ? "bg-neon-green/10 text-neon-green border-neon-green/30 hover:bg-neon-green/20" : "bg-gray-700/30 text-text-secondary border-gray-600/30 hover:bg-gray-700/50")">
+                                    @(key.IsEnabled ? "Enabled" : "Disabled")
+                                </button>
+                            </td>
+                            <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                                <a href="/Features/ApiKeys/Edit?id=@key.Id"
+                                   class="text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium">
+                                    Edit
+                                </a>
+                                <button type="button" onclick="regenerateKey('@key.Id', '@key.Name')"
+                                        class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">
+                                    Regenerate
+                                </button>
+                                <button type="button" onclick="deleteKey('@key.Id', '@key.Name')"
+                                        class="text-xs px-3 py-1.5 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">
+                                    Delete
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<!-- One-time key reveal modal (used by Regenerate) -->
+<div id="key-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div class="bg-cyber-card rounded-xl border border-neon-cyan/30 max-w-lg w-full p-6 shadow-neon-cyan">
+        <h3 class="text-lg font-semibold text-neon-cyan mb-2">New key generated</h3>
+        <p class="text-sm text-text-secondary mb-4">Copy this now — it won't be shown again.</p>
+        <code id="key-modal-value" class="block bg-cyber-bg-dark border border-gray-600/30 rounded-lg p-3 text-sm text-neon-green break-all mb-4"></code>
+        <button type="button" onclick="document.getElementById('key-modal').classList.add('hidden')"
+                class="px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">
+            Done
+        </button>
+    </div>
+</div>
+
+<script>
+function csrfToken() {
+    return document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+}
+
+async function toggleKey(id) {
+    try {
+        const resp = await fetch(`/Features/ApiKeys/Index?handler=Toggle&id=${id}`, { method: 'POST', headers: { 'RequestVerificationToken': csrfToken() } });
+        if (resp.ok) location.reload();
+        else alert('Failed to update key status.');
+    } catch (e) {
+        alert('Failed: ' + e.message);
+    }
+}
+
+async function regenerateKey(id, name) {
+    if (!confirm(`Regenerate the key for "${name}"? The old key will stop working immediately.`)) return;
+    try {
+        const resp = await fetch(`/Features/ApiKeys/Index?handler=Regenerate&id=${id}`, { method: 'POST', headers: { 'RequestVerificationToken': csrfToken() } });
+        if (!resp.ok) { alert('Failed to regenerate key.'); return; }
+        const result = await resp.json();
+        document.getElementById('key-modal-value').textContent = result.rawKey;
+        document.getElementById('key-modal').classList.remove('hidden');
+    } catch (e) {
+        alert('Failed: ' + e.message);
+    }
+}
+
+async function deleteKey(id, name) {
+    if (!confirm(`Delete API key "${name}"? This cannot be undone.`)) return;
+    try {
+        const resp = await fetch(`/Features/ApiKeys/Index?handler=Delete&id=${id}`, { method: 'POST', headers: { 'RequestVerificationToken': csrfToken() } });
+        if (resp.ok) location.reload();
+        else alert('Failed to delete key.');
+    } catch (e) {
+        alert('Delete failed.');
+    }
+}
+</script>
