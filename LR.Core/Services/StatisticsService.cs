@@ -12,10 +12,12 @@ namespace LR.Core.Services;
 public class StatisticsService : IStatisticsService
 {
     private readonly LRDbContext _context;
+    private readonly IStatHubPublisher _hubPublisher;
 
-    public StatisticsService(LRDbContext context)
+    public StatisticsService(LRDbContext context, IStatHubPublisher hubPublisher)
     {
         _context = context;
+        _hubPublisher = hubPublisher;
     }
 
     /// <inheritdoc />
@@ -43,6 +45,8 @@ public class StatisticsService : IStatisticsService
 
         _context.ModelStatistics.Add(stat);
         await _context.SaveChangesAsync();
+
+        await _hubPublisher.PublishAsync(stat);
     }
 
     /// <inheritdoc />

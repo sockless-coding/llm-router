@@ -36,7 +36,6 @@ public class RequestDispatcherService : BackgroundService
 
                 using var scope = _scopeFactory.CreateScope();
                 var serverManager = scope.ServiceProvider.GetRequiredService<IServerManager>();
-                var statisticsService = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
 
                 // Get all running healthy servers
                 var instances = await serverManager.GetAllInstancesAsync();
@@ -53,7 +52,7 @@ public class RequestDispatcherService : BackgroundService
                     if (_queue.TryDequeueMatching(server.ActivePresetId, out var item))
                     {
                         _ = ProcessRequestOnServer(server, item.Request, serverManager,
-                            item.Tcs, statisticsService, stoppingToken);
+                            item.Tcs, stoppingToken);
                     }
                 }
             }
@@ -75,7 +74,6 @@ public class RequestDispatcherService : BackgroundService
         RouteRequest request,
         IServerManager serverManager,
         TaskCompletionSource<RouteResponse> tcs,
-        IStatisticsService statisticsService,
         CancellationToken cancellationToken)
     {
         try
@@ -84,11 +82,15 @@ public class RequestDispatcherService : BackgroundService
 
             if (response != null)
             {
-                // Record statistics - resolve scoped services per-request
+                // Record statistics - resolve scoped services per-request (must be a fresh
+                // scope here, not one shared with the dispatch loop: that scope's DbContext
+                // gets disposed as soon as the loop moves on, since this method is invoked
+                // fire-and-forget and typically outlives the loop iteration that started it).
                 try
                 {
                     using var scope = _scopeFactory.CreateScope();
                     var presetManager = scope.ServiceProvider.GetRequiredService<IPresetManager>();
+                    var statisticsService = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
                     var presetId = request.PresetId ?? server.ActivePresetId;
                     var preset = presetId.HasValue ? presetManager.GetById(presetId.Value) : null;
                     await statisticsService.RecordRequestAsync(server, preset, response);

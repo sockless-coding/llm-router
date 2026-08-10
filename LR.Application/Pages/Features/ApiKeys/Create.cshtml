@@ -23,7 +23,7 @@
     }
     else
     {
-        <form method="post" class="space-y-6">
+        <form method="post" hx-boost="false" class="space-y-6">
             @Html.AntiForgeryToken()
 
             @if (!ViewData.ModelState.IsValid)

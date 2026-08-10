@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="dark" data-theme="neon">
+<html lang="en" class="dark" data-theme="sockless">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -24,8 +24,21 @@
 
     <!-- Self-hosted Tailwind build + theme (see Styles/site.css, built via `npm run build:css`) -->
     <link rel="stylesheet" href="~/css/site.css" />
+
+    <!-- Self-hosted htmx — boosts same-page <a>/<form> navigation into AJAX swaps of <body>,
+         so switching pages no longer does a full browser reload (see hx-boost below). -->
+    <script src="~/lib/htmx/htmx.min.js"></script>
+
+    <!-- Chart.js and SignalR live here rather than in the individual pages that use them:
+         under hx-boost, a page's own <script src> tags get re-inserted (and re-fetched)
+         on every boosted navigation to it, and browsers load dynamically-inserted <script
+         src> tags asynchronously — so a page's inline script can start running, and hit
+         "Chart/signalR is not defined", before its own library tag finishes loading. Both
+         are tiny enough to load once up front. -->
+    <script src="~/lib/chartjs/chart.umd.min.js"></script>
+    <script src="~/lib/signalr/signalr.min.js"></script>
 </head>
-<body style="background-color: var(--bg-main); color: var(--text-primary)" class="h-screen overflow-hidden transition-colors duration-300">
+<body hx-boost="true" style="background-color: var(--bg-main); color: var(--text-primary)" class="h-screen overflow-hidden transition-colors duration-300">
 
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
@@ -109,8 +122,8 @@
                 <select id="themeSelect" class="w-full text-sm rounded-lg px-3 py-2 border transition-all"
                         style="background-color: var(--bg-card); color: var(--text-primary); border-color: color-mix(in srgb, var(--neon-cyan) 20%, transparent)"
                         onchange="setThemeName(this.value)">
+                    <option value="sockless" selected>Sockless</option>
                     <option value="neon">Neon</option>
-                    <option value="sockless">Sockless</option>
                 </select>
 
                 <button id="themeToggle" type="button" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:text-neon-magenta transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-inherit"
@@ -187,7 +200,7 @@
         // whenever either control changes.
         function syncThemeControls() {
             const html = document.documentElement;
-            const themeName = html.getAttribute('data-theme') || 'neon';
+            const themeName = html.getAttribute('data-theme') || 'sockless';
             const isDark = html.classList.contains('dark');
             const darkOnly = isDarkOnlyTheme(themeName);
 

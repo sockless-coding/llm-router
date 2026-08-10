@@ -60,6 +60,9 @@ builder.Services.AddSingleton<IGgufMetadataReader, GgufMetadataReader>();
 // SignalR progress publisher (bridges LR.Core and LR.Application)
 builder.Services.AddScoped<LR.Core.Interfaces.ISignalRProgressPublisher, SignalRProgressPublisher>();
 
+// SignalR stats publisher (bridges LR.Core and LR.Application)
+builder.Services.AddScoped<LR.Core.Interfaces.IStatHubPublisher, StatHubPublisher>();
+
 // --- Model library (registry + Hugging Face integration) ---
 // Root folder / HF token are UI-controlled settings the app writes at runtime, so they're
 // persisted to the DB (single-row table) rather than appsettings.json — see
@@ -181,6 +184,9 @@ app.MapHub<LR.Application.Hubs.ServerHub>("/serverHub");
 
 // SignalR hub for model download progress
 app.MapHub<LR.Application.Hubs.ModelDownloadHub>("/modelDownloadHub");
+
+// SignalR hub for live inference statistics
+app.MapHub<LR.Application.Hubs.StatsHub>("/statsHub");
 
 // --- Health endpoint for agents ---
 app.MapGet("/health", async (IServerManager serverManager) =>

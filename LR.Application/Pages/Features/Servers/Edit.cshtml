@@ -17,7 +17,7 @@
 
 @if (Model.Server is not null)
 {
-    <form method="post" class="max-w-lg mx-auto">
+    <form method="post" hx-boost="false" class="max-w-lg mx-auto">
         @Html.AntiForgeryToken()
 
         <!-- Info section -->

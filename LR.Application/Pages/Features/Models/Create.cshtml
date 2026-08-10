@@ -7,7 +7,7 @@
 @{ var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500"; }
 
 <div class="max-w-3xl mx-auto">
-    <form method="post" class="space-y-6">
+    <form method="post" hx-boost="false" class="space-y-6">
         @Html.AntiForgeryToken()
 
         @if (!string.IsNullOrEmpty(Model.ErrorMessage))

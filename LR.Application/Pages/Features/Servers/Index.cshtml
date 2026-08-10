@@ -116,31 +116,42 @@
     </table>
 </div>
 
-<script src="~/lib/signalr/signalr.min.js"></script>
 <script>
 (function() {
-    // SignalR connection (shared across page)
-    let signalRConnection = null;
+    // SignalR connection, stored on window and reused across htmx-boosted navigations —
+    // Dashboard and Servers both talk to /serverHub, so without this, bouncing between
+    // them would disconnect and reconnect the socket on every single visit. Detach this
+    // page's previous handler first (if any) since it's a closure over stale DOM/state.
+    if (window.__serverHubHandler && window.__serverHubConnection) {
+        window.__serverHubConnection.off('ReceiveStartupProgress', window.__serverHubHandler);
+        window.__serverHubHandler = null;
+    }
 
     function connectSignalR() {
-        if (signalRConnection && signalRConnection.state === signalR.HubConnectionState.Connected) return;
+        let connection = window.__serverHubConnection;
+        const isLive = connection && connection.state !== signalR.HubConnectionState.Disconnected;
 
-        const connection = new signalR.HubConnectionBuilder()
-            .withUrl('/serverHub', { transport: signalR.HttpTransportType.WebSockets })
-            .withAutomaticReconnect()
-            .build();
+        if (!isLive) {
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl('/serverHub', { transport: signalR.HttpTransportType.WebSockets })
+                .withAutomaticReconnect()
+                .build();
+            window.__serverHubConnection = connection;
+        }
 
-        connection.on('ReceiveStartupProgress', (instanceId, eventType, message, elapsedSeconds) => {
+        const handler = (instanceId, eventType, message, elapsedSeconds) => {
             handleStartupProgress(instanceId, eventType, message, elapsedSeconds);
-        });
+        };
+        connection.on('ReceiveStartupProgress', handler);
+        window.__serverHubHandler = handler;
 
-        connection.start().then(() => {
-            console.log('[SignalR] Connected to serverHub');
-        }).catch(err => {
-            console.warn('[SignalR] Connection failed:', err.message);
-        });
-
-        signalRConnection = connection;
+        if (!isLive) {
+            connection.start().then(() => {
+                console.log('[SignalR] Connected to serverHub');
+            }).catch(err => {
+                console.warn('[SignalR] Connection failed:', err.message);
+            });
+        }
     }
 
     // Map event type enum values: 0=Starting, 1=ProcessStarted, 2=HealthChecking, 3=Healthy, 4=Error
@@ -239,7 +250,9 @@
     connectSignalR();
 })();
 
-let expandedCommands = {};
+// var, not let/const — this script re-runs on every htmx-boosted navigation to this page,
+// and top-level let/const would throw "already declared" the second time.
+var expandedCommands = {};
 
 async function toggleCommand(instanceId) {
     const rowId = 'server-row-' + instanceId;

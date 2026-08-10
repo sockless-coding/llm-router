@@ -34,7 +34,7 @@
 
     <!-- Filter Bar -->
     <div class="bg-cyber-card rounded-xl p-4 border border-gray-700/30 mb-6">
-        <form method="get" class="flex flex-wrap gap-4 items-center">
+        <form method="get" hx-boost="false" class="flex flex-wrap gap-4 items-center">
             <!-- Protocol filter -->
             <div>
                 <label class="block text-xs text-text-secondary mb-1">Protocol</label>
@@ -56,7 +56,7 @@
                     {
                         bool isActive = Model.TimeRange == range;
                         string activeClass = isActive ? "bg-neon-cyan/20 text-neon-cyan border border-neon-cyan shadow-neon-cyan" : "bg-gray-800/50 text-text-secondary border border-transparent hover:bg-neon-cyan/10 hover:text-neon-cyan";
-                        <a href="?protocol=@(Model.SelectedProtocol?.ToString() ?? "")&timeRange=@range"
+                        <a href="?protocol=@(Model.SelectedProtocol?.ToString() ?? "")&timeRange=@range" hx-boost="true"
 class="px-3 py-2 rounded-lg text-xs font-medium transition-colors @activeClass">
                             @range
                         </a>

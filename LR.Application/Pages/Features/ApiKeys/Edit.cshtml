@@ -10,7 +10,7 @@
 <div class="max-w-2xl mx-auto px-4 py-6">
     <h1 class="text-3xl font-bold mb-6 text-neon-cyan"><span aria-hidden="true">🔑</span> Edit API Key</h1>
 
-    <form method="post" class="space-y-6">
+    <form method="post" hx-boost="false" class="space-y-6">
         @Html.AntiForgeryToken()
         <input type="hidden" asp-for="Id" />
 

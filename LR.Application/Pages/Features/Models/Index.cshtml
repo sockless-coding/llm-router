@@ -44,7 +44,7 @@
         {
             <div class="text-sm text-neon-green">@Model.StatusMessage</div>
         }
-        <form method="post" asp-page-handler="SaveSettings" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <form method="post" asp-page-handler="SaveSettings" hx-boost="false" class="grid grid-cols-1 md:grid-cols-2 gap-4">
             @Html.AntiForgeryToken()
             <div>
                 <label asp-for="RootFolder" class="block text-sm font-medium text-text-secondary mb-1">Root Folder</label>
@@ -151,54 +151,77 @@ else
 }
 
 @section Scripts {
-    <script src="~/lib/signalr/signalr.min.js"></script>
     <script>
-        const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+        // Wrapped in an IIFE, and hub-facing functions exposed via window.*: this script
+        // re-runs on every htmx-boosted navigation to this page, and top-level let/const
+        // would throw "already declared" the second time.
+        (function () {
+            const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
 
-        async function postAction(fields) {
-            const formData = new FormData();
-            for (const [k, v] of Object.entries(fields)) formData.append(k, v);
-            formData.append('__RequestVerificationToken', token());
-            const resp = await fetch('/Features/Models/Actions', { method: 'POST', body: formData });
-            return resp.json();
-        }
+            async function postAction(fields) {
+                const formData = new FormData();
+                for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+                formData.append('__RequestVerificationToken', token());
+                const resp = await fetch('/Features/Models/Actions', { method: 'POST', body: formData });
+                return resp.json();
+            }
 
-        async function refreshModel(modelId) {
-            const result = await postAction({ Command: 'Refresh', ModelId: modelId });
-            if (result.success) location.reload();
-            else alert(result.message || 'Refresh failed.');
-        }
+            window.refreshModel = async function(modelId) {
+                const result = await postAction({ Command: 'Refresh', ModelId: modelId });
+                if (result.success) location.reload();
+                else alert(result.message || 'Refresh failed.');
+            };
 
-        async function deleteModel(modelId, name, usageCount) {
-            let msg = `Delete model "${name}"?`;
-            if (usageCount > 0) msg += ` It is referenced by ${usageCount} preset(s) — they will keep their current path but lose the registry link.`;
-            if (!confirm(msg)) return;
-            const deleteFile = confirm('Also delete the underlying file from disk?');
-            const result = await postAction({ Command: 'Delete', ModelId: modelId, DeleteFile: deleteFile });
-            if (result.success) location.reload();
-            else alert(result.message || 'Delete failed.');
-        }
+            window.deleteModel = async function(modelId, name, usageCount) {
+                let msg = `Delete model "${name}"?`;
+                if (usageCount > 0) msg += ` It is referenced by ${usageCount} preset(s) — they will keep their current path but lose the registry link.`;
+                if (!confirm(msg)) return;
+                const deleteFile = confirm('Also delete the underlying file from disk?');
+                const result = await postAction({ Command: 'Delete', ModelId: modelId, DeleteFile: deleteFile });
+                if (result.success) location.reload();
+                else alert(result.message || 'Delete failed.');
+            };
 
-        async function checkUpdate(modelId) {
-            const result = await postAction({ Command: 'CheckUpdate', ModelId: modelId });
-            if (!result.success) { alert(result.message || 'Could not check for updates.'); return; }
-            alert(result.updateAvailable ? `Update available (revision ${result.latestRevision}).` : 'Already up to date.');
-        }
+            window.checkUpdate = async function(modelId) {
+                const result = await postAction({ Command: 'CheckUpdate', ModelId: modelId });
+                if (!result.success) { alert(result.message || 'Could not check for updates.'); return; }
+                alert(result.updateAvailable ? `Update available (revision ${result.latestRevision}).` : 'Already up to date.');
+            };
 
-        // Live progress for any model currently downloading
-        const downloadBadges = document.querySelectorAll('.download-status');
-        if (downloadBadges.length > 0) {
-            const connection = new signalR.HubConnectionBuilder().withUrl('/modelDownloadHub').build();
-            connection.on('ReceiveDownloadProgress', (progress) => {
-                const badge = document.querySelector(`.download-status[data-model-id="${progress.modelId}"]`);
-                if (!badge) return;
-                if (progress.status === 'completed' || progress.status === 'error') {
-                    location.reload();
-                } else if (progress.percentComplete != null) {
-                    badge.textContent = `Downloading… ${progress.percentComplete}%`;
+            // Live progress for any model currently downloading. Connection is stored on
+            // window and reused across htmx-boosted navigations back to this page instead
+            // of being torn down and reconnected every time. Detach this page's previous
+            // handler first (if any) since it's a closure over a possibly-stale badge list.
+            if (window.__modelDownloadHubHandler && window.__modelDownloadHubConnection) {
+                window.__modelDownloadHubConnection.off('ReceiveDownloadProgress', window.__modelDownloadHubHandler);
+                window.__modelDownloadHubHandler = null;
+            }
+
+            const downloadBadges = document.querySelectorAll('.download-status');
+            if (downloadBadges.length > 0) {
+                let connection = window.__modelDownloadHubConnection;
+                const isLive = connection && connection.state !== signalR.HubConnectionState.Disconnected;
+                if (!isLive) {
+                    connection = new signalR.HubConnectionBuilder().withUrl('/modelDownloadHub').build();
+                    window.__modelDownloadHubConnection = connection;
                 }
-            });
-            connection.start().catch(() => {});
-        }
+
+                const handler = (progress) => {
+                    const badge = document.querySelector(`.download-status[data-model-id="${progress.modelId}"]`);
+                    if (!badge) return;
+                    if (progress.status === 'completed' || progress.status === 'error') {
+                        location.reload();
+                    } else if (progress.percentComplete != null) {
+                        badge.textContent = `Downloading… ${progress.percentComplete}%`;
+                    }
+                };
+                connection.on('ReceiveDownloadProgress', handler);
+                window.__modelDownloadHubHandler = handler;
+
+                if (!isLive) {
+                    connection.start().catch(() => {});
+                }
+            }
+        })();
     </script>
 }

@@ -16,7 +16,7 @@
 }
 
 <div class="max-w-lg mx-auto">
-    <form method="post" class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5">
+    <form method="post" hx-boost="false" class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5">
         @Html.AntiForgeryToken()
 
         <!-- Name -->
@@ -112,8 +112,11 @@ function toggleEngineFields() {
     }
 }
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', toggleEngineFields);
+// Runs immediately rather than on DOMContentLoaded: the <select> above is already in the
+// document by the time this script executes, both on a normal page load and on an
+// htmx-boosted navigation (DOMContentLoaded fires once per real browser navigation, so
+// gating on it would mean this never runs on a boosted revisit to this page).
+toggleEngineFields();
 </script>
 }
 

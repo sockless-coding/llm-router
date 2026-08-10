@@ -46,7 +46,8 @@
    else consume the roles via var(), not literal colors.
    ============================================================ */
 
-/* Neon (default) — cyberpunk, with a light and dark variant */
+/* Neon — cyberpunk, with a light and dark variant. Also the fallback
+   (bare :root) if data-theme is ever missing. */
 :root,
 html[data-theme="neon"] {
     --bg-main: #f0f0f5;
@@ -74,9 +75,10 @@ html[data-theme="neon"].dark {
     --neon-red: #ff2e63;
 }
 
-/* Sockless — steampunk/industrial palette matching sockless.tech. The source
-   site is dark-only, so this theme has no light variant; the light/dark
-   toggle is disabled while it's active (see syncThemeControls in _Layout). */
+/* Sockless (default) — steampunk/industrial palette matching sockless.tech.
+   The source site is dark-only, so this theme has no light variant; the
+   light/dark toggle is disabled while it's active (see syncThemeControls
+   in _Layout). */
 html[data-theme="sockless"] {
     --bg-main: #0d0d0d;
     --bg-surface: #1a1a1a;

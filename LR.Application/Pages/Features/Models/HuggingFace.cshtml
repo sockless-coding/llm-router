@@ -27,6 +27,9 @@
 
 @section Scripts {
     <script>
+        // Wrapped in an IIFE: this script re-runs on every htmx-boosted navigation to this
+        // page, and the top-level const below would throw "already declared" the second time.
+        (function () {
         const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
 
         async function postAction(fields) {
@@ -133,5 +136,6 @@
         document.getElementById('searchQuery').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') runSearch();
         });
+        })();
     </script>
 }

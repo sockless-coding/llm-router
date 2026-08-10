@@ -6,21 +6,27 @@
 }
 
 <div class="max-w-7xl mx-auto px-4 py-6">
-    <h1 class="text-3xl font-bold mb-6 text-neon-cyan"><span aria-hidden="true">📊</span> Statistics Dashboard</h1>
+    <h1 class="text-3xl font-bold mb-6 text-neon-cyan flex items-center gap-3">
+        <span aria-hidden="true">📊</span> Statistics Dashboard
+        <span id="statsLiveBadge" class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-gray-700/30 text-text-secondary border border-gray-600/30 align-middle" title="SignalR live-update connection status">
+            <span id="statsLiveDot" class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+            <span id="statsLiveText">Connecting…</span>
+        </span>
+    </h1>
 
     <!-- Summary Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
             <p class="text-sm text-text-secondary">Total Requests (24h)</p>
-            <p class="text-3xl font-bold mt-1 text-neon-cyan">@Model.TotalRequests</p>
+            <p id="statTotalRequests" class="text-3xl font-bold mt-1 text-neon-cyan">@Model.TotalRequests</p>
         </div>
         <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-green">
             <p class="text-sm text-text-secondary">Total Tokens (24h)</p>
-            <p class="text-3xl font-bold mt-1 text-neon-green">@Model.TotalTokens</p>
+            <p id="statTotalTokens" class="text-3xl font-bold mt-1 text-neon-green">@Model.TotalTokens</p>
         </div>
         <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-magenta">
             <p class="text-sm text-text-secondary">Avg Latency (24h)</p>
-            <p class="text-3xl font-bold mt-1 text-neon-magenta">@string.Format("{0:F1}", Model.AvgLatencyMs) ms</p>
+            <p id="statAvgLatency" class="text-3xl font-bold mt-1 text-neon-magenta">@string.Format("{0:F1}", Model.AvgLatencyMs) ms</p>
         </div>
         <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
             <p class="text-sm text-text-secondary">Active Servers</p>
@@ -87,8 +93,11 @@
     </div>
 </div>
 
-<script src="~/lib/chartjs/chart.umd.min.js"></script>
 <script>
+// Wrapped in an IIFE, and the two functions used by inline onclick/onchange exposed via
+// window.*: this script re-runs on every htmx-boosted navigation to this page, and the
+// top-level let/const below would throw "already declared" the second time.
+(function () {
 // ── Chart.js theme-aware defaults, read from the active theme's CSS variables so any
 // theme added in site.css (see the comment there) picks up chart colors automatically,
 // with no changes needed here. ──
@@ -119,6 +128,13 @@ let charts = {};
 const servers = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Servers.Select(s => new { id = s.Id, name = s.Name })));
 const serverNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ServerNames));
 const presets = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Presets.Select(p => new { id = p.Id, name = p.Name })));
+
+// Running summary-card totals, seeded from the page-load snapshot and updated in place as
+// SignalR events arrive (see connectStatsHub below) — kept exact via the same incremental-
+// average formula GetAvgTotalLatencyAsync uses, since both share the same 24h/all-servers scope.
+let liveTotalRequests = @Model.TotalRequests;
+let liveTotalTokens = @Model.TotalTokens;
+let liveAvgLatencyMs = @Model.AvgLatencyMs;
 
 // Line colors, read straight from the active theme's --neon-* variables (site.css picks
 // values that clear >= 3:1 contrast against the canvas background per WCAG 1.4.11 already).
@@ -183,10 +199,10 @@ async function loadContextUsage(rangeKey = '24h') {
     } catch (e) { console.error('Failed to load context usage:', e); }
 }
 
-function updateContextChart() {
+window.updateContextChart = function() {
     const activeRange = document.querySelector('.time-btn.border-neon-cyan')?.textContent.trim() || '24h';
     loadContextUsage(activeRange);
-}
+};
 
 function buildMultiServerChart(dataPointsByServerId, servers, colors, labelPrefix) {
     const datasets = [];
@@ -262,7 +278,7 @@ function initChart(canvasId, label) {
     });
 }
 
-async function updateAllCharts(rangeKey = '24h') {
+window.updateAllCharts = async function(rangeKey = '24h') {
     // Update active button styling
     document.querySelectorAll('.time-btn').forEach(btn => {
         const isMatch = btn.textContent.trim() === rangeKey;
@@ -297,29 +313,128 @@ async function updateAllCharts(rangeKey = '24h') {
 
     // Context usage
     loadContextUsage(rangeKey);
+};
+
+// Runs immediately rather than waiting for DOMContentLoaded: the canvases above are
+// already in the document by the time this script executes (both on a normal page load,
+// where script execution always follows earlier markup, and on an htmx-boosted navigation,
+// where the whole fragment — canvases included — is inserted before its scripts run).
+// DOMContentLoaded fires once per real browser navigation, so gating on it here would mean
+// this init never runs on a boosted revisit to this page.
+
+// Destroy any charts from a previous visit to this page — htmx's boosted navigation keeps
+// this JS realm alive across page swaps, so without this, revisiting would leak Chart.js
+// instances bound to now-detached canvases.
+if (window.__statsCharts) {
+    Object.values(window.__statsCharts).forEach(c => c.destroy());
 }
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', () => {
-    charts.prompt = initChart('promptThroughputChart', 'Prompt Tokens/sec');
-    charts.gen = initChart('genThroughputChart', 'Gen Tokens/sec');
-    charts.latency = initChart('latencyChart', 'Latency (ms)');
+charts.prompt = initChart('promptThroughputChart', 'Prompt Tokens/sec');
+charts.gen = initChart('genThroughputChart', 'Gen Tokens/sec');
+charts.latency = initChart('latencyChart', 'Latency (ms)');
 
-    // Context usage chart (bar chart)
-    const ctxContext = document.getElementById('contextUsageChart').getContext('2d');
-    charts.context = new Chart(ctxContext, {
-        type: 'bar',
-        data: { labels: [], datasets: [{ label: 'Tokens Used', data: [], backgroundColor: chartColors[0] + '99', borderColor: chartColors[0], borderWidth: 1 }] },
-        options: {
-            responsive: true,
-            animation: false,
-            scales: {
-                x: { title: { display: true, text: 'Time' } },
-                y: { beginAtZero: true, title: { display: true, text: 'Tokens Used' } }
-            }
+// Context usage chart (bar chart)
+const ctxContext = document.getElementById('contextUsageChart').getContext('2d');
+charts.context = new Chart(ctxContext, {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Tokens Used', data: [], backgroundColor: chartColors[0] + '99', borderColor: chartColors[0], borderWidth: 1 }] },
+    options: {
+        responsive: true,
+        animation: false,
+        scales: {
+            x: { title: { display: true, text: 'Time' } },
+            y: { beginAtZero: true, title: { display: true, text: 'Tokens Used' } }
         }
-    });
-
-    updateAllCharts('24h');
+    }
 });
+
+window.__statsCharts = charts;
+window.updateAllCharts('24h');
+
+// ── Live updates via SignalR ──
+// Connection is stored on window and reused across htmx-boosted navigations, following the
+// same pattern as /serverHub (see Index.cshtml): detach this page's previous handler first
+// since it's a closure over now-stale DOM/counters, then (re)attach against the shared
+// connection so revisiting this page doesn't disconnect/reconnect the socket each time.
+if (window.__statsHubHandler && window.__statsHubConnection) {
+    window.__statsHubConnection.off('ReceiveStatUpdate', window.__statsHubHandler);
+    window.__statsHubHandler = null;
+}
+
+function setLiveBadge(state) {
+    const dot = document.getElementById('statsLiveDot');
+    const text = document.getElementById('statsLiveText');
+    if (!dot || !text) return;
+    const styles = {
+        connecting: { dot: 'bg-gray-500', label: 'Connecting…' },
+        live: { dot: 'bg-neon-green animate-pulse', label: 'Live' },
+        down: { dot: 'bg-neon-red', label: 'Disconnected' },
+    };
+    const s = styles[state] || styles.connecting;
+    dot.className = 'w-1.5 h-1.5 rounded-full ' + s.dot;
+    text.textContent = s.label;
+}
+
+// Refreshing all four charts on every single event would hammer the /api/stats/* endpoints
+// during a burst of concurrent requests, so refreshes are coalesced to at most once per
+// interval instead of firing immediately for every incoming stat.
+let chartRefreshPending = false;
+function scheduleChartRefresh() {
+    if (chartRefreshPending) return;
+    chartRefreshPending = true;
+    setTimeout(() => {
+        chartRefreshPending = false;
+        const activeRange = document.querySelector('.time-btn.border-neon-cyan')?.textContent.trim() || '24h';
+        window.updateAllCharts(activeRange);
+    }, 2000);
+}
+
+function handleStatUpdate(stat) {
+    liveTotalRequests += 1;
+    liveTotalTokens += stat.promptTokensProcessed + stat.generatedTokenCount;
+    liveAvgLatencyMs = ((liveAvgLatencyMs * (liveTotalRequests - 1)) + stat.totalLatencyMs) / liveTotalRequests;
+
+    const reqEl = document.getElementById('statTotalRequests');
+    const tokEl = document.getElementById('statTotalTokens');
+    const latEl = document.getElementById('statAvgLatency');
+    if (reqEl) reqEl.textContent = liveTotalRequests;
+    if (tokEl) tokEl.textContent = liveTotalTokens;
+    if (latEl) latEl.textContent = liveAvgLatencyMs.toFixed(1) + ' ms';
+
+    scheduleChartRefresh();
+}
+
+function connectStatsHub() {
+    let connection = window.__statsHubConnection;
+    const isLive = connection && connection.state !== signalR.HubConnectionState.Disconnected;
+
+    if (!isLive) {
+        connection = new signalR.HubConnectionBuilder()
+            .withUrl('/statsHub', { transport: signalR.HttpTransportType.WebSockets })
+            .withAutomaticReconnect()
+            .build();
+        window.__statsHubConnection = connection;
+
+        connection.onreconnecting(() => setLiveBadge('connecting'));
+        connection.onreconnected(() => setLiveBadge('live'));
+        connection.onclose(() => setLiveBadge('down'));
+    }
+
+    connection.on('ReceiveStatUpdate', handleStatUpdate);
+    window.__statsHubHandler = handleStatUpdate;
+
+    if (!isLive) {
+        connection.start().then(() => {
+            setLiveBadge('live');
+        }).catch(err => {
+            console.warn('[SignalR] statsHub connection failed:', err.message);
+            setLiveBadge('down');
+        });
+    } else {
+        setLiveBadge('live');
+    }
+}
+
+connectStatsHub();
+})();
 </script>
