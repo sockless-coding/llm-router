@@ -147,6 +147,7 @@ public class PresetEditModel : PageModel
         ViewModel.ImageMaxTokens = preset.ImageMaxTokens;
         ViewModel.Lora = preset.Lora;
         ViewModel.ChatTemplate = preset.ChatTemplate;
+        ViewModel.ChatTemplateKwargs = preset.ChatTemplateKwargs;
     }
 
     private void MapViewModelToEntity(Core.Models.ModelPreset entity)
@@ -232,5 +233,6 @@ public class PresetEditModel : PageModel
         entity.ImageMaxTokens = ViewModel.ImageMaxTokens;
         entity.Lora = ViewModel.Lora;
         entity.ChatTemplate = ViewModel.ChatTemplate;
+        entity.ChatTemplateKwargs = ViewModel.ChatTemplateKwargs;
     }
 }

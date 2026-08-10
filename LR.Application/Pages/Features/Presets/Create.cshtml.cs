@@ -130,6 +130,7 @@ public class PresetCreateModel : PageModel
             ImageMaxTokens = ViewModel.ImageMaxTokens,
             Lora = ViewModel.Lora,
             ChatTemplate = ViewModel.ChatTemplate,
+            ChatTemplateKwargs = ViewModel.ChatTemplateKwargs,
         };
 
         await _presetManager.CreateAsync(preset);
@@ -262,5 +263,6 @@ public class PresetViewModel
 
     // Advanced: Chat Template
     public string? ChatTemplate { get; set; }
+    public string? ChatTemplateKwargs { get; set; }
 }
 

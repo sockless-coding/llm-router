@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Models.OpenAI;
+using LR.Core.Wrapper;
 
 namespace LR.Providers;
 
@@ -186,14 +187,14 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
 
         // Build args via ArgBuilder and start process via ProcessManager
         var args = _argBuilder.Build(preset);
-        string argString = string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+        string argPreview = string.Join(" ", args);
 
         await LogProviderMessage(ServerLogLevel.Info,
-            $"Starting server on port {Port}. Args: {argString.Substring(0, Math.Min(argString.Length, 200))}{(argString.Length > 200 ? "..." : "")}");
+            $"Starting server on port {Port}. Args: {argPreview.Substring(0, Math.Min(argPreview.Length, 200))}{(argPreview.Length > 200 ? "..." : "")}");
 
         var result = await _processManager.StartProcessAsync(
             ServerExecutablePath,
-            argString,
+            args,
             onProgress,
             cancellationToken);
 
@@ -637,11 +638,14 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
             return null;
 
         var args = _argBuilder.Build(preset);
-        string argString = string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+        string argString = WindowsCommandLine.Join(args);
 
-        // If environment setup is configured, the actual command goes through cmd.exe + batch script
+        // If environment setup is configured, the actual command runs as a two-line batch
+        // script (see WrapperHost.CreateTempBatchScriptAsync) — mirror that here rather than
+        // trying to flatten it into a single cmd.exe /c line, which needs another layer of
+        // quoting and would no longer match what's actually executed.
         if (!string.IsNullOrEmpty(_processManager.EnvironmentSetupCommand))
-            return $"cmd.exe /c \"call \"\"{_processManager.EnvironmentSetupCommand}\"\" && call \"\"{ServerExecutablePath}\"\" {argString}\"";
+            return $"call {_processManager.EnvironmentSetupCommand}\r\ncall \"{ServerExecutablePath}\" {argString}";
 
         return $"\"{ServerExecutablePath}\" {argString}";
     }

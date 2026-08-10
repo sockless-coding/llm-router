@@ -81,7 +81,7 @@ public class WrapperProcessManager
     /// </summary>
     public async Task<bool> StartProcessAsync(
         string serverExecutablePath,
-        string argString,
+        List<string> arguments,
         Func<StartupProgressEvent, Task>? onProgress,
         CancellationToken cancellationToken)
     {
@@ -95,12 +95,12 @@ public class WrapperProcessManager
             _pendingAck = ackTcs;
 
             _logger.LogInformation("Sending start command to wrapper for {ServerUrl} with args: {Args}",
-                $"http://localhost:{Port}", argString);
+                $"http://localhost:{Port}", string.Join(" ", arguments));
 
             await _connection!.SendAsync(new StartServerCommand
             {
                 ExecutablePath = serverExecutablePath,
-                Arguments = argString,
+                Arguments = arguments,
                 WorkingDirectory = ExecutableFolderPath,
                 EnvironmentSetupCommand = EnvironmentSetupCommand,
                 CompanionAppPath = CompanionAppPath,

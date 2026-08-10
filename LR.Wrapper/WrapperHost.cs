@@ -101,7 +101,7 @@ public sealed class WrapperHost
 
     // --- Main server process ---
 
-    private async Task StartServerProcessAsync(string executablePath, string arguments, string? workingDirectory, string? environmentSetupCommand, int? port)
+    private async Task StartServerProcessAsync(string executablePath, List<string> arguments, string? workingDirectory, string? environmentSetupCommand, int? port)
     {
         // Idempotent "ensure": stop whatever main server is currently running (this is an
         // intentional stop, not a crash — suppressed from ProcessExitedEvent) before swapping in
@@ -111,7 +111,6 @@ public sealed class WrapperHost
         var startInfo = new ProcessStartInfo
         {
             FileName = executablePath,
-            Arguments = arguments,
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
@@ -121,9 +120,17 @@ public sealed class WrapperHost
 
         if (!string.IsNullOrEmpty(environmentSetupCommand))
         {
-            _pendingTempBatchToCleanup = await CreateTempBatchScriptAsync(executablePath, arguments, environmentSetupCommand);
+            // Going through a batch file means a single flattened, correctly-quoted command
+            // line rather than ArgumentList (which only applies to a direct Process.Start).
+            string quotedArguments = WindowsCommandLine.Join(arguments);
+            _pendingTempBatchToCleanup = await CreateTempBatchScriptAsync(executablePath, quotedArguments, environmentSetupCommand);
             startInfo.FileName = "cmd.exe";
             startInfo.Arguments = "/c \"" + _pendingTempBatchToCleanup + "\"";
+        }
+        else
+        {
+            foreach (var arg in arguments)
+                startInfo.ArgumentList.Add(arg);
         }
 
         _lastKnownPort = port;
@@ -189,7 +196,11 @@ public sealed class WrapperHost
             _suppressNextExitEvent = true;
             try
             {
-                _serverProcess.Kill();
+                // entireProcessTree: true is required here — when EnvironmentSetupCommand is
+                // set, _serverProcess is cmd.exe running the temp batch, with the actual server
+                // executable as its child (invoked via "call"). Killing just cmd.exe leaves that
+                // child running as an orphan.
+                _serverProcess.Kill(entireProcessTree: true);
                 await _serverProcess.WaitForExitAsync();
             }
             catch { /* best effort */ }
@@ -207,7 +218,7 @@ public sealed class WrapperHost
         var lines = new List<string>
         {
             "@echo off",
-            environmentSetupCommand,
+            $"call {environmentSetupCommand}",
             $"call \"{executablePath}\" {arguments}",
         };
         await File.WriteAllLinesAsync(tempBatchPath, lines);
@@ -269,7 +280,7 @@ public sealed class WrapperHost
                 var lines = new List<string>
                 {
                     "@echo off",
-                    environmentSetupCommand,
+                    $"call {environmentSetupCommand}",
                     $"call \"{companionAppPath}\"",
                 };
                 await File.WriteAllLinesAsync(tempBatchPath, lines);
@@ -293,7 +304,9 @@ public sealed class WrapperHost
         {
             try
             {
-                _companionProcess.Kill();
+                // Same rationale as the main server kill — the companion may also be running
+                // under a cmd.exe wrapper via EnvironmentSetupCommand.
+                _companionProcess.Kill(entireProcessTree: true);
                 await _companionProcess.WaitForExitAsync();
             }
             catch { /* best effort */ }

@@ -692,6 +692,12 @@
                     <input asp-for="ViewModel.ChatTemplate" placeholder="chatml, deepseek, llama3, ..."
                            class="@inpCls" />
                 </div>
+                <div>
+                    <label asp-for="ViewModel.ChatTemplateKwargs" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                    <input asp-for="ViewModel.ChatTemplateKwargs" placeholder="{&quot;preserve_thinking&quot;: true}"
+                           class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1">Extra kwargs passed into the chat template's render context (--chat-template-kwargs). Not the same as the template above.</p>
+                </div>
             </div>
         </details>
 

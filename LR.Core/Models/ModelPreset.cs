@@ -471,6 +471,14 @@ public class ModelPreset
     [MaxLength(2048)]
     public string? ChatTemplate { get; set; }
 
+    /// <summary>
+    /// JSON object of extra kwargs passed into the chat template's Jinja render context, e.g.
+    /// {"preserve_thinking": true} (--chat-template-kwargs). Distinct from <see cref="ChatTemplate"/>,
+    /// which replaces the template itself rather than parameterizing it.
+    /// </summary>
+    [MaxLength(2048)]
+    public string? ChatTemplateKwargs { get; set; }
+
     // ==================== GGUF METADATA (Auto-Read from File) ====================
 
     /// <summary>

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using LR.Core.Models;
 
 namespace LR.Providers;
@@ -131,6 +133,7 @@ public class LlamaCppArgBuilder
 
         // --- Advanced: Chat Template ---
         AddArgIfSet(args, "--chat-template", preset.ChatTemplate);
+        AddArgIfSet(args, "--chat-template-kwargs", preset.ChatTemplateKwargs);
 
         // --- Fallback flags (from Flags dictionary) ---
         foreach (var flag in preset.Flags)
@@ -153,7 +156,7 @@ public class LlamaCppArgBuilder
         if (value.HasValue)
         {
             args.Add(name);
-            args.Add(value.Value.ToString());
+            args.Add(value.Value.ToString(CultureInfo.InvariantCulture));
         }
     }
 
@@ -162,7 +165,7 @@ public class LlamaCppArgBuilder
         if (value.HasValue)
         {
             args.Add(name);
-            args.Add(value.Value.ToString());
+            args.Add(value.Value.ToString(CultureInfo.InvariantCulture));
         }
     }
 
@@ -171,7 +174,7 @@ public class LlamaCppArgBuilder
         if (value.HasValue)
         {
             args.Add(name);
-            args.Add(value.Value.ToString("G7"));
+            args.Add(value.Value.ToString("G7", CultureInfo.InvariantCulture));
         }
     }
 }

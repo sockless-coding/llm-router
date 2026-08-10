@@ -216,6 +216,7 @@ public class PresetManager : IPresetManager
 
         // Advanced: Chat Template
         existing.ChatTemplate = updated.ChatTemplate;
+        existing.ChatTemplateKwargs = updated.ChatTemplateKwargs;
 
         // GGUF Metadata (auto-read from file)
         existing.GgufArchitecture = updated.GgufArchitecture;

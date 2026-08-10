@@ -39,7 +39,7 @@ public abstract class WrapperMessage
 public sealed class StartServerCommand : WrapperMessage
 {
     public string ExecutablePath { get; set; } = string.Empty;
-    public string Arguments { get; set; } = string.Empty;
+    public List<string> Arguments { get; set; } = new();
     public string? WorkingDirectory { get; set; }
     public string? EnvironmentSetupCommand { get; set; }
     public string? CompanionAppPath { get; set; }

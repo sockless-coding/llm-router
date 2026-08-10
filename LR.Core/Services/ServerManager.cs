@@ -189,6 +189,12 @@ public class ServerManager : IServerManager
 
                 if (!started)
                 {
+                    // Best-effort teardown: a failed start may still have a wrapper process
+                    // connected (it launched fine, but the server it was told to run never
+                    // came up healthy) — leaving it running would orphan it, since nothing else
+                    // is watching an instance stuck in Error.
+                    try { await provider.StopProcessAsync(cancellationToken); } catch { /* best effort */ }
+
                     var inst = await context.ServerInstances.FindAsync(instance.Id);
                     if (inst != null)
                     {
@@ -209,6 +215,10 @@ public class ServerManager : IServerManager
             }
             catch (Exception ex)
             {
+                // Same rationale as above — an exception during startup can still leave a
+                // wrapper process connected and running; tear it down rather than orphan it.
+                try { await provider.StopProcessAsync(cancellationToken); } catch { /* best effort */ }
+
                 using var scope2 = scopeFactory.CreateScope();
                 var context2 = scope2.ServiceProvider.GetRequiredService<LRDbContext>();
 
@@ -238,7 +248,7 @@ public class ServerManager : IServerManager
     public async Task StopAsync(Guid instanceId, CancellationToken cancellationToken = default)
     {
         var instance = await GetInstanceOrThrow(instanceId);
-        if (instance.Status != ServerStatus.Running)
+        if (instance.Status != ServerStatus.Running && instance.Status != ServerStatus.Error)
             return;
 
         instance.Status = ServerStatus.Stopping;
@@ -383,7 +393,7 @@ public class ServerManager : IServerManager
     public async Task RemoveInstanceAsync(Guid instanceId, CancellationToken cancellationToken = default)
     {
         var instance = await _context.ServerInstances.FindAsync(instanceId);
-        if (instance is not null && instance.Status == ServerStatus.Running)
+        if (instance is not null && (instance.Status == ServerStatus.Running || instance.Status == ServerStatus.Error))
             await StopAsync(instanceId, cancellationToken);
 
         if (instance is not null)
