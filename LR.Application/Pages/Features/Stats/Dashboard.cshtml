@@ -89,16 +89,21 @@
 
 <script src="~/lib/chartjs/chart.umd.min.js"></script>
 <script>
-// ── Chart.js theme-aware defaults (kept >= 4.5:1 contrast against the canvas background in both modes) ──
+// ── Chart.js theme-aware defaults, read from the active theme's CSS variables so any
+// theme added in site.css (see the comment there) picks up chart colors automatically,
+// with no changes needed here. ──
 const isDarkTheme = document.documentElement.classList.contains('dark');
-Chart.defaults.color = isDarkTheme ? '#9ca3af' : '#374151';           // text-secondary
+const rootStyle = getComputedStyle(document.documentElement);
+const cssVar = name => rootStyle.getPropertyValue(name).trim();
+
+Chart.defaults.color = cssVar('--text-secondary');
 Chart.defaults.borderColor = isDarkTheme ? 'rgba(75,85,99,0.2)' : 'rgba(107,114,128,0.25)';  // grid lines
 Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
 Chart.defaults.plugins.legend.labels.usePointStyle = true;
 Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(10,10,15,0.92)';
 Chart.defaults.plugins.tooltip.titleColor = '#f0f0f5';
 Chart.defaults.plugins.tooltip.bodyColor = '#d1d5db';
-Chart.defaults.plugins.tooltip.borderColor = 'rgba(0,245,255,0.3)';
+Chart.defaults.plugins.tooltip.borderColor = cssVar('--neon-cyan') + '4d'; // ~30% alpha
 Chart.defaults.plugins.tooltip.borderWidth = 1;
 
 const timeRanges = {
@@ -115,19 +120,13 @@ const servers = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Server
 const serverNames = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ServerNames));
 const presets = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Presets.Select(p => new { id = p.Id, name = p.Name })));
 
-// Line colors need >= 3:1 contrast against the canvas background (WCAG 1.4.11) — the raw
-// neon palette only clears that on the near-black dark-mode canvas, so use the darker
-// AA-safe shades from _Layout's --neon-* variables when the light theme is active.
-const chartColors = isDarkTheme ? [
-    '#00f5ff',   // cyan
-    '#00ff88',   // green
-    '#ff00ff',   // magenta
-    '#ff2e63',   // red
-] : [
-    '#0e7490',   // cyan-700
-    '#047857',   // emerald-700
-    '#a21caf',   // fuchsia-700
-    '#b91c1c',   // red-700
+// Line colors, read straight from the active theme's --neon-* variables (site.css picks
+// values that clear >= 3:1 contrast against the canvas background per WCAG 1.4.11 already).
+const chartColors = [
+    cssVar('--neon-cyan'),
+    cssVar('--neon-green'),
+    cssVar('--neon-magenta'),
+    cssVar('--neon-red'),
 ];
 const chartColorsAlpha = chartColors.map(c => {
     const hex = c.slice(1);

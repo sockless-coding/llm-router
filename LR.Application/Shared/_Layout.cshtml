@@ -1,15 +1,25 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en" class="dark" data-theme="neon">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] — Sockless LLM Router</title>
 
-    <!-- Applied before first paint so a saved light-mode preference doesn't flash dark first -->
+    <!-- Applied before first paint so a saved theme/light-mode preference doesn't flash the default first -->
     <script>
-        if (localStorage.getItem('theme') === 'light') {
-            document.documentElement.classList.remove('dark');
-        }
+        (function () {
+            var html = document.documentElement;
+            var savedTheme = localStorage.getItem('themeName');
+            if (savedTheme === 'neon' || savedTheme === 'sockless') {
+                html.setAttribute('data-theme', savedTheme);
+            }
+            if (html.getAttribute('data-theme') === 'sockless') {
+                // Sockless is dark-only, like the site it's modeled on.
+                html.classList.add('dark');
+            } else if (localStorage.getItem('theme') === 'light') {
+                html.classList.remove('dark');
+            }
+        })();
     </script>
 
     <!-- Self-hosted Tailwind build + theme (see Styles/site.css, built via `npm run build:css`) -->
@@ -21,11 +31,16 @@
 
     <div class="flex h-screen overflow-hidden">
         <!-- Sidebar (fixed to viewport height — scrolls internally if the nav ever overflows, but never scrolls with page content) -->
-        <aside style="background-color: var(--bg-surface); border-right: 1px solid rgba(0,245,255,0.1)" class="w-64 flex flex-col h-full shrink-0">
-            <!-- Logo -->
-            <div class="p-5" style="border-bottom: 1px solid rgba(0,245,255,0.1)">
-                <h1 class="text-lg font-bold text-neon-cyan tracking-wider"><span aria-hidden="true">⚡</span> Sockless</h1>
-                <p class="text-xs mt-1" style="color: var(--text-secondary)">LLM Router</p>
+        <aside style="background-color: var(--bg-surface); border-right: 1px solid color-mix(in srgb, var(--neon-cyan) 10%, transparent)" class="w-64 flex flex-col h-full shrink-0">
+            <!-- Logo (h-16 matches the header's height below so the dividers line up across the page) -->
+            <div class="h-16 px-5 flex items-center gap-3 shrink-0" style="border-bottom: 1px solid color-mix(in srgb, var(--neon-cyan) 10%, transparent)">
+                <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border shadow-neon-cyan" style="background-color: var(--bg-card); border-color: color-mix(in srgb, var(--neon-cyan) 30%, transparent)">
+                    <span aria-hidden="true" class="text-neon-cyan text-base">⚡</span>
+                </div>
+                <div class="leading-tight">
+                    <h1 class="text-base font-bold text-neon-cyan tracking-wide">Sockless</h1>
+                    <p class="text-[11px] uppercase tracking-wider" style="color: var(--text-secondary)">LLM Router</p>
+                </div>
             </div>
 
 @{
@@ -38,7 +53,7 @@
     bool isStats = path.StartsWith("/Features/Stats");
     bool isApiKeys = path.StartsWith("/Features/ApiKeys");
     bool isSettings = path.StartsWith("/Features/Settings");
-    string activeStyle = @"color: var(--neon-cyan); background-color: rgba(0,245,255,0.1); border-left-color: var(--neon-cyan)";
+    string activeStyle = @"color: var(--neon-cyan); background-color: color-mix(in srgb, var(--neon-cyan) 10%, transparent); border-left-color: var(--neon-cyan)";
     string inactiveStyle = @"color: var(--text-secondary)";
     string activeClasses = "border-l-2 font-semibold ";
     string inactiveClasses = "hover:text-neon-cyan ";
@@ -75,7 +90,7 @@
                     <span class="text-sm font-medium">Statistics</span>
                 </a>
 
-                <div class="pt-2 mt-2 border-t" style="border-color: rgba(0,245,255,0.1)">
+                <div class="pt-2 mt-2 border-t" style="border-color: color-mix(in srgb, var(--neon-cyan) 10%, transparent)">
                     <a href="/Features/ApiKeys/Index" aria-current="@(isApiKeys ? "page" : null)" class="@(isApiKeys ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isApiKeys ? activeStyle : inactiveStyle)">
                         <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
                         <span class="text-sm font-medium">API Keys</span>
@@ -88,9 +103,17 @@
                 </div>
             </nav>
 
-            <!-- Theme Toggle -->
-            <div class="p-3 shrink-0" style="border-top: 1px solid rgba(0,245,255,0.1)">
-                <button id="themeToggle" type="button" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:text-neon-magenta transition-all"
+            <!-- Theme controls -->
+            <div class="p-3 shrink-0 space-y-2" style="border-top: 1px solid color-mix(in srgb, var(--neon-cyan) 10%, transparent)">
+                <label for="themeSelect" class="sr-only">Theme</label>
+                <select id="themeSelect" class="w-full text-sm rounded-lg px-3 py-2 border transition-all"
+                        style="background-color: var(--bg-card); color: var(--text-primary); border-color: color-mix(in srgb, var(--neon-cyan) 20%, transparent)"
+                        onchange="setThemeName(this.value)">
+                    <option value="neon">Neon</option>
+                    <option value="sockless">Sockless</option>
+                </select>
+
+                <button id="themeToggle" type="button" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:text-neon-magenta transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-inherit"
                         style="color: var(--text-secondary)"
                         aria-pressed="true"
                         onclick="toggleTheme()">
@@ -102,12 +125,12 @@
 
         <!-- Main Content -->
         <main class="flex-1 flex flex-col overflow-hidden">
-            <!-- Top Bar -->
-            <header style="background-color: var(--bg-surface); border-bottom: 1px solid rgba(0,245,255,0.1)" class="px-6 py-4 flex items-center justify-between shrink-0">
+            <!-- Top Bar (h-16 matches the sidebar logo's height above so the dividers line up across the page) -->
+            <header style="background-color: var(--bg-surface); border-bottom: 1px solid color-mix(in srgb, var(--neon-cyan) 10%, transparent)" class="h-16 px-6 flex items-center justify-between shrink-0">
                 <h2 style="color: var(--text-primary)" class="text-xl font-semibold">@ViewData["Title"]</h2>
                 <div class="flex items-center gap-4">
                     <!-- Status indicator -->
-                    <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border" style="background-color: rgba(0,255,136,0.1); color: var(--neon-green); border-color: rgba(0,255,136,0.2)">
+                    <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border" style="background-color: color-mix(in srgb, var(--neon-green) 10%, transparent); color: var(--neon-green); border-color: color-mix(in srgb, var(--neon-green) 20%, transparent)">
                         <span class="w-2 h-2 rounded-full animate-pulse" style="background-color: var(--neon-green)" aria-hidden="true"></span>
                         System Online
                     </span>
@@ -124,32 +147,61 @@
     @await RenderSectionAsync("Scripts", required: false)
 
     <script>
+        // Sockless has no light variant (matches the site it's modeled on), so the
+        // light/dark toggle only makes sense while the neon theme is active.
+        function isDarkOnlyTheme(themeName) {
+            return themeName === 'sockless';
+        }
+
         function toggleTheme() {
             const html = document.documentElement;
-            const label = document.getElementById('themeLabel');
-            const toggleBtn = document.getElementById('themeToggle');
+            if (isDarkOnlyTheme(html.getAttribute('data-theme'))) return;
 
             if (html.classList.contains('dark')) {
                 html.classList.remove('dark');
                 localStorage.setItem('theme', 'light');
-                label.textContent = 'Dark Mode';
-                toggleBtn.setAttribute('aria-pressed', 'false');
             } else {
                 html.classList.add('dark');
                 localStorage.setItem('theme', 'dark');
-                label.textContent = 'Light Mode';
-                toggleBtn.setAttribute('aria-pressed', 'true');
             }
+            syncThemeControls();
         }
 
-        // Sync the toggle button's label/state with the theme applied in <head> (see inline
-        // pre-paint script above) — the class itself is already set by the time this runs.
-        (function () {
-            const isDark = document.documentElement.classList.contains('dark');
+        function setThemeName(themeName) {
+            const html = document.documentElement;
+            html.setAttribute('data-theme', themeName);
+            localStorage.setItem('themeName', themeName);
+            if (isDarkOnlyTheme(themeName)) {
+                // Applied visually only — the stored light/dark preference is left
+                // untouched so it resurfaces if the user switches back to a theme
+                // that supports both modes.
+                html.classList.add('dark');
+            } else {
+                html.classList.toggle('dark', localStorage.getItem('theme') !== 'light');
+            }
+            syncThemeControls();
+        }
+
+        // Keeps the theme <select>, the light/dark toggle button, and the <html> state
+        // in sync — called on load (matching the inline pre-paint script above) and
+        // whenever either control changes.
+        function syncThemeControls() {
+            const html = document.documentElement;
+            const themeName = html.getAttribute('data-theme') || 'neon';
+            const isDark = html.classList.contains('dark');
+            const darkOnly = isDarkOnlyTheme(themeName);
+
+            const select = document.getElementById('themeSelect');
+            select.value = themeName;
+
             const toggleBtn = document.getElementById('themeToggle');
-            document.getElementById('themeLabel').textContent = isDark ? 'Light Mode' : 'Dark Mode';
+            const label = document.getElementById('themeLabel');
+            toggleBtn.disabled = darkOnly;
             toggleBtn.setAttribute('aria-pressed', String(isDark));
-        })();
+            label.textContent = darkOnly ? 'Dark Mode (fixed)' : (isDark ? 'Light Mode' : 'Dark Mode');
+        }
+
+        syncThemeControls();
     </script>
 </body>
 </html>

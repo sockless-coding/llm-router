@@ -32,11 +32,23 @@
 
 /* ============================================================
    Theme variables
-   Dark theme borrows its "bones" (near-black surfaces, subtle
-   metallic texture) from sockless.tech, while keeping the neon
-   cyberpunk accent palette for a cyberpunk-industrial feel.
+
+   Each theme is a `html[data-theme="name"]` block defining the
+   same set of custom properties. The --neon-* names are accent
+   *roles* (primary / secondary / success / danger), not literal
+   colors, so a theme is free to point them at whatever palette
+   it wants.
+
+   To add a new theme:
+     1. Copy a block below and change the values.
+     2. Add a matching <option> to #themeSelect in _Layout.cshtml.
+   Nothing else needs to change — utilities and pages everywhere
+   else consume the roles via var(), not literal colors.
    ============================================================ */
-:root {
+
+/* Neon (default) — cyberpunk, with a light and dark variant */
+:root,
+html[data-theme="neon"] {
     --bg-main: #f0f0f5;
     --bg-surface: #ffffff;
     --bg-card: #fafafe;
@@ -49,7 +61,7 @@
     --neon-red: #b91c1c;
 }
 
-html.dark {
+html[data-theme="neon"].dark {
     --bg-main: #0a0a0a;
     --bg-surface: #141414;
     --bg-card: #1a1a1a;
@@ -62,6 +74,22 @@ html.dark {
     --neon-red: #ff2e63;
 }
 
+/* Sockless — steampunk/industrial palette matching sockless.tech. The source
+   site is dark-only, so this theme has no light variant; the light/dark
+   toggle is disabled while it's active (see syncThemeControls in _Layout). */
+html[data-theme="sockless"] {
+    --bg-main: #0d0d0d;
+    --bg-surface: #1a1a1a;
+    --bg-card: #1e1e1e;
+    --text-primary: #e8dcc8;
+    --text-secondary: #b0a898;
+    /* All checked for >= 4.5:1 contrast against --bg-main (WCAG AA) */
+    --neon-cyan: #cd7f32;    /* copper */
+    --neon-magenta: #d4af37; /* brass */
+    --neon-green: #4caf50;   /* verdigris — oxidised copper */
+    --neon-red: #e05d3c;     /* rust */
+}
+
 body {
     font-family: 'Raleway', sans-serif;
 }
@@ -71,11 +99,11 @@ h1, h2, h3, h4, h5, h6 {
     letter-spacing: 0.02em;
 }
 
-/* Subtle metallic texture overlay, dark mode only */
+/* Subtle metallic texture overlay, dark mode only — tinted by the active theme's accents */
 html.dark body {
     background-image:
-        radial-gradient(ellipse at top left, rgba(0, 245, 255, 0.03) 0%, transparent 50%),
-        radial-gradient(ellipse at bottom right, rgba(255, 0, 255, 0.025) 0%, transparent 50%);
+        radial-gradient(ellipse at top left, color-mix(in srgb, var(--neon-cyan) 3%, transparent) 0%, transparent 50%),
+        radial-gradient(ellipse at bottom right, color-mix(in srgb, var(--neon-magenta) 2.5%, transparent) 0%, transparent 50%);
 }
 
 html.dark body::before {
@@ -96,17 +124,17 @@ html.dark body::before {
 /* Cyberpunk scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-card); }
-::-webkit-scrollbar-thumb { background: rgba(0, 245, 255, 0.267); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 245, 255, 0.533); }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--neon-cyan) 27%, transparent); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--neon-cyan) 53%, transparent); }
 
 /* ── Neon text utilities (var-based so they stay WCAG AA-contrast in light mode) ── */
 .text-neon-cyan { color: var(--neon-cyan); }
 .text-neon-magenta { color: var(--neon-magenta); }
 .text-neon-green { color: var(--neon-green); }
 .text-neon-red { color: var(--neon-red); }
-html.dark .text-neon-cyan { text-shadow: 0 0 10px rgba(0,245,255,0.3); }
-html.dark .text-neon-magenta { text-shadow: 0 0 10px rgba(255,0,255,0.3); }
-html.dark .text-neon-green { text-shadow: 0 0 10px rgba(0,255,136,0.3); }
+html.dark .text-neon-cyan { text-shadow: 0 0 10px color-mix(in srgb, var(--neon-cyan) 30%, transparent); }
+html.dark .text-neon-magenta { text-shadow: 0 0 10px color-mix(in srgb, var(--neon-magenta) 30%, transparent); }
+html.dark .text-neon-green { text-shadow: 0 0 10px color-mix(in srgb, var(--neon-green) 30%, transparent); }
 
 /* ── Theme-aware text colors (auto dark/light) ── */
 .text-text-primary { color: var(--text-primary); }
@@ -118,14 +146,14 @@ html.dark .text-neon-green { text-shadow: 0 0 10px rgba(0,255,136,0.3); }
 .bg-cyber-bg-dark { background-color: var(--bg-main); }
 
 /* ── Neon box shadows ── */
-.shadow-neon-cyan { box-shadow: 0 0 8px rgba(0,245,255,0.4), 0 0 20px rgba(0,245,255,0.1); }
-.shadow-neon-magenta { box-shadow: 0 0 8px rgba(255,0,255,0.4), 0 0 20px rgba(255,0,255,0.1); }
-.shadow-neon-green { box-shadow: 0 0 8px rgba(0,255,136,0.4), 0 0 20px rgba(0,255,136,0.1); }
+.shadow-neon-cyan { box-shadow: 0 0 8px color-mix(in srgb, var(--neon-cyan) 40%, transparent), 0 0 20px color-mix(in srgb, var(--neon-cyan) 10%, transparent); }
+.shadow-neon-magenta { box-shadow: 0 0 8px color-mix(in srgb, var(--neon-magenta) 40%, transparent), 0 0 20px color-mix(in srgb, var(--neon-magenta) 10%, transparent); }
+.shadow-neon-green { box-shadow: 0 0 8px color-mix(in srgb, var(--neon-green) 40%, transparent), 0 0 20px color-mix(in srgb, var(--neon-green) 10%, transparent); }
 
 /* Glow animation */
 @keyframes glow {
-    0% { box-shadow: 0 0 5px rgba(0,245,255,0.2); }
-    100% { box-shadow: 0 0 20px rgba(0,245,255,0.6), 0 0 40px rgba(0,245,255,0.2); }
+    0% { box-shadow: 0 0 5px color-mix(in srgb, var(--neon-cyan) 20%, transparent); }
+    100% { box-shadow: 0 0 20px color-mix(in srgb, var(--neon-cyan) 60%, transparent), 0 0 40px color-mix(in srgb, var(--neon-cyan) 20%, transparent); }
 }
 .animate-glow { animation: glow 2s ease-in-out infinite alternate; }
 
