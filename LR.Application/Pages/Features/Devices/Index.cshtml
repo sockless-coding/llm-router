@@ -1,0 +1,139 @@
+@page
+@using LR.Application.Pages.Features.Devices
+@model DevicesListModel
+@{
+    ViewData["Title"] = "Devices";
+}
+
+<div class="max-w-5xl mx-auto px-4 py-6">
+    <form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-3xl font-bold text-neon-cyan"><span aria-hidden="true">🖥️</span> Devices</h1>
+            <p class="text-text-secondary mt-1">GPUs and NPUs detected on this machine. Disable a device in the OS when you don't want it available for AI workloads.</p>
+        </div>
+        <button type="button" onclick="location.reload()"
+                class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+            Rescan
+        </button>
+    </div>
+
+    <div class="mb-6 rounded-xl p-4 border border-neon-cyan/20 bg-neon-cyan/5">
+        <p class="text-sm text-text-primary">
+            Enabling/disabling a device changes its state in Windows Device Manager (via <code class="text-neon-cyan">pnputil</code>), so it takes effect
+            for every application, not just this router. It requires the router to run elevated or installed as the
+            <strong>LLM Router</strong> Windows service — under <code class="text-neon-cyan">dotnet run</code> without admin rights the toggle will fail.
+            Disabling the device driving your primary display can make it unusable until re-enabled from another session.
+            <strong>Likely APIs</strong> is inferred from the device's vendor and which compute runtimes (CUDA/Vulkan/oneAPI Level Zero) are installed
+            system-wide — it's a hint for picking a preset's backend, not a guarantee llama.cpp will run on it. The cyan
+            <strong>OpenVINO</strong> badge (Intel GPUs/NPUs only) isn't a llama.cpp backend option — it flags that Intel's own inference
+            runtime is installed, which matters most for NPUs since llama.cpp can't target those directly.
+        </p>
+    </div>
+
+    @if (!Model.Devices.Any())
+    {
+        <div class="text-center py-16 bg-cyber-card rounded-xl border border-neon-cyan/10">
+            <svg class="w-12 h-12 mx-auto text-text-secondary mb-3" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" /></svg>
+            <p class="text-text-secondary">No GPU or NPU devices detected</p>
+            <p class="text-text-secondary text-sm mt-1">This only works on Windows and may need the router running elevated to see accurate status.</p>
+        </div>
+    }
+    else
+    {
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Type</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">VRAM</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Likely APIs</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">OS Status</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">State</th>
+                        <th class="text-right px-4 py-3 text-text-secondary font-medium">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var device in Model.Devices)
+                    {
+                        <tr class="border-b border-gray-700/20 hover:bg-gray-800/20">
+                            <td class="px-4 py-3 text-text-secondary">@(device.Kind == ComputeDeviceKind.Gpu ? "GPU" : "NPU")</td>
+                            <td class="px-4 py-3 text-text-primary font-medium">
+                                @device.Name
+                                <div class="text-xs text-text-secondary font-normal">@(device.Manufacturer ?? "Unknown manufacturer")</div>
+                            </td>
+                            <td class="px-4 py-3 text-text-secondary">
+                                @DevicesListModel.FormatVram(device.VramBytes)
+                            </td>
+                            <td class="px-4 py-3">
+                                @if (device.SupportedBackends.Any() || device.OtherCapabilities.Any())
+                                {
+                                    <div class="flex flex-wrap gap-1">
+                                        @foreach (var backend in device.SupportedBackends)
+                                        {
+                                            <span class="text-xs px-2 py-0.5 rounded-full border bg-neon-magenta/10 text-neon-magenta border-neon-magenta/30 font-medium">@DevicesListModel.FormatBackend(backend)</span>
+                                        }
+                                        @foreach (var capability in device.OtherCapabilities)
+                                        {
+                                            <span class="text-xs px-2 py-0.5 rounded-full border bg-neon-cyan/10 text-neon-cyan border-neon-cyan/30 font-medium">@capability</span>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="text-text-secondary">—</span>
+                                }
+                            </td>
+                            <td class="px-4 py-3 text-text-secondary">@(device.StatusText ?? "—")</td>
+                            <td class="px-4 py-3">
+                                <span class="text-xs px-2.5 py-1 rounded-full border font-medium
+                                    @(device.IsEnabled ? "bg-neon-green/10 text-neon-green border-neon-green/30" : "bg-gray-700/30 text-text-secondary border-gray-600/30")">
+                                    @(device.IsEnabled ? "Enabled" : "Disabled")
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 text-right whitespace-nowrap">
+                                <button type="button" data-instance-id="@device.InstanceId" data-enable="@(device.IsEnabled ? "false" : "true")"
+                                        onclick="toggleDevice(this)"
+                                        class="text-xs px-3 py-1.5 rounded-md transition-all font-medium
+                                        @(device.IsEnabled ? "bg-red-500/10 text-neon-red hover:bg-red-500/20" : "bg-neon-green/10 text-neon-green hover:bg-neon-green/20")">
+                                    @(device.IsEnabled ? "Disable" : "Enable")
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@section Scripts {
+<script>
+function csrfToken() {
+    return document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+}
+
+async function toggleDevice(btn) {
+    const instanceId = btn.dataset.instanceId;
+    const enable = btn.dataset.enable;
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/Features/Devices/Index?handler=Toggle&instanceId=${encodeURIComponent(instanceId)}&enable=${enable}`,
+            { method: 'POST', headers: { 'RequestVerificationToken': csrfToken() } });
+        if (resp.ok) {
+            location.reload();
+        } else {
+            const message = await resp.text();
+            alert('Failed to update device: ' + message);
+            btn.disabled = false;
+        }
+    } catch (e) {
+        alert('Failed: ' + e.message);
+        btn.disabled = false;
+    }
+}
+</script>
+}

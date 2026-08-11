@@ -57,6 +57,14 @@ builder.Services.AddScoped<IApiKeyRequestContext, ApiKeyRequestContext>();
 // GGUF metadata reader (Singleton — stateless file reader)
 builder.Services.AddSingleton<IGgufMetadataReader, GgufMetadataReader>();
 
+// Compute device inventory (Singleton — stateless WMI/pnputil wrapper). ComputeDeviceService
+// checks OperatingSystem.IsWindows() itself at each call site, so it's safe to register
+// unconditionally; the pragma silences the platform-compat analyzer's false positive on the
+// constructor reference here.
+#pragma warning disable CA1416
+builder.Services.AddSingleton<IComputeDeviceService, ComputeDeviceService>();
+#pragma warning restore CA1416
+
 // SignalR progress publisher (bridges LR.Core and LR.Application)
 builder.Services.AddScoped<LR.Core.Interfaces.ISignalRProgressPublisher, SignalRProgressPublisher>();
 
