@@ -6,9 +6,17 @@ namespace LR.Core.Models;
 public class GatewaySettings
 {
     /// <summary>
-    /// The port the gateway listens on. Default: 8080.
+    /// The port the admin web UI (dashboard, Razor pages, SignalR hubs) listens on. Default: 8080.
     /// </summary>
     public int Port { get; set; } = 8080;
+
+    /// <summary>
+    /// The port the protocol-compatible routing endpoints (/v1/*, Ollama /api/*) listen on.
+    /// When 0 (default), routing endpoints are served on <see cref="Port"/> alongside the admin UI,
+    /// preserving single-port behavior. Set to a distinct value to expose routing traffic on its own
+    /// port without also exposing the admin UI on it.
+    /// </summary>
+    public int RoutingPort { get; set; } = 0;
 
     /// <summary>
     /// Which protocol endpoints to enable. If empty, all protocols are enabled.

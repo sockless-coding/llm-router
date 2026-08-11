@@ -36,6 +36,11 @@ public class IndexModel : PageModel
     [BindProperty]
     public bool RequireApiKey { get; set; }
 
+    [BindProperty]
+    public int RoutingPort { get; set; }
+
+    public int AdminPort { get; set; }
+
     // Path to appsettings.json for persisting changes
     private static string ConfigPath =>
         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
@@ -57,6 +62,8 @@ public class IndexModel : PageModel
         MaxQueueSize = s.MaxQueueSize;
         QueueTimeoutSeconds = s.QueueTimeoutSeconds;
         RequireApiKey = s.RequireApiKey;
+        RoutingPort = s.RoutingPort;
+        AdminPort = s.Port;
     }
 
     public async Task<IActionResult> OnPostAsync([FromForm] string? action)
@@ -103,6 +110,7 @@ public class IndexModel : PageModel
                         gatewayDict["MaxQueueSize"] = MaxQueueSize;
                         gatewayDict["QueueTimeoutSeconds"] = QueueTimeoutSeconds;
                         gatewayDict["RequireApiKey"] = RequireApiKey;
+                        gatewayDict["RoutingPort"] = RoutingPort;
                         config["Gateway"] = gatewayDict;
                     }
                 }
@@ -125,6 +133,13 @@ public class IndexModel : PageModel
         MaxQueueSize = s.MaxQueueSize;
         QueueTimeoutSeconds = s.QueueTimeoutSeconds;
         RequireApiKey = s.RequireApiKey;
+        RoutingPort = s.RoutingPort;
+        AdminPort = s.Port;
+
+        if (action == "save" && !StatusMessage.Contains("failed", StringComparison.OrdinalIgnoreCase))
+        {
+            StatusMessage += " Port changes take effect after restarting the router.";
+        }
 
         return Page();
     }

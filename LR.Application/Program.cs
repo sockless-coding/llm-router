@@ -119,6 +119,13 @@ var gatewaySettings = builder.Configuration.GetSection("Gateway").Get<GatewaySet
 builder.Services.AddSingleton(gatewaySettings);
 builder.Services.Configure<GatewaySettings>(builder.Configuration.GetSection("Gateway"));
 
+// The admin UI (Razor pages, SignalR hubs, static assets) always listens on Gateway:Port.
+// Routing/protocol endpoints (/v1/*, Ollama /api/*) listen there too unless Gateway:RoutingPort
+// is set to a different value, in which case they get their own listener — so the routing API
+// can be exposed externally without also exposing the admin dashboard.
+var routingPort = gatewaySettings.RoutingPort > 0 ? gatewaySettings.RoutingPort : gatewaySettings.Port;
+var splitRoutingPort = routingPort != gatewaySettings.Port;
+
 // Configure Kestrel for long-running inference requests
 builder.WebHost.ConfigureKestrel(options =>
 {
@@ -129,6 +136,11 @@ builder.WebHost.ConfigureKestrel(options =>
     if (gatewaySettings.Port > 0)
     {
         options.ListenAnyIP(gatewaySettings.Port);
+    }
+
+    if (splitRoutingPort && routingPort > 0)
+    {
+        options.ListenAnyIP(routingPort);
     }
 });
 
@@ -174,6 +186,27 @@ using (var scope = app.Services.CreateScope())
 {
     var modelReconciliation = scope.ServiceProvider.GetRequiredService<ModelLibraryReconciliationService>();
     await modelReconciliation.ReconcileAsync();
+}
+
+// When the routing API has its own port, keep the two surfaces strictly separated: the admin
+// port never serves routing/protocol traffic, and the routing port serves nothing else (so
+// exposing it externally doesn't also expose the dashboard, SignalR hubs, or stats API). This
+// checks the actual TCP connection port rather than the Host header, which a client could spoof.
+if (splitRoutingPort)
+{
+    app.Use(async (context, next) =>
+    {
+        var isRoutingPort = context.Connection.LocalPort == routingPort;
+        var isRoutingPath = IsRoutingApiPath(context.Request.Path);
+
+        if (isRoutingPath != isRoutingPort && context.Request.Path != "/health")
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        await next();
+    });
 }
 
 app.UseStaticFiles();
@@ -251,3 +284,16 @@ static void AddEventLogging(ILoggingBuilder logging)
     var settings = new Microsoft.Extensions.Logging.EventLog.EventLogSettings { SourceName = "LLM Router" };
     logging.AddEventLog(settings);
 }
+
+// Matches the protocol-compatible routing endpoints mapped in LR.Application.Pages.Api
+// (OpenAI/Claude/Responses under /v1/*, Ollama under /api/*) — everything else (Razor pages,
+// SignalR hubs, static assets, the /api/stats/* dashboard data endpoints) is "admin" traffic.
+static bool IsRoutingApiPath(PathString path) =>
+    path.StartsWithSegments("/v1") ||
+    path.StartsWithSegments("/api/version") ||
+    path.StartsWithSegments("/api/chat") ||
+    path.StartsWithSegments("/api/tags") ||
+    path.StartsWithSegments("/api/show") ||
+    path.StartsWithSegments("/api/generate") ||
+    path.StartsWithSegments("/api/embed") ||
+    path.StartsWithSegments("/api/ps");

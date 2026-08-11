@@ -92,6 +92,21 @@ class="sr-only peer" aria-labelledby="requireApiKeyLabel"
                 </label>
             </div>
 
+            <!-- Routing Port -->
+            <div class="flex items-center justify-between py-3 border-b border-gray-700/20">
+                <div id="routingPortLabel">
+                    <p class="text-sm text-text-primary font-medium">Routing API Port</p>
+                    <p class="text-xs text-text-secondary mt-0.5">
+                        Port for /v1/* and Ollama /api/* endpoints. Admin UI stays on port @Model.AdminPort.
+                        Set to 0 to serve routing traffic on the admin port instead (single-port mode).
+                        Requires a restart to take effect.
+                    </p>
+                </div>
+                <input type="number" name="RoutingPort" min="0" max="65535" value="@Model.RoutingPort"
+class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-2 w-24 text-sm text-center" aria-labelledby="routingPortLabel"
+                           asp-for="RoutingPort" />
+            </div>
+
             <!-- Max Queue Size -->
             <div class="flex items-center justify-between py-3 border-b border-gray-700/20">
                 <div id="maxQueueSizeLabel">
