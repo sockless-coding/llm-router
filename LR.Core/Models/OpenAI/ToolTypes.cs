@@ -41,6 +41,15 @@ public class ChatToolFunction
 /// </summary>
 public class ChatToolCall
 {
+    /// <summary>
+    /// The position of this call among the message's tool_calls. Required on streaming deltas —
+    /// it's how a client correlates fragments across SSE frames to the right call — but absent
+    /// on the final non-streaming message.tool_calls array, so this stays null there.
+    /// </summary>
+    [JsonPropertyName("index")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Index { get; set; }
+
     /// <summary>The ID of the tool call.</summary>
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;

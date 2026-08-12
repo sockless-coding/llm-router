@@ -492,9 +492,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                 // (llama.cpp/OpenAI send stream_options usage as its own frame with empty
                 // choices, which the code below folds into streamResponse as it's seen).
                 streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
-                streamResponse.ToolCalls = accumulatedToolCalls.Count > 0
-                    ? accumulatedToolCalls.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList()
-                    : null;
+                streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
                 _timingCoordinator.MergeTimingData(streamResponse);
                 completed = true;
                 yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
@@ -530,8 +528,12 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                             : null;
 
                         // Tool calls stream incrementally, index-keyed, the same way OpenAI does:
-                        // each frame carries a fragment of one call's id/name/arguments.
-                        if (delta.TryGetProperty("tool_calls", out JsonElement toolCallsDelta) && toolCallsDelta.ValueKind == JsonValueKind.Array)
+                        // each frame carries a fragment of one call's id/name/arguments. Some
+                        // llama.cpp versions include an empty "tool_calls": [] on frames that
+                        // aren't actually part of a tool call — skip those so we don't yield a
+                        // non-null-but-empty ToolCallDeltas that downstream code (and clients
+                        // accumulating history) could mistake for "this message has tool_calls".
+                        if (delta.TryGetProperty("tool_calls", out JsonElement toolCallsDelta) && toolCallsDelta.ValueKind == JsonValueKind.Array && toolCallsDelta.GetArrayLength() > 0)
                         {
                             toolCallDeltas = new List<ChatToolCall>();
                             foreach (var tc in toolCallsDelta.EnumerateArray())
@@ -556,6 +558,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
 
                                 toolCallDeltas.Add(new ChatToolCall
                                 {
+                                    Index = index,
                                     Id = entry.Id,
                                     Type = entry.Type,
                                     Function = new ChatToolCallFunction
@@ -624,12 +627,28 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         {
             streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
             streamResponse.Payload = accumulatedText ?? string.Empty;
-            streamResponse.ToolCalls = accumulatedToolCalls.Count > 0
-                ? accumulatedToolCalls.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList()
-                : null;
+            streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
             _timingCoordinator.MergeTimingData(streamResponse);
             yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
         }
+    }
+
+    /// <summary>
+    /// Builds the final tool-call list from accumulated stream deltas, dropping any entry whose
+    /// function name never came through (empty/whitespace). An empty name is never a valid call —
+    /// no client can dispatch it — and observed cases (e.g. under speculative/MTP decoding) show
+    /// the model occasionally emitting a tool_calls entry with arguments but no name. Forwarding
+    /// that verbatim just moves the failure to the client in a more confusing form (e.g. "Model
+    /// tried to call unavailable tool ''"), so it's filtered out here instead.
+    /// </summary>
+    private static List<ChatToolCall>? FinalizeToolCalls(Dictionary<int, ChatToolCall> accumulated)
+    {
+        var calls = accumulated.OrderBy(kv => kv.Key)
+            .Select(kv => kv.Value)
+            .Where(tc => !string.IsNullOrWhiteSpace(tc.Function.Name))
+            .ToList();
+
+        return calls.Count > 0 ? calls : null;
     }
 
     public virtual string? GetStartCommand(ModelPreset preset, int? port = null)

@@ -175,7 +175,16 @@ public class OpenAiHandler : IProtocolHandler
                                     new ChunkChoice
                                     {
                                         Index = 0,
-                                        Delta = new DeltaMessage { ToolCalls = chunk.Response.ToolCalls },
+                                        // Deliberately empty: the client already received the full
+                                        // tool call (name + arguments) via the preceding incremental
+                                        // deltas. Restating it here — as this used to do — duplicates
+                                        // it for any client that does the standard (and
+                                        // OpenAI-recommended) thing of blindly concatenating each
+                                        // delta's content/arguments, since this frame's data would
+                                        // get appended on top of what was already assembled. Real
+                                        // OpenAI/llama.cpp send an empty delta on the terminating
+                                        // frame for exactly this reason.
+                                        Delta = new DeltaMessage(),
                                         FinishReason = chunk.Response.FinishReason ?? "stop"
                                     }
                                 },
@@ -361,6 +370,8 @@ public class OpenAiHandler : IProtocolHandler
             request.StreamOptions.IncludeUsage = true;
         }
 
+        SanitizeAssistantMessages(request.Messages);
+
         var payload = JsonSerializer.Serialize(request, BackendJsonOpts);
         _logger.LogDebug("RouteRequest payload for {Model}: {Payload}", request.Model, payload);
 
@@ -372,8 +383,39 @@ public class OpenAiHandler : IProtocolHandler
         };
     }
 
+    /// <summary>
+    /// Guards against forwarding an assistant message that has neither usable content nor
+    /// tool_calls to the backend — llama.cpp rejects those outright ("Assistant message must
+    /// contain either 'content' or 'tool_calls'!"). Request messages are forwarded to the
+    /// backend essentially as-is, so a client replaying a stored conversation that picked up a
+    /// malformed turn (e.g. from a prior router bug, or from any other source) would otherwise
+    /// 400 on every subsequent request until that turn ages out of its history. Rather than
+    /// reject the whole request, give the message explicit empty content so it's clearly a
+    /// no-op turn instead of a validation failure.
+    /// </summary>
+    private static void SanitizeAssistantMessages(List<ChatMessage> messages)
+    {
+        foreach (var message in messages)
+        {
+            if (message.Role != "assistant") continue;
+
+            bool hasContent = message.Content is { Text.Length: > 0 } or { Parts.Count: > 0 };
+            bool hasToolCalls = message.ToolCalls is { Count: > 0 };
+            if (hasContent || hasToolCalls) continue;
+
+            message.Content = ChatMessageContent.FromText(string.Empty);
+            message.ToolCalls = null;
+        }
+    }
+
     private ChatCompletionResponse BuildCompletionResponse(string model, RouteResponse response)
     {
+        // Treat a non-null-but-empty ToolCalls list the same as null: an empty list here would
+        // otherwise omit "content" (below) in favor of an empty "tool_calls" array, producing an
+        // assistant message with neither — which llama.cpp rejects on the very next turn once
+        // the client stores this response and replays it as history.
+        var toolCalls = response.ToolCalls is { Count: > 0 } ? response.ToolCalls : null;
+
         return new ChatCompletionResponse
         {
             Id = $"chatcmpl-{Guid.NewGuid():N}",
@@ -387,8 +429,8 @@ public class OpenAiHandler : IProtocolHandler
                     Message = new ChatMessage
                     {
                         Role = "assistant",
-                        Content = response.ToolCalls is null ? ChatMessageContent.FromText(response.Payload) : null,
-                        ToolCalls = response.ToolCalls,
+                        Content = toolCalls is null ? ChatMessageContent.FromText(response.Payload) : null,
+                        ToolCalls = toolCalls,
                         ReasoningContent = response.ReasoningContent
                     },
                     FinishReason = response.FinishReason ?? "stop"

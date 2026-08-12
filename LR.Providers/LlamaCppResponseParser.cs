@@ -41,9 +41,19 @@ public static class LlamaCppResponseParser
                     ? reasoning.GetString()
                     : null;
 
-                if (message.TryGetProperty("tool_calls", out JsonElement toolCalls) && toolCalls.ValueKind == JsonValueKind.Array)
+                // Only set ToolCalls when the array actually has entries — llama.cpp can include
+                // an empty "tool_calls": [] on ordinary text responses, and a non-null-but-empty
+                // list here would later make BuildCompletionResponse omit "content" in favor of
+                // an empty "tool_calls" array, producing an assistant message with neither that
+                // backends reject on the next turn.
+                if (message.TryGetProperty("tool_calls", out JsonElement toolCalls) && toolCalls.ValueKind == JsonValueKind.Array && toolCalls.GetArrayLength() > 0)
                 {
-                    response.ToolCalls = JsonSerializer.Deserialize<List<ChatToolCall>>(toolCalls.GetRawText());
+                    // Drop any entry with no function name — never dispatchable by any client
+                    // (observed under speculative/MTP decoding: arguments present, name empty).
+                    var parsed = JsonSerializer.Deserialize<List<ChatToolCall>>(toolCalls.GetRawText())
+                        ?.Where(tc => !string.IsNullOrWhiteSpace(tc.Function.Name))
+                        .ToList();
+                    response.ToolCalls = parsed is { Count: > 0 } ? parsed : null;
                 }
             }
 

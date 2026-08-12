@@ -212,8 +212,8 @@ public class ApiRequestLogger : IApiRequestLogger
         if (value is null) return null;
 
         // Always allow at least this much for debugging even when truncated
-        const int maxTruncatedLength = 8192; // 8KB for partial payloads
-        const int maxFullLength = 65536;     // 64KB for full payloads
+        const int maxTruncatedLength = 8192;   // 8KB for partial payloads
+        const int maxFullLength = 1_048_576;   // 1MB for full payloads — large system prompts/tool schemas (e.g. Copilot's) can run tens of KB on their own
 
         if (_settings.LogFullPayloads)
             return value.Length > maxFullLength ? value[..maxFullLength] : value;

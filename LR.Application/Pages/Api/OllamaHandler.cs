@@ -280,7 +280,12 @@ public class OllamaHandler : IProtocolHandler
                         {
                             Model = request.Model,
                             CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                            Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = string.Empty },
+                            Message = new LR.Core.Models.Ollama.ChatMessage
+                            {
+                                Role = "assistant",
+                                Content = string.Empty,
+                                ToolCalls = MapToolCallsToOllama(chunk.Response.ToolCalls)
+                            },
                             Done = true,
                             DoneReason = "stop",
                             PromptEvalCount = chunk.Response.PromptTokensProcessed,
@@ -624,11 +629,8 @@ public class OllamaHandler : IProtocolHandler
             Seed = ollamaRequest.Options?.Seed,
             MaxTokens = ollamaRequest.Options?.NumPredict,
             Stop = ollamaRequest.Options?.Stop,
-            Messages = ollamaRequest.Messages.Select(m => new LR.Core.Models.OpenAI.ChatMessage
-            {
-                Role = m.Role,
-                Content = ChatMessageContent.FromText(m.Content)
-            }).ToList()
+            Messages = ConvertOllamaMessages(ollamaRequest.Messages),
+            Tools = ollamaRequest.Tools
         };
 
         // llama.cpp (like OpenAI) only includes token usage in the SSE stream when
@@ -646,6 +648,104 @@ public class OllamaHandler : IProtocolHandler
             // Omit null fields — backend rejects "name":null etc.
             Payload = JsonSerializer.Serialize(openAiRequest, new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull })
         };
+    }
+
+    /// <summary>
+    /// Converts Ollama-protocol messages to OpenAI-compatible messages, preserving tool calls
+    /// and tool results. Ollama assistant messages carry tool_calls with arguments as a JSON
+    /// object and no reliable call ID; tool-result messages identify the call by tool name
+    /// (via "tool_name") rather than by ID. OpenAI/llama.cpp instead correlate tool results to
+    /// calls by ID and require assistant messages to carry either non-empty content or
+    /// tool_calls — never neither, and never an empty-string content alongside dropped
+    /// tool_calls, which is what silently happened here before this method existed, producing
+    /// backend 400s ("Assistant message must contain either 'content' or 'tool_calls'!") on any
+    /// follow-up turn after a tool call. This synthesizes an ID per tool call (if the client
+    /// didn't supply one) and backfills it onto the matching tool-result message by name.
+    /// </summary>
+    private static List<LR.Core.Models.OpenAI.ChatMessage> ConvertOllamaMessages(List<LR.Core.Models.Ollama.ChatMessage> ollamaMessages)
+    {
+        var result = new List<LR.Core.Models.OpenAI.ChatMessage>(ollamaMessages.Count);
+        var lastToolCallIdByName = new Dictionary<string, string>();
+
+        foreach (var m in ollamaMessages)
+        {
+            List<LR.Core.Models.OpenAI.ChatToolCall>? toolCalls = null;
+            if (m.ToolCalls is { Count: > 0 })
+            {
+                toolCalls = new List<LR.Core.Models.OpenAI.ChatToolCall>(m.ToolCalls.Count);
+                foreach (var tc in m.ToolCalls)
+                {
+                    var id = string.IsNullOrEmpty(tc.Id) ? $"call_{Guid.NewGuid():N}" : tc.Id;
+                    if (!string.IsNullOrEmpty(tc.Function.Name))
+                        lastToolCallIdByName[tc.Function.Name] = id;
+
+                    toolCalls.Add(new LR.Core.Models.OpenAI.ChatToolCall
+                    {
+                        Id = id,
+                        Type = "function",
+                        Function = new LR.Core.Models.OpenAI.ChatToolCallFunction
+                        {
+                            Name = tc.Function.Name,
+                            Arguments = tc.Function.Arguments.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
+                                ? "{}"
+                                : tc.Function.Arguments.GetRawText()
+                        }
+                    });
+                }
+            }
+
+            string? toolCallId = m.ToolCallId;
+            if (m.Role == "tool" && toolCallId is null && m.ToolName is not null)
+                lastToolCallIdByName.TryGetValue(m.ToolName, out toolCallId);
+
+            // Only omit content when tool_calls are present to satisfy the "content or
+            // tool_calls" requirement — for every other role (including empty tool results),
+            // keep sending an explicit empty string rather than null, since null content with
+            // no tool_calls is exactly the shape backends reject.
+            var content = string.IsNullOrEmpty(m.Content) && toolCalls is not null
+                ? null
+                : ChatMessageContent.FromText(m.Content);
+
+            result.Add(new LR.Core.Models.OpenAI.ChatMessage
+            {
+                Role = m.Role,
+                Content = content,
+                ToolCalls = toolCalls,
+                ToolCallId = toolCallId,
+                Name = m.Role == "tool" ? m.ToolName : null
+            });
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Converts backend tool calls (OpenAI shape: arguments as a JSON-encoded string) back to
+    /// Ollama's shape (arguments as a JSON object), so Ollama-protocol clients that request
+    /// tool use actually see the resulting calls instead of them being silently dropped.
+    /// </summary>
+    private static List<OllamaToolCall>? MapToolCallsToOllama(List<LR.Core.Models.OpenAI.ChatToolCall>? toolCalls)
+    {
+        if (toolCalls is null || toolCalls.Count == 0) return null;
+
+        return toolCalls.Select(tc =>
+        {
+            JsonElement arguments;
+            try
+            {
+                arguments = JsonDocument.Parse(string.IsNullOrEmpty(tc.Function.Arguments) ? "{}" : tc.Function.Arguments).RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                arguments = JsonDocument.Parse("{}").RootElement.Clone();
+            }
+
+            return new OllamaToolCall
+            {
+                Id = tc.Id,
+                Function = new OllamaToolCallFunction { Name = tc.Function.Name, Arguments = arguments }
+            };
+        }).ToList();
     }
 
     /// <summary>
@@ -703,7 +803,12 @@ public class OllamaHandler : IProtocolHandler
         {
             Model = model,
             CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-            Message = new LR.Core.Models.Ollama.ChatMessage { Role = "assistant", Content = response.Payload },
+            Message = new LR.Core.Models.Ollama.ChatMessage
+            {
+                Role = "assistant",
+                Content = response.Payload,
+                ToolCalls = MapToolCallsToOllama(response.ToolCalls)
+            },
             Done = true,
             DoneReason = "stop",
             PromptEvalCount = response.PromptTokensProcessed,
