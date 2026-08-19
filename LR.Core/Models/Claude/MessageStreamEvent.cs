@@ -45,6 +45,29 @@ public class MessageEnvelope
 
     [JsonPropertyName("model")]
     public string Model { get; set; } = string.Empty;
+
+    [JsonPropertyName("stop_reason")]
+    public string? StopReason { get; set; }
+
+    [JsonPropertyName("stop_sequence")]
+    public object? StopSequence { get; set; }
+
+    [JsonPropertyName("usage")]
+    public Usage Usage { get; set; } = new();
+}
+
+/// <summary>
+/// content_block_stop event — closes the content block opened by content_block_start.
+/// Real Anthropic clients (including the official SDK) expect this before message_delta/
+/// message_stop; omitting it produces a malformed event sequence some clients reject outright.
+/// </summary>
+public class ContentBlockStopData
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "content_block_stop";
+
+    [JsonPropertyName("index")]
+    public int Index { get; set; }
 }
 
 /// <summary>
@@ -94,6 +117,14 @@ public class DeltaContentBlockDelta
     /// </summary>
     [JsonPropertyName("thinking")]
     public string? Thinking { get; set; }
+
+    /// <summary>
+    /// Incremental fragment of a tool call's JSON-encoded arguments, for input_json_delta type.
+    /// Fragments for a given content block are concatenated in order to form the full arguments
+    /// JSON string once the block closes.
+    /// </summary>
+    [JsonPropertyName("partial_json")]
+    public string? PartialJson { get; set; }
 }
 
 /// <summary>
@@ -106,6 +137,9 @@ public class MessageDeltaData
 
     [JsonPropertyName("delta")]
     public DeltaMessageDelta Delta { get; set; } = new();
+
+    [JsonPropertyName("usage")]
+    public Usage? Usage { get; set; }
 }
 
 public class DeltaMessageDelta

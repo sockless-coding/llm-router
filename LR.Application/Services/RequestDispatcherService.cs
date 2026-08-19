@@ -131,6 +131,6 @@ public class RequestDispatcherService : BackgroundService
         if (provider is null)
             throw new InvalidOperationException($"No backend provider registered for instance {server.Name}.");
 
-        return await provider.SendRequestAsync(request.Payload, cancellationToken);
+        return await provider.SendRequestAsync(request.Payload, request.Protocol, cancellationToken);
     }
 }

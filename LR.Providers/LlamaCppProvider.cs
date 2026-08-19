@@ -249,10 +249,16 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         }
     }
 
-    public async Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default)
+    public async Task<RouteResponse?> SendRequestAsync(string payload, ApiProtocol protocol = ApiProtocol.OpenAI, CancellationToken cancellationToken = default)
     {
         const int maxRetries = 2;
         Exception? lastException = null;
+
+        // llama.cpp exposes a native Anthropic-compatible endpoint alongside its OpenAI one, so
+        // a Claude-protocol payload (as built by ClaudeHandler) is routed there unchanged instead
+        // of being sent to /v1/chat/completions, which doesn't understand its shape (top-level
+        // "system", content blocks, etc.).
+        string endpoint = protocol == ApiProtocol.Claude ? "/v1/messages" : "/v1/chat/completions";
 
         for (int attempt = 0; attempt <= maxRetries; attempt++)
         {
@@ -273,7 +279,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                 _logger.LogInformation("[Stats] Enqueued non-streaming request.");
 
                 var response = await _httpClient.PostAsJsonAsync(
-                    $"{ServerUrl}/v1/chat/completions",
+                    $"{ServerUrl}{endpoint}",
                     JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload),
                     cancellationToken);
 
@@ -284,7 +290,10 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                 }
 
                 var jsonDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-                LlamaCppResponseParser.ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
+                if (protocol == ApiProtocol.Claude)
+                    LlamaCppClaudeResponseParser.ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
+                else
+                    LlamaCppResponseParser.ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
 
                 // Non-streaming request: by the time we get here, stdout parsing should have
                 // already captured completion timing. Merge it into our response.
@@ -375,7 +384,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
     /// Sends a streaming inference request. Returns token chunks as they are generated.
     /// </summary>
     public async IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(
-        string payload, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        string payload, ApiProtocol protocol = ApiProtocol.OpenAI, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(ServerUrl)) yield break;
 
@@ -390,6 +399,11 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         const int maxRetries = 2;
         Exception? lastException = null;
 
+        // llama.cpp's native Anthropic endpoint takes "stream" as a body field (like the real
+        // Claude API), not a query string — unlike the ?stream=true convention used below for
+        // its OpenAI-compatible endpoint.
+        string endpoint = protocol == ApiProtocol.Claude ? "/v1/messages" : "/v1/chat/completions?stream=true";
+
         for (int attempt = 0; attempt <= maxRetries; attempt++)
         {
             if (attempt > 0)
@@ -403,14 +417,14 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
             try
             {
                 var requestContent = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-                _logger.LogInformation("Sending streaming request to {ServerUrl}/v1/chat/completions?stream=true (attempt {Attempt})",
-                    ServerUrl, attempt + 1);
+                _logger.LogInformation("Sending streaming request to {ServerUrl}{Endpoint} (attempt {Attempt})",
+                    ServerUrl, endpoint, attempt + 1);
                 _logger.LogDebug("Streaming request payload: {Payload}", payload);
 
                 // Use SendAsync with ResponseHeadersRead so the call returns as soon as headers arrive,
                 // allowing chunks to flow through the stream incrementally instead of buffering
                 // the entire response before yielding.
-                var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{ServerUrl}/v1/chat/completions?stream=true")
+                var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{ServerUrl}{endpoint}")
                 {
                     Content = requestContent
                 };
@@ -463,6 +477,13 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                 $"Streaming request failed after retries: {lastException.Message}");
 
             throw new InvalidOperationException($"Failed to send streaming request to {ServerUrl} after {maxRetries + 1} attempts: {lastException.Message}", lastException);
+        }
+
+        if (protocol == ApiProtocol.Claude)
+        {
+            await foreach (var claudeChunk in ReadClaudeSseStreamAsync(reader!, streamResponse, cancellationToken))
+                yield return claudeChunk;
+            yield break;
         }
 
         string? accumulatedText = null;
@@ -627,6 +648,178 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         {
             streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
             streamResponse.Payload = accumulatedText ?? string.Empty;
+            streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
+            _timingCoordinator.MergeTimingData(streamResponse);
+            yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
+        }
+    }
+
+    /// <summary>
+    /// Reads llama.cpp's native Anthropic-compatible SSE stream (from /v1/messages) and yields
+    /// normalized RouteStreamChunks, mirroring what the OpenAI-shaped loop above does for
+    /// /v1/chat/completions. Anthropic's event framing differs from OpenAI's: named events
+    /// (message_start, content_block_delta, message_delta, message_stop, ...) instead of a flat
+    /// sequence of "choices" deltas terminated by a literal "[DONE]" marker.
+    /// </summary>
+    private async IAsyncEnumerable<RouteStreamChunk> ReadClaudeSseStreamAsync(
+        StreamReader reader, RouteResponse streamResponse, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        string? accumulatedText = null;
+        string? accumulatedThinking = null;
+        bool completed = false;
+        var accumulatedToolCalls = new Dictionary<int, ChatToolCall>();
+
+        while (!completed && !cancellationToken.IsCancellationRequested)
+        {
+            string? line = await reader.ReadLineAsync();
+            if (line is null) break;
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            // Anthropic SSE frames carry both "event: <type>" and "data: {json}" lines; the type
+            // is also present in the JSON payload itself, so the "event:" line can be skipped.
+            if (!line.StartsWith("data:")) continue;
+
+            string data = line.Substring(5).Trim();
+            if (string.IsNullOrEmpty(data)) continue;
+
+            _logger.LogDebug("[Claude SSE] {Data}", data);
+
+            var chunksToYield = new List<RouteStreamChunk>(1);
+            try
+            {
+                using var jsonDoc = JsonDocument.Parse(data);
+                var root = jsonDoc.RootElement;
+                string? eventType = root.TryGetProperty("type", out JsonElement typeEl) ? typeEl.GetString() : null;
+                int blockIndex = root.TryGetProperty("index", out JsonElement indexEl) && indexEl.ValueKind == JsonValueKind.Number
+                    ? indexEl.GetInt32()
+                    : 0;
+
+                switch (eventType)
+                {
+                    case "message_start":
+                        if (root.TryGetProperty("message", out JsonElement message) &&
+                            message.TryGetProperty("usage", out JsonElement startUsage) &&
+                            startUsage.TryGetProperty("input_tokens", out JsonElement inputTokensEl) &&
+                            inputTokensEl.ValueKind == JsonValueKind.Number)
+                        {
+                            streamResponse.PromptTokensProcessed = inputTokensEl.GetInt32();
+                        }
+                        break;
+
+                    case "content_block_start":
+                        if (root.TryGetProperty("content_block", out JsonElement contentBlock) &&
+                            contentBlock.TryGetProperty("type", out JsonElement blockTypeEl) &&
+                            blockTypeEl.GetString() == "tool_use")
+                        {
+                            string id = contentBlock.TryGetProperty("id", out JsonElement idEl) ? idEl.GetString() ?? string.Empty : string.Empty;
+                            string name = contentBlock.TryGetProperty("name", out JsonElement nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty;
+
+                            var call = new ChatToolCall
+                            {
+                                Index = blockIndex,
+                                Id = id,
+                                Type = "function",
+                                Function = new ChatToolCallFunction { Name = name, Arguments = string.Empty }
+                            };
+                            accumulatedToolCalls[blockIndex] = call;
+                            chunksToYield.Add(new RouteStreamChunk
+                            {
+                                TextDelta = string.Empty,
+                                ToolCallDeltas = new List<ChatToolCall> { call },
+                                IsFinal = false
+                            });
+                        }
+                        break;
+
+                    case "content_block_delta":
+                        if (root.TryGetProperty("delta", out JsonElement delta) &&
+                            delta.TryGetProperty("type", out JsonElement deltaTypeEl))
+                        {
+                            string? deltaType = deltaTypeEl.GetString();
+                            if (deltaType == "text_delta" && delta.TryGetProperty("text", out JsonElement textEl))
+                            {
+                                string text = textEl.GetString() ?? string.Empty;
+                                accumulatedText += text;
+                                chunksToYield.Add(new RouteStreamChunk { TextDelta = text, IsFinal = false });
+                            }
+                            else if (deltaType == "thinking_delta" && delta.TryGetProperty("thinking", out JsonElement thinkingEl))
+                            {
+                                string thinking = thinkingEl.GetString() ?? string.Empty;
+                                accumulatedThinking += thinking;
+                                streamResponse.ReasoningTokenCount++;
+                                chunksToYield.Add(new RouteStreamChunk { TextDelta = string.Empty, ReasoningContentDelta = thinking, IsFinal = false });
+                            }
+                            else if (deltaType == "input_json_delta" && delta.TryGetProperty("partial_json", out JsonElement partialJsonEl))
+                            {
+                                string fragment = partialJsonEl.GetString() ?? string.Empty;
+                                if (accumulatedToolCalls.TryGetValue(blockIndex, out var entry))
+                                {
+                                    entry.Function.Arguments += fragment;
+                                    var deltaCall = new ChatToolCall
+                                    {
+                                        Index = blockIndex,
+                                        Id = string.Empty,
+                                        Type = "function",
+                                        Function = new ChatToolCallFunction { Name = string.Empty, Arguments = fragment }
+                                    };
+                                    chunksToYield.Add(new RouteStreamChunk
+                                    {
+                                        TextDelta = string.Empty,
+                                        ToolCallDeltas = new List<ChatToolCall> { deltaCall },
+                                        IsFinal = false
+                                    });
+                                }
+                            }
+                        }
+                        break;
+
+                    case "message_delta":
+                        if (root.TryGetProperty("delta", out JsonElement msgDelta) &&
+                            msgDelta.TryGetProperty("stop_reason", out JsonElement stopReasonEl) &&
+                            stopReasonEl.ValueKind == JsonValueKind.String)
+                        {
+                            streamResponse.FinishReason = stopReasonEl.GetString();
+                        }
+                        if (root.TryGetProperty("usage", out JsonElement deltaUsage) &&
+                            deltaUsage.TryGetProperty("output_tokens", out JsonElement outputTokensEl) &&
+                            outputTokensEl.ValueKind == JsonValueKind.Number)
+                        {
+                            streamResponse.GeneratedTokenCount = outputTokensEl.GetInt32();
+                        }
+                        break;
+
+                    case "message_stop":
+                        streamResponse.Payload = accumulatedText ?? string.Empty;
+                        streamResponse.ReasoningContent = accumulatedThinking;
+                        streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
+                        _timingCoordinator.MergeTimingData(streamResponse);
+                        completed = true;
+                        chunksToYield.Add(new RouteStreamChunk { IsFinal = true, Response = streamResponse });
+                        break;
+
+                    case "error":
+                        _logger.LogWarning("[Claude SSE] Backend returned an error event: {Data}", data);
+                        break;
+
+                    // content_block_stop, ping: no normalized chunk needed.
+                }
+            }
+            catch (JsonException)
+            {
+                // Skip malformed SSE data lines
+                continue;
+            }
+
+            foreach (var chunk in chunksToYield)
+                yield return chunk;
+        }
+
+        // Stream ended without a message_stop frame (backend crash, dropped connection, etc.) —
+        // surface whatever partial content we captured instead of dropping it silently.
+        if (!completed)
+        {
+            streamResponse.Payload = accumulatedText ?? string.Empty;
+            streamResponse.ReasoningContent = accumulatedThinking;
             streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
             _timingCoordinator.MergeTimingData(streamResponse);
             yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };

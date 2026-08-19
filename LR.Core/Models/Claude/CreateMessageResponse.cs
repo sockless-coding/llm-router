@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace LR.Core.Models.Claude;
@@ -37,8 +38,25 @@ public class ContentBlock
     [JsonPropertyName("type")]
     public string Type { get; set; } = "text";
 
+    /// <summary>Text for "text" blocks. Omitted (rather than serialized as "") on other block types.</summary>
     [JsonPropertyName("text")]
-    public string Text { get; set; } = string.Empty;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Text { get; set; } = string.Empty;
+
+    /// <summary>Tool call ID for "tool_use" blocks.</summary>
+    [JsonPropertyName("id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Id { get; set; }
+
+    /// <summary>Tool/function name for "tool_use" blocks.</summary>
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    /// <summary>Tool call arguments (as a JSON object) for "tool_use" blocks.</summary>
+    [JsonPropertyName("input")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Input { get; set; }
 }
 
 public class Usage

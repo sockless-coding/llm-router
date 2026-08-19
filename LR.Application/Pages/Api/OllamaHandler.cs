@@ -269,7 +269,7 @@ public class OllamaHandler : IProtocolHandler
                 if (provider is null)
                     return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
 
-                await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
+                await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken))
                 {
                     if (cancellationToken.IsCancellationRequested) break;
 
@@ -356,7 +356,7 @@ public class OllamaHandler : IProtocolHandler
             throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
 
         // Send request to the backend
-        var response = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+        var response = await provider.SendRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken);
         if (response == null)
             throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
 
@@ -423,7 +423,7 @@ public class OllamaHandler : IProtocolHandler
                 // Disable Kestrel response buffering so writes go directly to the socket
                 httpResponse.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
 
-                await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, cancellationToken))
+                await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken))
                 {
                     if (cancellationToken.IsCancellationRequested) break;
 
@@ -472,7 +472,7 @@ public class OllamaHandler : IProtocolHandler
 
             // Non-streaming: process on server and return full response
 
-            var result = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+            var result = await provider.SendRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken);
             if (result == null)
                 return Microsoft.AspNetCore.Http.Results.Problem("Backend returned no response", statusCode: 502);
 

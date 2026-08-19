@@ -157,7 +157,7 @@ public class OpenAiHandler : IProtocolHandler
                     await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(firstChunk), cancellationToken);
                     await bodyWriter.FlushAsync(cancellationToken);
 
-                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, backendToken))
+                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, backendToken))
                     {
                         if (backendToken.IsCancellationRequested) break;
 
@@ -289,7 +289,7 @@ public class OpenAiHandler : IProtocolHandler
             throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
 
         // Send request to the backend
-        var response = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+        var response = await provider.SendRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken);
         if (response == null)
             throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
 

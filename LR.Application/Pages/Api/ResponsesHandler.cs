@@ -252,7 +252,7 @@ public class ResponsesHandler
                 var provider = serverManager.GetProvider(server.Id);
                 if (provider is null) throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
 
-                routeResponse = await provider.SendRequestAsync(routeRequest.Payload, cts.Token);
+                routeResponse = await provider.SendRequestAsync(routeRequest.Payload, routeRequest.Protocol, cts.Token);
                 if (routeResponse is null) throw new InvalidOperationException("Backend returned no response.");
 
                 try
@@ -321,7 +321,7 @@ public class ResponsesHandler
 
         try
         {
-            await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, backendToken))
+            await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, backendToken))
             {
                 if (backendToken.IsCancellationRequested) break;
 
@@ -455,7 +455,7 @@ public class ResponsesHandler
         if (provider is null)
             throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
 
-        var response = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+        var response = await provider.SendRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken);
         if (response is null)
             throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
 

@@ -50,15 +50,18 @@ public interface IBackendProvider
 
     /// <summary>
     /// Sends an inference request to the running server and returns the response with performance metrics.
+    /// The protocol indicates the wire shape of <paramref name="payload"/> — providers that don't
+    /// natively speak a protocol are expected to translate; providers that do (e.g. llama.cpp's
+    /// native /v1/messages support for Claude) can route to the matching backend endpoint directly.
     /// </summary>
-    Task<RouteResponse?> SendRequestAsync(string payload, CancellationToken cancellationToken = default);
+    Task<RouteResponse?> SendRequestAsync(string payload, ApiProtocol protocol = ApiProtocol.OpenAI, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Sends a streaming inference request. Returns token chunks as they are generated.
     /// Each yielded string is a single text delta/token from the model.
     /// After all tokens are yielded, the final yield contains the RouteResponse metadata.
     /// </summary>
-    IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(string payload, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(string payload, ApiProtocol protocol = ApiProtocol.OpenAI, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Configures the provider with engine-specific settings (paths, environment setup, etc.).

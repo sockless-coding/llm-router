@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
@@ -15,6 +16,13 @@ namespace LR.Application.Pages.Api;
 /// </summary>
 public class ClaudeHandler : IProtocolHandler
 {
+    /// <summary>
+    /// The placeholder "input" Anthropic sends on a tool_use content_block_start before any
+    /// input_json_delta fragments arrive — the real arguments are assembled from those deltas.
+    /// </summary>
+    private static readonly JsonElement EmptyJsonObject = JsonDocument.Parse("{}").RootElement.Clone();
+
+    private readonly ILogger<ClaudeHandler> _logger;
     private readonly IServerManager _serverManager;
     private readonly IPresetManager _presetManager;
     private readonly IRoutingEngine _routingEngine;
@@ -28,6 +36,7 @@ public class ClaudeHandler : IProtocolHandler
     public string PathPrefix => "/v1";
 
     public ClaudeHandler(
+        ILogger<ClaudeHandler> logger,
         IServerManager serverManager,
         IPresetManager presetManager,
         IRoutingEngine routingEngine,
@@ -37,6 +46,7 @@ public class ClaudeHandler : IProtocolHandler
         GatewaySettings gatewaySettings,
         IApiKeyRequestContext apiKeyContext)
     {
+        _logger = logger;
         _serverManager = serverManager;
         _presetManager = presetManager;
         _routingEngine = routingEngine;
@@ -140,7 +150,9 @@ public class ClaudeHandler : IProtocolHandler
 })}\r\n\r\n", cancellationToken);
                     await httpResponse.Body.FlushAsync(cancellationToken);
 
-                    // content_block_start event
+                    // content_block_start event — block 0 is reserved for text; any tool_use blocks
+                    // the model emits get their own client-facing index (see toolBlockClientIndex
+                    // below), independent of whatever index llama.cpp assigns internally.
                     await httpResponse.WriteAsync($"event: content_block_start\ndata: {JsonSerializer.Serialize(new ContentBlockStartData
                     {
                         Type = "content_block_start",
@@ -149,20 +161,47 @@ public class ClaudeHandler : IProtocolHandler
                     })}\r\n\r\n", cancellationToken);
                     await httpResponse.Body.FlushAsync(cancellationToken);
 
-                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, backendToken))
+                    // Maps the backend's tool-call block index (RouteStreamChunk.ToolCallDeltas[].Index)
+                    // to the index this client sees, since client-facing index 0 is already taken by
+                    // the eagerly-opened text block above.
+                    var toolBlockClientIndex = new Dictionary<int, int>();
+                    int nextToolClientIndex = 1;
+
+                    try
+                    {
+                    await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, backendToken))
                     {
                         if (backendToken.IsCancellationRequested) break;
 
                         if (chunk.IsFinal && chunk.Response is not null)
                         {
-                            // message_delta event with stop reason
+                            // content_block_stop for every block opened above (text + any tool_use
+                            // blocks). Required before message_delta/message_stop for a well-formed
+                            // event sequence; strict clients (e.g. the official Anthropic SDK) reject
+                            // a stream missing it.
+                            foreach (var openIndex in new[] { 0 }.Concat(toolBlockClientIndex.Values).OrderBy(i => i))
+                            {
+                                await httpResponse.WriteAsync($"event: content_block_stop\ndata: {JsonSerializer.Serialize(new ContentBlockStopData
+                                {
+                                    Type = "content_block_stop",
+                                    Index = openIndex
+                                })}\r\n\r\n", cancellationToken);
+                            }
+                            await httpResponse.Body.FlushAsync(cancellationToken);
+
+                            // message_delta event with stop reason and final usage
                             await httpResponse.WriteAsync($"event: message_delta\ndata: {JsonSerializer.Serialize(new MessageDeltaData
                             {
                                 Type = "message_delta",
                                 Delta = new DeltaMessageDelta
                                 {
-                                    StopReason = "end_turn",
+                                    StopReason = chunk.Response.FinishReason ?? "end_turn",
                                     StopSequence = null
+                                },
+                                Usage = new Usage
+                                {
+                                    InputTokens = chunk.Response.PromptTokensProcessed,
+                                    OutputTokens = chunk.Response.GeneratedTokenCount
                                 }
                             })}\r\n\r\n", cancellationToken);
 
@@ -193,7 +232,7 @@ public class ClaudeHandler : IProtocolHandler
                                 catch { /* Logging failure shouldn't block the response */ }
                             }
                         }
-                        else if (!string.IsNullOrEmpty(chunk.ReasoningContentDelta) || !string.IsNullOrEmpty(chunk.TextDelta))
+                        else
                         {
                             // Send thinking_delta event for reasoning content first (Claude protocol)
                             if (!string.IsNullOrEmpty(chunk.ReasoningContentDelta))
@@ -224,9 +263,63 @@ public class ClaudeHandler : IProtocolHandler
                                     }
                                 })}\r\n\r\n", cancellationToken);
                             }
+
+                            // Tool call fragments — each backend block index maps to its own
+                            // client-facing content block (index 0 is reserved for text).
+                            if (chunk.ToolCallDeltas is not null)
+                            {
+                                foreach (var toolDelta in chunk.ToolCallDeltas)
+                                {
+                                    int backendIndex = toolDelta.Index ?? 0;
+                                    if (!toolBlockClientIndex.TryGetValue(backendIndex, out int clientIndex))
+                                    {
+                                        clientIndex = nextToolClientIndex++;
+                                        toolBlockClientIndex[backendIndex] = clientIndex;
+
+                                        await httpResponse.WriteAsync($"event: content_block_start\ndata: {JsonSerializer.Serialize(new ContentBlockStartData
+                                        {
+                                            Type = "content_block_start",
+                                            Index = clientIndex,
+                                            ContentBlock = new ContentBlock
+                                            {
+                                                Type = "tool_use",
+                                                Text = null,
+                                                Id = toolDelta.Id,
+                                                Name = toolDelta.Function.Name,
+                                                Input = EmptyJsonObject
+                                            }
+                                        })}\r\n\r\n", cancellationToken);
+                                    }
+
+                                    if (!string.IsNullOrEmpty(toolDelta.Function.Arguments))
+                                    {
+                                        await httpResponse.WriteAsync($"event: content_block_delta\ndata: {JsonSerializer.Serialize(new ContentBlockDeltaData
+                                        {
+                                            Type = "content_block_delta",
+                                            Index = clientIndex,
+                                            Delta = new DeltaContentBlockDelta
+                                            {
+                                                Type = "input_json_delta",
+                                                PartialJson = toolDelta.Function.Arguments
+                                            }
+                                        })}\r\n\r\n", cancellationToken);
+                                    }
+                                }
+                            }
                         }
 
                         await httpResponse.Body.FlushAsync(cancellationToken);
+                    }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger.LogError(ex, "Claude streaming response failed for model {Model} on server {Server}", request.Model, server.Name);
+                        if (logId != Guid.Empty)
+                        {
+                            try { await _requestLogger.LogErrorAsync(logId, ex.Message); }
+                            catch { /* Logging failure shouldn't block the response */ }
+                        }
+                        throw;
                     }
 
                 return Results.Empty;
@@ -267,7 +360,7 @@ public class ClaudeHandler : IProtocolHandler
             throw new InvalidOperationException($"No backend provider registered for instance {server.Name}");
 
         // Send request to the backend
-        var response = await provider.SendRequestAsync(routeRequest.Payload, cancellationToken);
+        var response = await provider.SendRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken);
         if (response == null)
             throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
 
@@ -305,6 +398,7 @@ public class ClaudeHandler : IProtocolHandler
         {
             ModelName = request.Model,
             PresetId = preset?.Id,
+            Protocol = ApiProtocol.Claude,
             // Omit null fields — backend rejects "name":null etc.
             Payload = JsonSerializer.Serialize(request, new System.Text.Json.JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull })
         };
@@ -312,16 +406,49 @@ public class ClaudeHandler : IProtocolHandler
 
     private CreateMessageResponse BuildMessageResponse(string model, RouteResponse response)
     {
+        var content = new List<ContentBlock>();
+
+        if (!string.IsNullOrEmpty(response.Payload))
+            content.Add(new ContentBlock { Type = "text", Text = response.Payload });
+
+        if (response.ToolCalls is { Count: > 0 })
+        {
+            foreach (var toolCall in response.ToolCalls)
+            {
+                JsonElement input;
+                try
+                {
+                    input = JsonDocument.Parse(string.IsNullOrEmpty(toolCall.Function.Arguments) ? "{}" : toolCall.Function.Arguments).RootElement.Clone();
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Tool call '{ToolName}' had non-JSON arguments; forwarding an empty object instead: {Arguments}",
+                        toolCall.Function.Name, toolCall.Function.Arguments);
+                    input = JsonDocument.Parse("{}").RootElement.Clone();
+                }
+
+                content.Add(new ContentBlock
+                {
+                    Type = "tool_use",
+                    Text = null,
+                    Id = toolCall.Id,
+                    Name = toolCall.Function.Name,
+                    Input = input
+                });
+            }
+        }
+
+        // Anthropic requires at least one content block.
+        if (content.Count == 0)
+            content.Add(new ContentBlock { Type = "text", Text = string.Empty });
+
         return new CreateMessageResponse
         {
             Id = $"msg_{Guid.NewGuid():N}",
             Model = model,
-            Content = new List<ContentBlock>
-            {
-                new ContentBlock { Type = "text", Text = response.Payload }
-            },
-            StopReason = "end_turn",
-            Usage = new LR.Core.Models.Claude.Usage
+            Content = content,
+            StopReason = response.FinishReason ?? "end_turn",
+            Usage = new Usage
             {
                 InputTokens = response.PromptTokensProcessed,
                 OutputTokens = response.GeneratedTokenCount

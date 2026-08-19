@@ -23,6 +23,14 @@ public class RouteRequest
     public BackendType? PreferredBackend { get; set; }
 
     /// <summary>
+    /// The wire protocol <see cref="Payload"/> is encoded in. Backend providers that don't
+    /// natively speak every protocol use this to decide how to translate/route the payload
+    /// (e.g. llama.cpp accepts this shape directly on a protocol-specific endpoint rather than
+    /// needing conversion to OpenAI's chat-completions shape).
+    /// </summary>
+    public ApiProtocol Protocol { get; set; } = ApiProtocol.OpenAI;
+
+    /// <summary>
     /// The inference payload (e.g., prompt text, JSON body).
     /// </summary>
     public string Payload { get; set; } = string.Empty;
