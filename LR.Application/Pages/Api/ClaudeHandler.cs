@@ -57,7 +57,19 @@ public class ClaudeHandler : IProtocolHandler
     {
         using var reader = new StreamReader(httpRequest.Body);
         var body = await reader.ReadToEndAsync(cancellationToken);
-        var request = JsonSerializer.Deserialize<CreateMessageRequest>(body);
+        CreateMessageRequest? request;
+        try
+        {
+            request = JsonSerializer.Deserialize<CreateMessageRequest>(body);
+        }
+        catch (JsonException ex)
+        {
+            return Microsoft.AspNetCore.Http.Results.Json(new
+            {
+                type = "error",
+                error = new { type = "invalid_request_error", message = $"Invalid JSON in request body: {ex.Message}" }
+            }, statusCode: 400);
+        }
         if (request is null) return Microsoft.AspNetCore.Http.Results.BadRequest("Invalid JSON in request body");
 
         // Reject models this API key isn't scoped to before touching the routing engine —

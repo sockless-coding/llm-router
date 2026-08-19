@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace LR.Core.Models.Claude;
@@ -10,17 +11,40 @@ public class CreateMessageRequest
     /// <summary>
     /// The model to use. Should match a configured preset name.
     /// </summary>
+    [JsonPropertyName("model")]
     public string Model { get; set; } = string.Empty;
 
     /// <summary>
-    /// System prompt - instructions for the assistant.
+    /// System prompt - instructions for the assistant. Can be a plain string or an array of
+    /// content blocks (e.g. cached system prompt blocks with cache_control), same as message content.
     /// </summary>
     [JsonPropertyName("system")]
-    public string? System { get; set; }
+    [JsonConverter(typeof(MessageContentConverter))]
+    public MessageContent? System { get; set; }
+
+    /// <summary>
+    /// Tool definitions available to the model. Preserved as raw JSON and forwarded as-is —
+    /// this router doesn't need to interpret tool schemas, only avoid dropping them.
+    /// </summary>
+    [JsonPropertyName("tools")]
+    public JsonElement? Tools { get; set; }
+
+    /// <summary>
+    /// Controls whether/which tool the model must use. Preserved as raw JSON.
+    /// </summary>
+    [JsonPropertyName("tool_choice")]
+    public JsonElement? ToolChoice { get; set; }
+
+    /// <summary>
+    /// Opaque request metadata (e.g. user_id). Preserved as raw JSON.
+    /// </summary>
+    [JsonPropertyName("metadata")]
+    public JsonElement? Metadata { get; set; }
 
     /// <summary>
     /// The conversation messages.
     /// </summary>
+    [JsonPropertyName("messages")]
     public List<MessageParam> Messages { get; set; } = new();
 
     /// <summary>
