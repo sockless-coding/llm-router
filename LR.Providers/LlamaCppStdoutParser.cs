@@ -29,14 +29,14 @@ public class LlamaCppStdoutParser
     // 665.18.892.620 I slot print_timing: id  0 | task 121574 | prompt eval time =    2403.38 ms /   220 tokens (   10.92 ms per token,    91.54 tokens per second)
     private static readonly Regex PromptEvalTimeRegex =
         new(
-            @"print_timing:\s+id\s+(?<slot>\d+)\s*\|\s*task\s+(?<taskId>\d+)\s*\|\s*prompt eval time\s*=\s*(?<timeMs>[\d.]+) ms /\s+(?<tokens>\d+) tokens \(\s*\(\s*\(\s*\(\s*\(\s*(?<msPerToken>[\d.]+) ms per token,\s*(?<tps>[\d.]+) tokens per second\)",
+            @"print_timing:\s+id\s+(?<slot>\d+)\s*\|\s*task\s+(?<taskId>\d+)\s*\|\s*prompt eval time\s*=\s*(?<timeMs>[\d.]+) ms /\s+(?<tokens>\d+) tokens \(\s*(?<msPerToken>[\d.]+) ms per token,\s*(?<tps>[\d.]+) tokens per second\)",
             RegexOptions.Compiled);
 
     // --- Completion: eval time ---
     // 665.18.892.625 I slot print_timing: id  0 | task 121574 |        eval time =   19142.70 ms /   468 tokens (   40.90 ms per token,    24.45 tokens per second)
     private static readonly Regex EvalTimeRegex =
         new(
-            @"print_timing:\s+id\s+(?<slot>\d+)\s*\|\s*task\s+(?<taskId>\d+)\s*\|\s+eval time\s*=\s*(?<timeMs>[\d.]+) ms /\s+(?<tokens>\d+) tokens \(\s*\(\s*\(\s*\(\s*\(\s*(?<msPerToken>[\d.]+) ms per token,\s*(?<tps>[\d.]+) tokens per second\)",
+            @"print_timing:\s+id\s+(?<slot>\d+)\s*\|\s*task\s+(?<taskId>\d+)\s*\|\s+eval time\s*=\s*(?<timeMs>[\d.]+) ms /\s+(?<tokens>\d+) tokens \(\s*(?<msPerToken>[\d.]+) ms per token,\s*(?<tps>[\d.]+) tokens per second\)",
             RegexOptions.Compiled);
 
     // --- Completion: total time ---

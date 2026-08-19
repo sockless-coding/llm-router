@@ -58,16 +58,25 @@ public class LlamaCppTimingCoordinator
         if (isNew)
             _logger.LogInformation("[Stats] New stdout task detected: TaskId={TaskId}, Phase={Phase}", evt.TaskId, evt.Phase);
 
+        // Assign the task_id to the oldest pending request on the FIRST stdout line seen for it,
+        // regardless of phase. Previously this only happened on PromptProcessing/Generation
+        // progress lines, which llama.cpp only prints periodically (per-batch / every ~3s) — a
+        // request whose prompt fits in one batch and whose generation finishes before the next
+        // progress tick never printed one, so its first (and possibly only) stdout line was a
+        // Completion summary. Since assignment never ran, the completion data below had nowhere
+        // to merge into and was silently dropped, leaving PromptProcessingMs/GenerationMs at 0
+        // despite token counts and total latency being recorded correctly. (AssignTaskToPendingRequest
+        // is idempotent — a no-op if this task_id is already assigned.)
+        AssignTaskToPendingRequest(evt.TaskId);
+
         switch (evt.Phase)
         {
             case LlamaCppTimingPhase.PromptProcessing:
                 timing.PromptProgress = evt.Progress ?? 0;
-                AssignTaskToPendingRequest(evt.TaskId);
                 break;
 
             case LlamaCppTimingPhase.Generation:
                 timing.NDecoded = evt.NDecoded;
-                AssignTaskToPendingRequest(evt.TaskId);
                 break;
 
             case LlamaCppTimingPhase.Completion:
