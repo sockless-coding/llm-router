@@ -9,18 +9,21 @@ public class PresetEditModel : PageModel
     private readonly IPresetManager _presetManager;
     private readonly IServerManager _serverManager;
     private readonly IModelLibrary _modelLibrary;
+    private readonly IChatTemplateVariableExtractor _templateVariableExtractor;
 
     [BindProperty]
     public PresetViewModel ViewModel { get; set; } = new();
 
     public IReadOnlyList<Core.Models.ServerInstance> Servers { get; set; } = new List<Core.Models.ServerInstance>();
     public IReadOnlyList<Core.Models.LocalModel> Models { get; set; } = new List<Core.Models.LocalModel>();
+    public IReadOnlyList<Core.Models.ChatTemplateVariable> DetectedTemplateVariables { get; set; } = Array.Empty<Core.Models.ChatTemplateVariable>();
 
-    public PresetEditModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary)
+    public PresetEditModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary, IChatTemplateVariableExtractor templateVariableExtractor)
     {
         _presetManager = presetManager;
         _serverManager = serverManager;
         _modelLibrary = modelLibrary;
+        _templateVariableExtractor = templateVariableExtractor;
     }
 
     public async Task<IActionResult> OnGetAsync([FromQuery] Guid Id)
@@ -32,6 +35,7 @@ public class PresetEditModel : PageModel
         Servers = _serverManager.GetAllInstances();
         Models = await _modelLibrary.GetAllAsync();
         MapToViewModel(preset);
+        DetectedTemplateVariables = _templateVariableExtractor.Extract(preset.GgufChatTemplate);
 
         return Page();
     }

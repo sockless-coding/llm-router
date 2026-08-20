@@ -60,6 +60,26 @@
             </div>
         }
 
+        @if (Model.TemplateVariables.Count > 0)
+        {
+            <details class="mt-2">
+                <summary class="cursor-pointer text-sm text-neon-cyan">Custom template variables (@Model.TemplateVariables.Count)</summary>
+                <ul class="text-xs bg-cyber-bg-dark rounded-lg p-3 mt-2 space-y-1 text-text-primary">
+                    @foreach (var v in Model.TemplateVariables)
+                    {
+                        <li>
+                            <span class="font-mono text-neon-magenta">@v.Name</span>
+                            @if (v.LiteralValues.Count > 0)
+                            {
+                                <span class="text-text-secondary"> — possible values: @string.Join(", ", v.LiteralValues)</span>
+                            }
+                        </li>
+                    }
+                </ul>
+                <p class="text-xs text-text-secondary mt-1">Detected from the raw Jinja chat template — knobs this model's template reads beyond the standard llama.cpp render context. Pass them via --chat-template-kwargs on the preset. Best-effort; not guaranteed complete.</p>
+            </details>
+        }
+
         @if (Model.KvPairs is not null)
         {
             <details class="mt-2">

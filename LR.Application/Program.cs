@@ -57,6 +57,9 @@ builder.Services.AddScoped<IApiKeyRequestContext, ApiKeyRequestContext>();
 // GGUF metadata reader (Singleton — stateless file reader)
 builder.Services.AddSingleton<IGgufMetadataReader, GgufMetadataReader>();
 
+// Chat-template free-variable extractor (Singleton — stateless pure-function lexer)
+builder.Services.AddSingleton<IChatTemplateVariableExtractor, ChatTemplateVariableExtractor>();
+
 // Compute device inventory (Singleton — stateless WMI/pnputil wrapper). ComputeDeviceService
 // checks OperatingSystem.IsWindows() itself at each call site, so it's safe to register
 // unconditionally; the pragma silences the platform-compat analyzer's false positive on the

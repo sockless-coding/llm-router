@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="LR.Core.Tests/LR.Core.Tests.csproj" />
   <Project Path="LR.Core/LR.Core.csproj" />
   <Project Path="LR.Providers/LR.Providers.csproj" />
   <Project Path="LR.Wrapper/LR.Wrapper.csproj" />

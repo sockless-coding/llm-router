@@ -12,15 +12,18 @@ public class ModelsDetailsModel : PageModel
 {
     private readonly IModelLibrary _modelLibrary;
     private readonly IPresetManager _presetManager;
+    private readonly IChatTemplateVariableExtractor _templateVariableExtractor;
 
     public LocalModel LocalModel { get; set; } = null!;
     public IReadOnlyList<ModelPreset> UsedByPresets { get; set; } = new List<ModelPreset>();
     public Dictionary<string, object>? KvPairs { get; set; }
+    public IReadOnlyList<ChatTemplateVariable> TemplateVariables { get; set; } = Array.Empty<ChatTemplateVariable>();
 
-    public ModelsDetailsModel(IModelLibrary modelLibrary, IPresetManager presetManager)
+    public ModelsDetailsModel(IModelLibrary modelLibrary, IPresetManager presetManager, IChatTemplateVariableExtractor templateVariableExtractor)
     {
         _modelLibrary = modelLibrary;
         _presetManager = presetManager;
+        _templateVariableExtractor = templateVariableExtractor;
     }
 
     public async Task<IActionResult> OnGetAsync([FromQuery] Guid id)
@@ -30,6 +33,7 @@ public class ModelsDetailsModel : PageModel
             return NotFound();
 
         LocalModel = model;
+        TemplateVariables = _templateVariableExtractor.Extract(model.ChatTemplate);
 
         var allPresets = await _presetManager.GetAllPresetsAsync();
         UsedByPresets = allPresets.Where(p => p.ModelId == id).ToList();

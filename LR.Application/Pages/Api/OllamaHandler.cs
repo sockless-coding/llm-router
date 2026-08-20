@@ -23,6 +23,7 @@ public class OllamaHandler : IProtocolHandler
     private readonly IRequestQueueService _queue;
     private readonly IStatisticsService _statisticsService;
     private readonly IGgufMetadataReader _ggufReader;
+    private readonly IChatTemplateVariableExtractor _templateVariableExtractor;
     private readonly IApiRequestLogger _requestLogger;
     private readonly GatewaySettings _gatewaySettings;
     private readonly IApiKeyRequestContext _apiKeyContext;
@@ -37,6 +38,7 @@ public class OllamaHandler : IProtocolHandler
         IRequestQueueService queue,
         IStatisticsService statisticsService,
         IGgufMetadataReader ggufReader,
+        IChatTemplateVariableExtractor templateVariableExtractor,
         IApiRequestLogger requestLogger,
         GatewaySettings gatewaySettings,
         IApiKeyRequestContext apiKeyContext)
@@ -47,6 +49,7 @@ public class OllamaHandler : IProtocolHandler
         _queue = queue;
         _statisticsService = statisticsService;
         _ggufReader = ggufReader;
+        _templateVariableExtractor = templateVariableExtractor;
         _requestLogger = requestLogger;
         _gatewaySettings = gatewaySettings;
         _apiKeyContext = apiKeyContext;
@@ -67,7 +70,7 @@ public class OllamaHandler : IProtocolHandler
                 capabilities.Add("vision");
             if (SupportsTools(p.GgufChatTemplate))
                 capabilities.Add("tools");
-            if (SupportsThinking(p.Reasoning, p.GgufChatTemplate))
+            if (SupportsThinking(p.Reasoning, p.GgufChatTemplate, _templateVariableExtractor))
                 capabilities.Add("thinking");
 
             long modelSize = 0L;
@@ -168,7 +171,7 @@ public class OllamaHandler : IProtocolHandler
             capabilities.Add("vision");
         if (SupportsTools(template))
             capabilities.Add("tools");
-        if (SupportsThinking(preset.Reasoning, template))
+        if (SupportsThinking(preset.Reasoning, template, _templateVariableExtractor))
             capabilities.Add("thinking");
 
         return new ShowResponse
@@ -197,21 +200,39 @@ public class OllamaHandler : IProtocolHandler
     /// via a template scan keeps Copilot's agent/tool-use mode enabled for models routed through
     /// us the same way it is when Copilot talks to Ollama directly.
     /// </summary>
+    /// <summary>
+    /// "tools" capability check deliberately stays a raw substring scan rather than using
+    /// IChatTemplateVariableExtractor: "tools" is part of the standard llama.cpp/minja render
+    /// context, so the extractor's free-variable allowlist filters it out by design — it has
+    /// nothing to add here.
+    /// </summary>
     private static bool SupportsTools(string? chatTemplate) =>
         !string.IsNullOrEmpty(chatTemplate) && chatTemplate.Contains("tools", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// "thinking" capability: either the preset has reasoning explicitly enabled, or the chat
-    /// template itself emits/gates a thinking block (e.g. "&lt;think&gt;" or "enable_thinking").
+    /// Free variable names that, when a chat template reads them, signal a reasoning/thinking
+    /// toggle the template exposes via --chat-template-kwargs.
     /// </summary>
-    private static bool SupportsThinking(string? reasoning, string? chatTemplate)
+    private static readonly HashSet<string> ReasoningSignalVariables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "enable_thinking", "thinking", "reasoning_effort", "thinking_budget"
+    };
+
+    /// <summary>
+    /// "thinking" capability: the preset has reasoning explicitly enabled, or the chat template
+    /// itself emits a thinking block (e.g. "&lt;think&gt;") or references a known reasoning-toggle
+    /// variable (e.g. "enable_thinking", "reasoning_effort") detected via
+    /// <see cref="IChatTemplateVariableExtractor"/>.
+    /// </summary>
+    private static bool SupportsThinking(string? reasoning, string? chatTemplate, IChatTemplateVariableExtractor templateVariableExtractor)
     {
         if (!string.IsNullOrEmpty(reasoning) && !reasoning.Equals("off", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        return !string.IsNullOrEmpty(chatTemplate) &&
-            (chatTemplate.Contains("<think>", StringComparison.OrdinalIgnoreCase) ||
-             chatTemplate.Contains("enable_thinking", StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrEmpty(chatTemplate) && chatTemplate.Contains("<think>", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return templateVariableExtractor.Extract(chatTemplate).Any(v => ReasoningSignalVariables.Contains(v.Name));
     }
 
 

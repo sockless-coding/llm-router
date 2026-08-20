@@ -697,6 +697,13 @@
                     <input asp-for="ViewModel.ChatTemplateKwargs" placeholder="{&quot;preserve_thinking&quot;: true}"
                            class="@inpCls" />
                     <p class="text-xs text-text-secondary mt-1">Extra kwargs passed into the chat template's render context (--chat-template-kwargs). Not the same as the template above.</p>
+                    @if (Model.DetectedTemplateVariables.Count > 0)
+                    {
+                        <p class="text-xs text-text-secondary mt-1">
+                            Detected from this model's template:
+                            @string.Join(", ", Model.DetectedTemplateVariables.Select(v => v.LiteralValues.Count > 0 ? $"{v.Name} ({string.Join('/', v.LiteralValues)})" : v.Name))
+                        </p>
+                    }
                 </div>
             </div>
         </details>
