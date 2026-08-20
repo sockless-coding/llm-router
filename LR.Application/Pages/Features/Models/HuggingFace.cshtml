@@ -70,21 +70,31 @@
                             <p class="text-text-primary font-medium repo-name"></p>
                             <p class="text-xs text-text-secondary mt-0.5">${repo.downloads ?? 0} downloads · ${repo.likes ?? 0} likes</p>
                         </div>
-                        <button type="button" class="load-files-btn text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium">
-                            Show Files
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button type="button" class="details-btn text-xs px-3 py-1.5 rounded-md bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium">
+                                Details
+                            </button>
+                            <button type="button" class="load-files-btn text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium">
+                                Show Files
+                            </button>
+                        </div>
                     </div>
+                    <div class="details-container mt-3 space-y-1 hidden text-sm"></div>
                     <div class="files-container mt-3 space-y-1 hidden"></div>
                 `;
                 // Set untrusted values via text/dataset properties (not string-interpolated HTML/attributes)
                 // to avoid a markup/attribute-breakout injection from a malicious repo id.
                 card.querySelector('.repo-name').textContent = repo.id;
                 card.querySelector('.load-files-btn').dataset.repoId = repo.id;
+                card.querySelector('.details-btn').dataset.repoId = repo.id;
                 resultsEl.appendChild(card);
             }
 
             resultsEl.querySelectorAll('.load-files-btn').forEach(btn => {
                 btn.addEventListener('click', () => loadFiles(btn));
+            });
+            resultsEl.querySelectorAll('.details-btn').forEach(btn => {
+                btn.addEventListener('click', () => loadDetails(btn));
             });
         }
 
@@ -120,6 +130,61 @@
                 row.querySelector('.download-btn').addEventListener('click', () => downloadFile(repoId, file.filename));
                 container.appendChild(row);
             }
+        }
+
+        function formatDate(iso) {
+            if (!iso) return 'unknown';
+            const d = new Date(iso);
+            return isNaN(d.getTime()) ? 'unknown' : d.toLocaleDateString();
+        }
+
+        async function loadDetails(btn) {
+            const repoId = btn.dataset.repoId;
+            const container = btn.closest('div.bg-cyber-card').querySelector('.details-container');
+
+            if (!container.classList.contains('hidden')) {
+                container.classList.add('hidden');
+                return;
+            }
+
+            container.classList.remove('hidden');
+            container.innerHTML = '<p class="text-xs text-text-secondary">Loading details…</p>';
+
+            const resp = await fetch('?handler=Details&repoId=' + encodeURIComponent(repoId));
+            const info = await resp.json();
+
+            if (!resp.ok || info.error) {
+                container.innerHTML = '<p class="text-xs text-text-secondary"></p>';
+                container.querySelector('p').textContent = info.error || 'Failed to load details.';
+                return;
+            }
+
+            const rows = [
+                ['Author', info.author || 'unknown'],
+                ['License', info.license || 'unknown'],
+                ['Pipeline', info.pipelineTag || 'unknown'],
+                ['Library', info.libraryName || 'unknown'],
+                ['Last updated', formatDate(info.lastModified)],
+                ['Downloads', String(info.downloads ?? 0)],
+                ['Likes', String(info.likes ?? 0)],
+                ['GGUF files', `${info.fileCount ?? 0} (${formatBytes(info.totalSizeBytes)})`],
+                ['Tags', (info.tags && info.tags.length) ? info.tags.join(', ') : 'none'],
+            ];
+
+            container.innerHTML = '';
+            const grid = document.createElement('div');
+            grid.className = 'grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border-t border-gray-700/30 pt-2';
+            for (const [label, value] of rows) {
+                const dt = document.createElement('span');
+                dt.className = 'text-text-secondary';
+                dt.textContent = label;
+                const dd = document.createElement('span');
+                dd.className = 'text-text-primary';
+                dd.textContent = value;
+                grid.appendChild(dt);
+                grid.appendChild(dd);
+            }
+            container.appendChild(grid);
         }
 
         async function downloadFile(repoId, filename) {

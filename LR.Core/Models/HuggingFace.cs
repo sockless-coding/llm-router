@@ -47,11 +47,44 @@ public class HfRepoDetail
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    [JsonPropertyName("author")]
+    public string? Author { get; set; }
+
     [JsonPropertyName("sha")]
     public string? Sha { get; set; }
 
+    [JsonPropertyName("downloads")]
+    public long Downloads { get; set; }
+
+    [JsonPropertyName("likes")]
+    public long Likes { get; set; }
+
+    [JsonPropertyName("lastModified")]
+    public DateTimeOffset? LastModified { get; set; }
+
+    [JsonPropertyName("library_name")]
+    public string? LibraryName { get; set; }
+
+    [JsonPropertyName("pipeline_tag")]
+    public string? PipelineTag { get; set; }
+
+    [JsonPropertyName("tags")]
+    public List<string> Tags { get; set; } = new();
+
+    [JsonPropertyName("cardData")]
+    public HfCardData? CardData { get; set; }
+
     [JsonPropertyName("siblings")]
     public List<HfRepoFile> Siblings { get; set; } = new();
+}
+
+/// <summary>
+/// The subset of a repo's model-card metadata (YAML front matter) we surface in the UI.
+/// </summary>
+public class HfCardData
+{
+    [JsonPropertyName("license")]
+    public string? License { get; set; }
 }
 
 /// <summary>
