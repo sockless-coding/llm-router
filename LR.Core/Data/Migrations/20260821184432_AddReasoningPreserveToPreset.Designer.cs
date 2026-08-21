@@ -3,16 +3,19 @@ using System;
 using LR.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace LR.Core.Migrations
+namespace LR.Core.Data.Migrations
 {
     [DbContext(typeof(LRDbContext))]
-    partial class LRDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260821184432_AddReasoningPreserveToPreset")]
+    partial class AddReasoningPreserveToPreset
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -344,9 +347,6 @@ namespace LR.Core.Migrations
                     b.Property<int?>("CacheRam")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int?>("CacheReuse")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("CacheTypeK")
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
@@ -366,27 +366,7 @@ namespace LR.Core.Migrations
                     b.Property<bool?>("ContBatching")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool?>("ContextShift")
-                        .HasColumnType("INTEGER");
-
                     b.Property<int?>("ContextSize")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ControlVector")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("ControlVectorLayerEnd")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("ControlVectorLayerStart")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ControlVectorScaled")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool?>("CpuMoe")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Device")
@@ -405,10 +385,6 @@ namespace LR.Core.Migrations
                     b.Property<int?>("DryPenaltyLastN")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("DrySequenceBreaker")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
                     b.Property<float?>("DynatempExp")
                         .HasColumnType("REAL");
 
@@ -417,13 +393,6 @@ namespace LR.Core.Migrations
 
                     b.Property<string>("Fit")
                         .HasMaxLength(3)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("FitCtx")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("FitTarget")
-                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Flags")
@@ -491,18 +460,11 @@ namespace LR.Core.Migrations
                     b.Property<bool?>("KvOffload")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool?>("KvUnified")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("LoadMode")
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Lora")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("LoraScaled")
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
@@ -525,20 +487,6 @@ namespace LR.Core.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
-                    b.Property<bool?>("MmprojAuto")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("MmprojDevice")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool?>("MmprojOffload")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("MmprojUrl")
-                        .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("ModelId")
                         .HasColumnType("TEXT");
 
@@ -547,19 +495,9 @@ namespace LR.Core.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("MtmdBatchMaxTokens")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("NCpuMoe")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OverrideTensor")
-                        .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("Parallel")
@@ -580,14 +518,6 @@ namespace LR.Core.Migrations
 
                     b.Property<int?>("ReasoningBudget")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("ReasoningBudgetMessage")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ReasoningEffort")
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("ReasoningFormat")
                         .HasMaxLength(16)
@@ -618,25 +548,11 @@ namespace LR.Core.Migrations
                         .HasMaxLength(8)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("SamplerSeq")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Samplers")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
                     b.Property<long?>("Seed")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("ServerInstanceId")
                         .HasColumnType("TEXT");
-
-                    b.Property<int?>("SleepIdleSeconds")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<float?>("SlotPromptSimilarity")
-                        .HasColumnType("REAL");
 
                     b.Property<int?>("SpecDraftGpuLayers")
                         .HasColumnType("INTEGER");
@@ -652,9 +568,6 @@ namespace LR.Core.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<float?>("SpecDraftPMin")
-                        .HasColumnType("REAL");
-
-                    b.Property<float?>("SpecDraftPSplit")
                         .HasColumnType("REAL");
 
                     b.Property<int?>("SpecDraftThreads")

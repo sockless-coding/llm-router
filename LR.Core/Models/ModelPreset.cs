@@ -193,10 +193,40 @@ public class ModelPreset
     /// </summary>
     public bool? Repack { get; set; }
 
+    /// <summary>
+    /// Keep all Mixture-of-Experts weights on the CPU (--cpu-moe). Mutually exclusive in practice
+    /// with <see cref="NCpuMoe"/> — pick one.
+    /// </summary>
+    public bool? CpuMoe { get; set; }
+
+    /// <summary>
+    /// Keep the MoE weights of the first N layers on the CPU (--n-cpu-moe).
+    /// </summary>
+    public int? NCpuMoe { get; set; }
+
+    /// <summary>
+    /// Override tensor buffer type, e.g. "exps=CPU" (--override-tensor). Comma-separated for
+    /// multiple overrides.
+    /// </summary>
+    [MaxLength(1024)]
+    public string? OverrideTensor { get; set; }
+
+    /// <summary>
+    /// Target free-memory margin per device for --fit, in MiB, comma-separated per device
+    /// (--fit-target). Default: 1024.
+    /// </summary>
+    [MaxLength(256)]
+    public string? FitTarget { get; set; }
+
+    /// <summary>
+    /// Minimum context size --fit is allowed to shrink to (--fit-ctx). Default: 4096.
+    /// </summary>
+    public int? FitCtx { get; set; }
+
     // ==================== ADVANCED: Memory ====================
 
     /// <summary>
-    /// Model loading mode (-lm). none/mmap/mlock/dio.
+    /// Model loading mode (-lm). auto/none/mmap/mlock/mmap+mlock/dio. Default: auto.
     /// </summary>
     [MaxLength(16)]
     public string? LoadMode { get; set; }
@@ -257,6 +287,19 @@ public class ModelPreset
     // ==================== ADVANCED: Sampling (Extended) ====================
 
     /// <summary>
+    /// Semicolon-separated sampler order (--samplers). Default:
+    /// penalties;dry;top_n_sigma;top_k;typ_p;top_p;min_p;xtc;temperature.
+    /// </summary>
+    [MaxLength(256)]
+    public string? Samplers { get; set; }
+
+    /// <summary>
+    /// Simplified sampler sequence (--sampler-seq). Default: edskypmxt.
+    /// </summary>
+    [MaxLength(32)]
+    public string? SamplerSeq { get; set; }
+
+    /// <summary>
     /// Top-N-Sigma sampling (--top-nsigma). -1 = disabled.
     /// </summary>
     public float? TopNSigma { get; set; }
@@ -307,17 +350,25 @@ public class ModelPreset
     public int? DryPenaltyLastN { get; set; }
 
     /// <summary>
+    /// Comma-separated DRY sequence breakers (--dry-sequence-breaker, repeated once per breaker).
+    /// Setting this clears llama.cpp's default breakers ('\n', ':', '"', '*'). Use "none" to
+    /// disable sequence breakers entirely.
+    /// </summary>
+    [MaxLength(256)]
+    public string? DrySequenceBreaker { get; set; }
+
+    /// <summary>
     /// Mirostat mode (--mirostat). 0=disabled, 1=Mirostat, 2=Mirostat 2.0.
     /// </summary>
     public int? Mirostat { get; set; }
 
     /// <summary>
-    /// Mirostat learning rate (--mirostat-lr).
+    /// Mirostat target entropy, parameter tau (--mirostat-ent). Default: 5.00.
     /// </summary>
     public float? MirostatTau { get; set; }
 
     /// <summary>
-    /// Mirostat target entropy (--mirostat-ent).
+    /// Mirostat learning rate, parameter eta (--mirostat-lr). Default: 0.10.
     /// </summary>
     public float? MirostatEta { get; set; }
 
@@ -353,6 +404,11 @@ public class ModelPreset
     /// Min speculative probability (--draft-p-min).
     /// </summary>
     public float? SpecDraftPMin { get; set; }
+
+    /// <summary>
+    /// Speculative decoding split probability (--spec-draft-p-split). Default: 0.10.
+    /// </summary>
+    public float? SpecDraftPSplit { get; set; }
 
     /// <summary>
     /// KV cache type for K in draft model.
@@ -415,6 +471,36 @@ public class ModelPreset
     /// </summary>
     public bool? CachePrompt { get; set; }
 
+    /// <summary>
+    /// Min chunk size to attempt reusing from the prompt cache via KV shifting (--cache-reuse).
+    /// Requires prompt caching to be enabled. Default: 0 (disabled).
+    /// </summary>
+    public int? CacheReuse { get; set; }
+
+    /// <summary>
+    /// Use context shift on infinite text generation (--context-shift / --no-context-shift).
+    /// Default: disabled.
+    /// </summary>
+    public bool? ContextShift { get; set; }
+
+    /// <summary>
+    /// Use a single unified KV buffer shared across all sequences (--kv-unified /
+    /// --no-kv-unified). Default: enabled when the number of slots is auto.
+    /// </summary>
+    public bool? KvUnified { get; set; }
+
+    /// <summary>
+    /// How much a request's prompt must match a slot's prompt to reuse that slot
+    /// (--slot-prompt-similarity). Default: 0.10, 0.0 = disabled.
+    /// </summary>
+    public float? SlotPromptSimilarity { get; set; }
+
+    /// <summary>
+    /// Seconds of idleness after which the server will sleep (--sleep-idle-seconds).
+    /// Default: -1 (disabled).
+    /// </summary>
+    public int? SleepIdleSeconds { get; set; }
+
     // ==================== ADVANCED: Reasoning ====================
 
     /// <summary>
@@ -424,9 +510,23 @@ public class ModelPreset
     public string? Reasoning { get; set; }
 
     /// <summary>
+    /// Reasoning effort level given to the chat template (--reasoning-effort). One of: default,
+    /// minimal, low, medium, high, xhigh, max.
+    /// </summary>
+    [MaxLength(16)]
+    public string? ReasoningEffort { get; set; }
+
+    /// <summary>
     /// Token budget for reasoning (--reasoning-budget). -1 = unrestricted, 0 = disabled.
     /// </summary>
     public int? ReasoningBudget { get; set; }
+
+    /// <summary>
+    /// Message injected before the end-of-thinking tag when the reasoning budget is exhausted
+    /// (--reasoning-budget-message).
+    /// </summary>
+    [MaxLength(512)]
+    public string? ReasoningBudgetMessage { get; set; }
 
     /// <summary>
     /// Controls how thought tags are extracted from the response (--reasoning-format).
@@ -437,6 +537,13 @@ public class ModelPreset
     [MaxLength(16)]
     public string? ReasoningFormat { get; set; }
 
+    /// <summary>
+    /// Preserve the reasoning trace across the full conversation history instead of just the
+    /// last turn (--reasoning-preserve / --no-reasoning-preserve). Null leaves llama.cpp's
+    /// template-default behavior.
+    /// </summary>
+    public bool? ReasoningPreserve { get; set; }
+
     // ==================== ADVANCED: Multimodal ====================
 
     /// <summary>
@@ -444,6 +551,31 @@ public class ModelPreset
     /// </summary>
     [MaxLength(1024)]
     public string? Mmproj { get; set; }
+
+    /// <summary>
+    /// URL to a multimodal projector file (--mmproj-url).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? MmprojUrl { get; set; }
+
+    /// <summary>
+    /// Use the multimodal projector file automatically when available, e.g. with -hf
+    /// (--mmproj-auto / --no-mmproj-auto). Default: enabled.
+    /// </summary>
+    public bool? MmprojAuto { get; set; }
+
+    /// <summary>
+    /// Enable GPU offloading for the multimodal projector (--mmproj-offload /
+    /// --no-mmproj-offload). Default: enabled.
+    /// </summary>
+    public bool? MmprojOffload { get; set; }
+
+    /// <summary>
+    /// Device to use for the multimodal projector, none = don't offload (--mmproj-device).
+    /// Default: auto.
+    /// </summary>
+    [MaxLength(256)]
+    public string? MmprojDevice { get; set; }
 
     /// <summary>
     /// Min tokens per image (--image-min-tokens).
@@ -455,6 +587,11 @@ public class ModelPreset
     /// </summary>
     public int? ImageMaxTokens { get; set; }
 
+    /// <summary>
+    /// Max image tokens per batch when encoding images (--mtmd-batch-max-tokens). Default: 1024.
+    /// </summary>
+    public int? MtmdBatchMaxTokens { get; set; }
+
     // ==================== ADVANCED: LoRA ====================
 
     /// <summary>
@@ -462,6 +599,38 @@ public class ModelPreset
     /// </summary>
     [MaxLength(2048)]
     public string? Lora { get; set; }
+
+    /// <summary>
+    /// Comma-separated LoRA adapters with user-defined scaling, format FNAME:SCALE,...
+    /// (--lora-scaled).
+    /// </summary>
+    [MaxLength(2048)]
+    public string? LoraScaled { get; set; }
+
+    /// <summary>
+    /// Comma-separated control vector paths to add (--control-vector).
+    /// </summary>
+    [MaxLength(2048)]
+    public string? ControlVector { get; set; }
+
+    /// <summary>
+    /// Comma-separated control vectors with user-defined scaling, format FNAME:SCALE,...
+    /// (--control-vector-scaled).
+    /// </summary>
+    [MaxLength(2048)]
+    public string? ControlVectorScaled { get; set; }
+
+    /// <summary>
+    /// Start of the layer range the control vector(s) apply to, inclusive
+    /// (--control-vector-layer-range START END). Requires <see cref="ControlVectorLayerEnd"/>.
+    /// </summary>
+    public int? ControlVectorLayerStart { get; set; }
+
+    /// <summary>
+    /// End of the layer range the control vector(s) apply to, inclusive
+    /// (--control-vector-layer-range START END). Requires <see cref="ControlVectorLayerStart"/>.
+    /// </summary>
+    public int? ControlVectorLayerEnd { get; set; }
 
     // ==================== ADVANCED: Chat Template ====================
 

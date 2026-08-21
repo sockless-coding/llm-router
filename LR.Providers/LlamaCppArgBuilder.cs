@@ -60,10 +60,16 @@ public class LlamaCppArgBuilder
         AddArgIfSet(args, "--tensor-split", preset.TensorSplit);
         AddIntArg(args, "--main-gpu", preset.MainGpu);
         AddArgIfSet(args, "--fit", preset.Fit);
+        AddArgIfSet(args, "--fit-target", preset.FitTarget);
+        AddIntArg(args, "--fit-ctx", preset.FitCtx);
         if (preset.KvOffload.HasValue)
             args.Add(preset.KvOffload.Value ? "--kv-offload" : "--no-kv-offload");
         if (preset.Repack.HasValue)
             args.Add(preset.Repack.Value ? "--repack" : "--no-repack");
+        if (preset.CpuMoe.HasValue && preset.CpuMoe.Value)
+            args.Add("--cpu-moe");
+        AddIntArg(args, "--n-cpu-moe", preset.NCpuMoe);
+        AddArgIfSet(args, "--override-tensor", preset.OverrideTensor);
 
         // --- Advanced: Memory ---
         AddArgIfSet(args, "--load-mode", preset.LoadMode);
@@ -81,6 +87,8 @@ public class LlamaCppArgBuilder
         AddFloatArg(args, "--yarn-beta-fast", preset.YarnBetaFast);
 
         // --- Advanced: Sampling (Extended) ---
+        AddArgIfSet(args, "--samplers", preset.Samplers);
+        AddArgIfSet(args, "--sampler-seq", preset.SamplerSeq);
         AddFloatArg(args, "--top-n-sigma", preset.TopNSigma);
         AddFloatArg(args, "--xtc-probability", preset.XtcProbability);
         AddFloatArg(args, "--xtc-threshold", preset.XtcThreshold);
@@ -91,9 +99,10 @@ public class LlamaCppArgBuilder
         AddFloatArg(args, "--dry-base", preset.DryBase);
         AddIntArg(args, "--dry-allowed-length", preset.DryAllowedLength);
         AddIntArg(args, "--dry-penalty-last-n", preset.DryPenaltyLastN);
+        AddRepeatedArg(args, "--dry-sequence-breaker", preset.DrySequenceBreaker);
         AddIntArg(args, "--mirostat", preset.Mirostat);
-        AddFloatArg(args, "--mirostat-lr", preset.MirostatTau);
-        AddFloatArg(args, "--mirostat-ent", preset.MirostatEta);
+        AddFloatArg(args, "--mirostat-ent", preset.MirostatTau);
+        AddFloatArg(args, "--mirostat-lr", preset.MirostatEta);
         AddFloatArg(args, "--dynatemp-range", preset.DynatempRange);
         AddFloatArg(args, "--dynatemp-exp", preset.DynatempExp);
 
@@ -102,6 +111,7 @@ public class LlamaCppArgBuilder
         AddIntArg(args, "--spec-draft-n-max", preset.SpecDraftNMax);
         AddIntArg(args, "--spec-draft-n-min", preset.SpecDraftNMin);
         AddFloatArg(args, "--draft-p-min", preset.SpecDraftPMin);
+        AddFloatArg(args, "--spec-draft-p-split", preset.SpecDraftPSplit);
         AddArgIfSet(args, "--cache-type-k-draft", preset.SpecDraftTypeK);
         AddArgIfSet(args, "--cache-type-v-draft", preset.SpecDraftTypeV);
         AddIntArg(args, "--gpu-layers-draft", preset.SpecDraftGpuLayers);
@@ -117,19 +127,46 @@ public class LlamaCppArgBuilder
         AddArgIfSet(args, "--api-key", preset.ApiKey);
         if (preset.CachePrompt.HasValue)
             args.Add(preset.CachePrompt.Value ? "--cache-prompt" : "--no-cache-prompt");
+        AddIntArg(args, "--cache-reuse", preset.CacheReuse);
+        if (preset.ContextShift.HasValue)
+            args.Add(preset.ContextShift.Value ? "--context-shift" : "--no-context-shift");
+        if (preset.KvUnified.HasValue)
+            args.Add(preset.KvUnified.Value ? "--kv-unified" : "--no-kv-unified");
+        AddFloatArg(args, "--slot-prompt-similarity", preset.SlotPromptSimilarity);
+        AddIntArg(args, "--sleep-idle-seconds", preset.SleepIdleSeconds);
 
         // --- Advanced: Reasoning ---
         AddArgIfSet(args, "--reasoning", preset.Reasoning);
+        AddArgIfSet(args, "--reasoning-effort", preset.ReasoningEffort);
         AddIntArg(args, "--reasoning-budget", preset.ReasoningBudget);
+        AddArgIfSet(args, "--reasoning-budget-message", preset.ReasoningBudgetMessage);
         AddArgIfSet(args, "--reasoning-format", preset.ReasoningFormat);
+        if (preset.ReasoningPreserve.HasValue)
+            args.Add(preset.ReasoningPreserve.Value ? "--reasoning-preserve" : "--no-reasoning-preserve");
 
         // --- Advanced: Multimodal ---
         AddArgIfSet(args, "--mmproj", preset.Mmproj);
+        AddArgIfSet(args, "--mmproj-url", preset.MmprojUrl);
+        if (preset.MmprojAuto.HasValue)
+            args.Add(preset.MmprojAuto.Value ? "--mmproj-auto" : "--no-mmproj-auto");
+        if (preset.MmprojOffload.HasValue)
+            args.Add(preset.MmprojOffload.Value ? "--mmproj-offload" : "--no-mmproj-offload");
+        AddArgIfSet(args, "--mmproj-device", preset.MmprojDevice);
         AddIntArg(args, "--image-min-tokens", preset.ImageMinTokens);
         AddIntArg(args, "--image-max-tokens", preset.ImageMaxTokens);
+        AddIntArg(args, "--mtmd-batch-max-tokens", preset.MtmdBatchMaxTokens);
 
         // --- Advanced: LoRA ---
         AddArgIfSet(args, "--lora", preset.Lora);
+        AddArgIfSet(args, "--lora-scaled", preset.LoraScaled);
+        AddArgIfSet(args, "--control-vector", preset.ControlVector);
+        AddArgIfSet(args, "--control-vector-scaled", preset.ControlVectorScaled);
+        if (preset.ControlVectorLayerStart.HasValue && preset.ControlVectorLayerEnd.HasValue)
+        {
+            args.Add("--control-vector-layer-range");
+            args.Add(preset.ControlVectorLayerStart.Value.ToString(CultureInfo.InvariantCulture));
+            args.Add(preset.ControlVectorLayerEnd.Value.ToString(CultureInfo.InvariantCulture));
+        }
 
         // --- Advanced: Chat Template ---
         AddArgIfSet(args, "--chat-template", preset.ChatTemplate);
@@ -148,6 +185,23 @@ public class LlamaCppArgBuilder
         {
             args.Add(name);
             args.Add(value);
+        }
+    }
+
+    /// <summary>
+    /// Emits one "name value" pair per comma-separated entry in <paramref name="value"/> — for
+    /// flags like --dry-sequence-breaker that llama.cpp expects repeated once per item rather
+    /// than as a single comma-separated argument.
+    /// </summary>
+    private static void AddRepeatedArg(List<string> args, string name, string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return;
+
+        foreach (var entry in value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            args.Add(name);
+            args.Add(entry);
         }
     }
 
