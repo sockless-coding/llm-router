@@ -83,6 +83,12 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
             // Macro names persist after {% endmacro %} (unlike for/set/with scopes) since a
             // macro remains callable for the rest of the template once declared.
             var macroNames = new HashSet<string>(StringComparer.Ordinal);
+            // Templates commonly materialize a free variable into a local name before testing
+            // it, e.g. `{% set resolved = reasoning_effort | default('xhigh') %}` and then
+            // comparing `resolved` for the rest of the block. aliasMap[local] = freeVarRoot lets
+            // literal-value comparisons against the local alias still attribute back to the
+            // original free variable instead of being silently dropped once it's bound.
+            var aliasMap = new Dictionary<string, string>(StringComparer.Ordinal);
 
             foreach (var segment in segments)
             {
@@ -91,9 +97,9 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
                     continue;
 
                 if (segment.Kind == SegmentKind.Statement)
-                    ProcessStatement(tokens, scopeStack, macroNames, results);
+                    ProcessStatement(tokens, scopeStack, macroNames, aliasMap, results);
                 else
-                    WalkExpression(tokens, 0, tokens.Count, scopeStack, macroNames, results);
+                    WalkExpression(tokens, 0, tokens.Count, scopeStack, macroNames, aliasMap, results);
             }
 
             return results
@@ -299,11 +305,11 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
 
     #region Stage 3 — scope-tracked free-variable walk
 
-    private static void ProcessStatement(List<Token> tokens, Stack<HashSet<string>> scopeStack, HashSet<string> macroNames, Dictionary<string, List<string>> results)
+    private static void ProcessStatement(List<Token> tokens, Stack<HashSet<string>> scopeStack, HashSet<string> macroNames, Dictionary<string, string> aliasMap, Dictionary<string, List<string>> results)
     {
         if (tokens[0].Kind != TokenKind.Identifier)
         {
-            WalkExpression(tokens, 0, tokens.Count, scopeStack, macroNames, results);
+            WalkExpression(tokens, 0, tokens.Count, scopeStack, macroNames, aliasMap, results);
             return;
         }
 
@@ -314,7 +320,7 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
                 int inIdx = FindTopLevel(tokens, 1, tokens.Count, "in");
                 if (inIdx < 0)
                 {
-                    WalkExpression(tokens, 1, tokens.Count, scopeStack, macroNames, results);
+                    WalkExpression(tokens, 1, tokens.Count, scopeStack, macroNames, aliasMap, results);
                     break;
                 }
 
@@ -324,14 +330,14 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
 
                 int ifIdx = FindTopLevel(tokens, inIdx + 1, tokens.Count, "if");
                 int iterableEnd = ifIdx >= 0 ? ifIdx : tokens.Count;
-                WalkExpression(tokens, inIdx + 1, iterableEnd, scopeStack, macroNames, results);
+                WalkExpression(tokens, inIdx + 1, iterableEnd, scopeStack, macroNames, aliasMap, results);
 
                 var newScope = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var v in loopVars) newScope.Add(v);
                 scopeStack.Push(newScope);
 
                 if (ifIdx >= 0)
-                    WalkExpression(tokens, ifIdx + 1, tokens.Count, scopeStack, macroNames, results);
+                    WalkExpression(tokens, ifIdx + 1, tokens.Count, scopeStack, macroNames, aliasMap, results);
                 break;
             }
 
@@ -349,7 +355,19 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
                 {
                     foreach (var (cs, ce) in SplitTopLevelCommas(tokens, 1, eq))
                         if (ce > cs && tokens[cs].Kind == TokenKind.Identifier) names.Add(tokens[cs].Text);
-                    WalkExpression(tokens, eq + 1, tokens.Count, scopeStack, macroNames, results);
+                    WalkExpression(tokens, eq + 1, tokens.Count, scopeStack, macroNames, aliasMap, results);
+
+                    // Track simple aliases (`set local = free`, optionally `free | default(...)`)
+                    // so later comparisons against `local` still attribute back to `free`.
+                    if (names.Count == 1)
+                    {
+                        var root = TryResolveAlias(tokens, eq + 1, tokens.Count, scopeStack, macroNames, aliasMap);
+                        if (root != null)
+                        {
+                            aliasMap[names[0]] = root;
+                            if (!results.ContainsKey(root)) results[root] = new List<string>();
+                        }
+                    }
                 }
                 else
                 {
@@ -397,7 +415,7 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
                     int eq = FindTopLevel(tokens, cs, ce, "=");
                     if (tokens[cs].Kind == TokenKind.Identifier) newScope.Add(tokens[cs].Text);
                     if (eq >= 0)
-                        WalkExpression(tokens, eq + 1, ce, scopeStack, macroNames, results);
+                        WalkExpression(tokens, eq + 1, ce, scopeStack, macroNames, aliasMap, results);
                 }
                 scopeStack.Push(newScope);
                 break;
@@ -412,8 +430,8 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
                     foreach (var (cs, ce) in SplitTopLevelCommas(tokens, 1, tokens.Count))
                     {
                         int localAs = FindTopLevel(tokens, cs, ce, "as");
-                        if (localAs < 0) { WalkExpression(tokens, cs, ce, scopeStack, macroNames, results); continue; }
-                        WalkExpression(tokens, cs, localAs, scopeStack, macroNames, results);
+                        if (localAs < 0) { WalkExpression(tokens, cs, ce, scopeStack, macroNames, aliasMap, results); continue; }
+                        WalkExpression(tokens, cs, localAs, scopeStack, macroNames, aliasMap, results);
                         if (localAs + 1 < ce && tokens[localAs + 1].Kind == TokenKind.Identifier)
                             boundNames.Add(tokens[localAs + 1].Text);
                     }
@@ -423,9 +441,9 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
                     foreach (var (cs, ce) in SplitTopLevelCommas(tokens, 1, tokens.Count))
                     {
                         int eq = FindTopLevel(tokens, cs, ce, "=");
-                        if (eq < 0) { WalkExpression(tokens, cs, ce, scopeStack, macroNames, results); continue; }
+                        if (eq < 0) { WalkExpression(tokens, cs, ce, scopeStack, macroNames, aliasMap, results); continue; }
                         if (tokens[cs].Kind == TokenKind.Identifier) boundNames.Add(tokens[cs].Text);
-                        WalkExpression(tokens, eq + 1, ce, scopeStack, macroNames, results);
+                        WalkExpression(tokens, eq + 1, ce, scopeStack, macroNames, aliasMap, results);
                     }
                 }
 
@@ -437,7 +455,7 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
 
             case "if":
             case "elif":
-                WalkExpression(tokens, 1, tokens.Count, scopeStack, macroNames, results);
+                WalkExpression(tokens, 1, tokens.Count, scopeStack, macroNames, aliasMap, results);
                 break;
 
             case "else":
@@ -446,7 +464,7 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
                 break;
 
             case "block":
-                if (tokens.Count > 2) WalkExpression(tokens, 2, tokens.Count, scopeStack, macroNames, results);
+                if (tokens.Count > 2) WalkExpression(tokens, 2, tokens.Count, scopeStack, macroNames, aliasMap, results);
                 break;
 
             case "endblock":
@@ -458,12 +476,12 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
                 // Unrecognized statement keyword (call/filter/endfilter/extends/include/import/
                 // namespace/do/continue/break/...) — walk everything after the leading keyword
                 // generically in the current scope, binding nothing.
-                WalkExpression(tokens, 1, tokens.Count, scopeStack, macroNames, results);
+                WalkExpression(tokens, 1, tokens.Count, scopeStack, macroNames, aliasMap, results);
                 break;
         }
     }
 
-    private static void WalkExpression(List<Token> tokens, int start, int end, Stack<HashSet<string>> scopeStack, HashSet<string> macroNames, Dictionary<string, List<string>> results)
+    private static void WalkExpression(List<Token> tokens, int start, int end, Stack<HashSet<string>> scopeStack, HashSet<string> macroNames, Dictionary<string, string> aliasMap, Dictionary<string, List<string>> results)
     {
         for (int i = start; i < end; i++)
         {
@@ -479,7 +497,23 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
             if (KeywordOperators.Contains(text)) continue;
             if (Builtins.Contains(text)) continue;
             if (macroNames.Contains(text)) continue;
-            if (IsBound(text, scopeStack)) continue;
+
+            if (IsBound(text, scopeStack))
+            {
+                // A bound local that aliases a free variable (see TryResolveAlias) still
+                // contributes its literal comparisons back to the aliased root.
+                if (aliasMap.TryGetValue(text, out var root))
+                {
+                    if (!results.TryGetValue(root, out var aliasList))
+                    {
+                        aliasList = new List<string>();
+                        results[root] = aliasList;
+                    }
+                    CollectLiteralValues(tokens, i, aliasList);
+                }
+                continue;
+            }
+
             if (StandardContextVariables.Contains(text)) continue;
 
             if (!results.TryGetValue(text, out var list))
@@ -489,6 +523,46 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
             }
             CollectLiteralValues(tokens, i, list);
         }
+    }
+
+    /// <summary>
+    /// Recognizes the narrow "materialize a kwarg into a local name" shape —
+    /// `local = freeVar` or `local = freeVar | default(...)` — and returns the ultimate free
+    /// variable root if the RHS resolves to one (following any existing alias chain). Returns
+    /// null for anything more complex (arithmetic, attribute access, ternaries, ...) — those are
+    /// intentionally not treated as aliases to avoid mis-attributing literal values.
+    /// </summary>
+    private static string? TryResolveAlias(List<Token> tokens, int start, int end, Stack<HashSet<string>> scopeStack, HashSet<string> macroNames, Dictionary<string, string> aliasMap)
+    {
+        string? candidate = null;
+
+        if (end - start == 1 && tokens[start].Kind == TokenKind.Identifier)
+        {
+            candidate = tokens[start].Text;
+        }
+        else if (end - start >= 5
+            && tokens[start].Kind == TokenKind.Identifier
+            && tokens[start + 1].Kind == TokenKind.Op && tokens[start + 1].Text == "|"
+            && tokens[start + 2].Kind == TokenKind.Identifier && tokens[start + 2].Text == "default"
+            && tokens[start + 3].Kind == TokenKind.Punct && tokens[start + 3].Text == "("
+            && tokens[end - 1].Kind == TokenKind.Punct && tokens[end - 1].Text == ")")
+        {
+            candidate = tokens[start].Text;
+        }
+
+        if (candidate is null) return null;
+
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        while (aliasMap.TryGetValue(candidate, out var next) && visited.Add(candidate))
+            candidate = next;
+
+        if (KeywordOperators.Contains(candidate)) return null;
+        if (Builtins.Contains(candidate)) return null;
+        if (macroNames.Contains(candidate)) return null;
+        if (IsBound(candidate, scopeStack)) return null;
+        if (StandardContextVariables.Contains(candidate)) return null;
+
+        return candidate;
     }
 
     private static bool IsBound(string name, Stack<HashSet<string>> scopeStack)
@@ -512,15 +586,18 @@ public class ChatTemplateVariableExtractor : IChatTemplateVariableExtractor
             && tokens[idx - 2].Kind == TokenKind.String)
             sink.Add(tokens[idx - 2].Text);
 
-        // NAME in [ "a", "b", ... ]
-        if (idx + 2 < n && tokens[idx + 1].Kind == TokenKind.Identifier && tokens[idx + 1].Text == "in"
-            && tokens[idx + 2].Kind == TokenKind.Punct && tokens[idx + 2].Text == "[")
+        // NAME [not] in [ "a", "b", ... ] / NAME [not] in ( "a", "b", ... )  (list or tuple literal)
+        int afterName = idx + 1;
+        if (afterName < n && tokens[afterName].Kind == TokenKind.Identifier && tokens[afterName].Text == "not")
+            afterName++;
+        if (afterName + 1 < n && tokens[afterName].Kind == TokenKind.Identifier && tokens[afterName].Text == "in"
+            && tokens[afterName + 1].Kind == TokenKind.Punct && tokens[afterName + 1].Text is "[" or "(")
         {
             int depth = 0;
-            for (int j = idx + 2; j < n; j++)
+            for (int j = afterName + 1; j < n; j++)
             {
-                if (tokens[j].Kind == TokenKind.Punct && tokens[j].Text == "[") depth++;
-                else if (tokens[j].Kind == TokenKind.Punct && tokens[j].Text == "]") { depth--; if (depth == 0) break; }
+                if (tokens[j].Kind == TokenKind.Punct && tokens[j].Text is "[" or "(") depth++;
+                else if (tokens[j].Kind == TokenKind.Punct && tokens[j].Text is "]" or ")") { depth--; if (depth == 0) break; }
                 else if (tokens[j].Kind == TokenKind.String) sink.Add(tokens[j].Text);
             }
         }

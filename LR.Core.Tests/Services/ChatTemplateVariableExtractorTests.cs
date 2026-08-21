@@ -154,4 +154,34 @@ public class ChatTemplateVariableExtractorTests
 
         Assert.Empty(result);
     }
+
+    [Fact]
+    public void AliasedVariable_BubblesLiteralValuesBackToRoot()
+    {
+        // Mirrors a real-world pattern (Qwen3-style reasoning_effort): the kwarg is materialized
+        // into a local alias via set + default(), then all subsequent comparisons/membership
+        // checks test the alias, not the original free variable.
+        var template = """
+            {%- if enable_thinking is undefined or enable_thinking is true %}
+                {%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}
+                {%- if resolved_reasoning_effort == 'high' %}
+                    {%- set resolved_reasoning_effort = 'xhigh' %}
+                {%- endif %}
+                {%- if resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}
+                    {{- raise_exception('bad effort ' ~ reasoning_effort) }}
+                {%- endif %}
+                {%- if resolved_reasoning_effort == 'xhigh' %}
+                    {%- set reasoning_instructions = 'xhigh text' %}
+                {%- elif resolved_reasoning_effort == 'low' %}
+                    {%- set reasoning_instructions = 'low text' %}
+                {%- endif %}
+            {%- endif %}
+            """;
+
+        var result = _extractor.Extract(template);
+
+        var v = Assert.Single(result, x => x.Name == "reasoning_effort");
+        Assert.Equal(new[] { "high", "low", "medium", "xhigh" }, v.LiteralValues.OrderBy(x => x));
+        Assert.DoesNotContain(result, x => x.Name == "resolved_reasoning_effort");
+    }
 }
