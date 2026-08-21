@@ -4,8 +4,17 @@
     ViewData["Title"] = "Dashboard";
 }
 
-<!-- Stats Row -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+<!-- Page intro -->
+<div class="flex items-center justify-between mb-6">
+    <p class="text-text-secondary">Overview of your inference fleet and traffic.</p>
+    <span id="dashLiveBadge" class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-gray-700/30 text-text-secondary border border-gray-600/30" title="Live server-status connection">
+        <span id="dashLiveDot" class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+        <span id="dashLiveText">Connecting…</span>
+    </span>
+</div>
+
+<!-- Fleet Stats -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
     <!-- Total Servers -->
     <div class="bg-cyber-card rounded-xl p-5 border border-neon-cyan/10 hover:border-neon-cyan/30 transition-all">
         <div class="flex items-center justify-between">
@@ -46,11 +55,61 @@
     </div>
 </div>
 
-<!-- Server Cards -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+<!-- 24h Activity -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2">
+    <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-xs text-text-secondary uppercase tracking-wider">Requests (24h)</p>
+                <p class="text-2xl font-bold text-neon-cyan mt-1">@Model.TotalRequests24h.ToString("N0")</p>
+            </div>
+            <div class="w-12 h-12 rounded-lg bg-neon-cyan/10 flex items-center justify-center">
+                <svg class="w-6 h-6 text-neon-cyan" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-green">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-xs text-text-secondary uppercase tracking-wider">Tokens (24h)</p>
+                <p class="text-2xl font-bold text-neon-green mt-1">@Model.TotalTokens24h.ToString("N0")</p>
+            </div>
+            <div class="w-12 h-12 rounded-lg bg-neon-green/10 flex items-center justify-center">
+                <svg class="w-6 h-6 text-neon-green" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-magenta">
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-xs text-text-secondary uppercase tracking-wider">Avg Latency (24h)</p>
+                <p class="text-2xl font-bold text-neon-magenta mt-1">@Model.AvgLatencyMs24h.ToString("F1") ms</p>
+            </div>
+            <div class="w-12 h-12 rounded-lg bg-neon-magenta/10 flex items-center justify-center">
+                <svg class="w-6 h-6 text-neon-magenta" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="text-right mb-6">
+    <a href="/Features/Stats/Dashboard" class="text-xs text-text-secondary hover:text-neon-cyan transition-colors">View full statistics →</a>
+</div>
+
+<!-- Servers -->
+<div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-semibold text-text-primary">Servers</h2>
+    <a href="/Features/Servers/Create" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-xs font-medium">
+        <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+        New Server
+    </a>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
     @if (!Model.Servers.Any())
     {
-        <div class="col-span-full text-center py-16">
+        <div class="col-span-full text-center py-16 bg-cyber-card rounded-xl border border-neon-cyan/10">
             <svg class="w-16 h-16 mx-auto text-text-secondary mb-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2m-9-3v4" /></svg>
             <p class="text-text-primary text-lg">No servers configured</p>
             <p class="text-text-secondary text-sm mt-1">Create your first server instance to get started.</p>
@@ -63,21 +122,42 @@
 
     @foreach (var server in Model.Servers)
     {
-        <div class="bg-cyber-card rounded-xl p-5 border border-neon-cyan/10 hover:border-neon-cyan/30 transition-all" data-server-id="@server.Id">
+        var borderColor = server.Status == ServerStatus.Error ? "neon-red" : "neon-cyan";
+        <div class="bg-cyber-card rounded-xl p-5 border border-@borderColor/10 hover:border-@borderColor/30 transition-all" data-server-id="@server.Id">
             <!-- Header -->
-            <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-3">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-3 min-w-0">
                     <span id="status-dot-@server.Id" aria-hidden="true"
-                          class="w-3 h-3 rounded-full
+                          class="w-3 h-3 rounded-full shrink-0
                               @if (server.Status == ServerStatus.Running) { <text>bg-neon-green animate-pulse shadow-neon-green</text> }
                               else if (server.Status == ServerStatus.Error) { <text>bg-neon-red animate-pulse shadow-neon-red</text> }
                               else if (server.Status == ServerStatus.Starting || server.Status == ServerStatus.Stopping) { <text>bg-yellow-500 animate-pulse</text> }
+                              else if (server.Status == ServerStatus.Reconnecting) { <text>bg-blue-400 animate-pulse</text> }
                               else { <text>bg-gray-500</text> }"></span>
-                    <h3 class="text-lg font-semibold text-text-primary">@server.Name</h3>
+                    <h3 class="text-lg font-semibold text-text-primary truncate" title="@server.Name">@server.Name</h3>
+                    @if (server.LastErrorMessage != null)
+                    {
+                        <span class="cursor-help text-neon-red shrink-0" tabindex="0" role="img" aria-label="Last error: @(server.LastErrorMessage) at @(server.LastErrorTime?.ToString("yyyy-MM-dd HH:mm:ss"))" title="Last error: @(server.LastErrorMessage)&#10;@(server.LastErrorTime?.ToString("yyyy-MM-dd HH:mm:ss"))">
+                            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        </span>
+                    }
                 </div>
-                <span class="px-2 py-1 rounded-md text-xs font-medium uppercase tracking-wider bg-neon-cyan/10 text-neon-cyan">
+                <span class="px-2 py-1 rounded-md text-xs font-medium uppercase tracking-wider bg-neon-cyan/10 text-neon-cyan shrink-0">
                     @server.Engine.ToString().Replace("LlamaCpp", "llama.cpp")
                 </span>
+            </div>
+
+            <!-- Model badge -->
+            <div class="flex items-center gap-1.5 mb-4 text-xs">
+                <svg class="w-4 h-4 shrink-0 @(server.ActivePresetId.HasValue ? "text-neon-magenta" : "text-text-secondary")" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z" /></svg>
+                @if (server.ActivePresetId.HasValue && Model.ActivePresetNames.TryGetValue(server.ActivePresetId.Value, out var presetName))
+                {
+                    <span class="text-text-primary font-medium truncate" title="@presetName">@presetName</span>
+                }
+                else
+                {
+                    <span class="text-text-secondary italic">No model loaded</span>
+                }
             </div>
 
             <!-- Details -->
@@ -91,6 +171,11 @@
                     <p class="text-text-primary font-medium mt-1">@server.Port</p>
                 </div>
             </div>
+
+            @if (server.RestartCount > 0)
+            {
+                <div class="mb-3 text-xs text-yellow-500">Restarted @server.RestartCount/@server.MaxRestarts times</div>
+            }
 
             <!-- Progress message (hidden by default) -->
             <div id="progress-msg-@server.Id" class="mb-3 text-xs text-yellow-400 hidden"></div>
@@ -119,6 +204,53 @@
     }
 </div>
 
+<!-- Recent Activity -->
+<div class="bg-cyber-card rounded-xl border border-neon-cyan/10 overflow-hidden mb-4">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-700/30">
+        <h2 class="text-lg font-semibold text-text-primary">Recent Activity</h2>
+        <a href="/Features/RequestLog/Index" class="text-xs text-text-secondary hover:text-neon-cyan transition-colors">View all →</a>
+    </div>
+
+    @if (!Model.RecentRequests.Any())
+    {
+        <p class="text-text-secondary text-sm text-center py-10">No requests in the last 24 hours.</p>
+    }
+    else
+    {
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-700/50">
+                        <th scope="col" class="text-left px-5 py-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">Time</th>
+                        <th scope="col" class="text-left px-5 py-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">Protocol</th>
+                        <th scope="col" class="text-left px-5 py-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">Model</th>
+                        <th scope="col" class="text-left px-5 py-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">Server</th>
+                        <th scope="col" class="text-left px-5 py-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">Status</th>
+                        <th scope="col" class="text-right px-5 py-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">Latency</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var log in Model.RecentRequests)
+                    {
+                        <tr class="border-b border-gray-700/20 last:border-b-0 hover:bg-white/[0.02] transition-colors">
+                            <td class="px-5 py-2.5 text-text-secondary whitespace-nowrap">@log.Timestamp.ToString("HH:mm:ss")</td>
+                            <td class="px-5 py-2.5">
+                                <span class="px-2 py-0.5 rounded text-xs font-medium bg-neon-cyan/10 text-neon-cyan">@log.ProtocolBadge</span>
+                            </td>
+                            <td class="px-5 py-2.5 text-text-primary truncate max-w-[12rem]" title="@log.ModelName">@(log.ModelName ?? "—")</td>
+                            <td class="px-5 py-2.5 text-text-secondary truncate max-w-[10rem]">@(log.ServerInstance?.Name ?? "—")</td>
+                            <td class="px-5 py-2.5">
+                                <span class="@(log.StatusDisplay == "OK" ? "text-neon-green" : "text-neon-red") font-medium">@log.StatusDisplay</span>
+                            </td>
+                            <td class="px-5 py-2.5 text-right text-text-primary whitespace-nowrap">@(log.TotalLatencyMs.HasValue ? log.TotalLatencyMs.Value.ToString("F0") + " ms" : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
 <script>
 (function() {
     // SignalR connection, stored on window and reused across htmx-boosted navigations —
@@ -128,6 +260,20 @@
     if (window.__serverHubHandler && window.__serverHubConnection) {
         window.__serverHubConnection.off('ReceiveStartupProgress', window.__serverHubHandler);
         window.__serverHubHandler = null;
+    }
+
+    function setLiveBadge(state) {
+        const dot = document.getElementById('dashLiveDot');
+        const text = document.getElementById('dashLiveText');
+        if (!dot || !text) return;
+        const styles = {
+            connecting: { dot: 'bg-gray-500', label: 'Connecting…' },
+            live: { dot: 'bg-neon-green animate-pulse', label: 'Live' },
+            down: { dot: 'bg-neon-red', label: 'Disconnected' },
+        };
+        const s = styles[state] || styles.connecting;
+        dot.className = 'w-1.5 h-1.5 rounded-full ' + s.dot;
+        text.textContent = s.label;
     }
 
     function connectSignalR() {
@@ -140,6 +286,10 @@
                 .withAutomaticReconnect()
                 .build();
             window.__serverHubConnection = connection;
+
+            connection.onreconnecting(() => setLiveBadge('connecting'));
+            connection.onreconnected(() => setLiveBadge('live'));
+            connection.onclose(() => setLiveBadge('down'));
         }
 
         const handler = (instanceId, eventType, message, elapsedSeconds) => {
@@ -151,9 +301,13 @@
         if (!isLive) {
             connection.start().then(() => {
                 console.log('[SignalR] Connected to serverHub');
+                setLiveBadge('live');
             }).catch(err => {
                 console.warn('[SignalR] Connection failed:', err.message);
+                setLiveBadge('down');
             });
+        } else {
+            setLiveBadge('live');
         }
     }
 
