@@ -11,6 +11,7 @@ public class PresetCreateModel : PageModel
     private readonly IPresetManager _presetManager;
     private readonly IServerManager _serverManager;
     private readonly IModelLibrary _modelLibrary;
+    private readonly IChatTemplateVariableExtractor _templateVariableExtractor;
 
     [BindProperty]
     public PresetViewModel ViewModel { get; set; } = new();
@@ -18,17 +19,33 @@ public class PresetCreateModel : PageModel
     public IReadOnlyList<Core.Models.ServerInstance> Servers { get; set; } = new List<Core.Models.ServerInstance>();
     public IReadOnlyList<Core.Models.LocalModel> Models { get; set; } = new List<Core.Models.LocalModel>();
 
-    public PresetCreateModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary)
+    public PresetCreateModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary, IChatTemplateVariableExtractor templateVariableExtractor)
     {
         _presetManager = presetManager;
         _serverManager = serverManager;
         _modelLibrary = modelLibrary;
+        _templateVariableExtractor = templateVariableExtractor;
     }
 
     public async Task OnGetAsync()
     {
         Servers = _serverManager.GetAllInstances();
         Models = await _modelLibrary.GetAllAsync();
+    }
+
+    /// <summary>
+    /// AJAX endpoint backing the ChatTemplateKwargs editor: given a registry model id, extracts
+    /// the custom Jinja variables its chat template reads so the UI can offer them as fields
+    /// instead of requiring hand-written JSON. Called from client script on model selection.
+    /// </summary>
+    public async Task<IActionResult> OnGetTemplateVariablesAsync(Guid? modelId)
+    {
+        if (modelId is null)
+            return new JsonResult(Array.Empty<object>());
+
+        var model = await _modelLibrary.GetByIdAsync(modelId.Value);
+        var variables = _templateVariableExtractor.Extract(model?.ChatTemplate);
+        return new JsonResult(variables.Select(v => new { name = v.Name, literalValues = v.LiteralValues }));
     }
 
     public async Task<IActionResult> OnPostAsync()

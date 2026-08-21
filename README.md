@@ -17,6 +17,17 @@ LLM Router provides a unified interface to route requests across heterogeneous b
 - **Request logging & stats dashboard** — Per-request API log with filtering, plus charts for throughput, latency, and context usage.
 - **Razor Pages UI** — Web dashboard for managing servers, presets, the model library, request logs, and stats.
 
+## Screenshots
+
+| | |
+|---|---|
+| **Dashboard** — fleet overview, recent activity | **Servers** — instance registry, start/stop/edit |
+| ![Dashboard](docs/screenshots/dashboard-home.png) | ![Servers](docs/screenshots/servers.png) |
+| **Presets** — launch configurations per server | **Model Library** — GGUF registry with size/status |
+| ![Presets](docs/screenshots/presets.png) | ![Model Library](docs/screenshots/model-library.png) |
+| **Statistics** — throughput, latency, context usage | **Request Log** — per-request history with filtering |
+| ![Statistics](docs/screenshots/stats.png) | ![Request Log](docs/screenshots/request-log.png) |
+
 ## Architecture
 
 ```mermaid
