@@ -106,8 +106,10 @@ public class ClaudeHandler : IProtocolHandler
         // Log translated payload
         if (logId != Guid.Empty) { try { await _requestLogger.LogTranslatedPayloadAsync(logId, routeRequest.Payload); } catch { } }
 
-        // Create a backend-specific cancellation token that is NOT tied to client disconnection.
-        using var backendCts = new CancellationTokenSource();
+        // Backend-call cancellation: linked to the client's token so a client disconnect
+        // aborts the in-flight call to llama.cpp immediately, plus an independent backend
+        // timeout so a hung backend still gets cut off even while the client stays connected.
+        using var backendCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (_gatewaySettings.BackendTimeoutSeconds > 0)
         {
             backendCts.CancelAfter(TimeSpan.FromSeconds(_gatewaySettings.BackendTimeoutSeconds));
@@ -116,7 +118,7 @@ public class ClaudeHandler : IProtocolHandler
         // Use the HTTP context token for routing (fast DB query — safe to cancel on client disconnect)
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
 
-        // Backend token — survives client disconnect but respects the backend timeout
+        // Backend token — cancels on client disconnect or the backend timeout, whichever is first
         var backendToken = backendCts.Token;
 
         if (server != null)
@@ -169,47 +171,57 @@ public class ClaudeHandler : IProtocolHandler
 
                     try
                     {
+                    // Note: no early "if backendToken.IsCancellationRequested break" guard here —
+                    // once cancelled (client disconnect or backend timeout), the provider stops
+                    // reading from llama.cpp and yields exactly one more chunk: a synthetic final
+                    // chunk carrying whatever partial content/stats it captured. Breaking before
+                    // that chunk is processed would discard it and skip stats/logging below.
                     await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, backendToken))
                     {
-                        if (backendToken.IsCancellationRequested) break;
-
                         if (chunk.IsFinal && chunk.Response is not null)
                         {
-                            // content_block_stop for every block opened above (text + any tool_use
-                            // blocks). Required before message_delta/message_stop for a well-formed
-                            // event sequence; strict clients (e.g. the official Anthropic SDK) reject
-                            // a stream missing it.
-                            foreach (var openIndex in new[] { 0 }.Concat(toolBlockClientIndex.Values).OrderBy(i => i))
+                            // Best-effort: the client may already be gone (that's the same
+                            // disconnect that just cancelled the backend call above) — don't let
+                            // a failed write skip the statistics/logging below.
+                            try
                             {
-                                await httpResponse.WriteAsync($"event: content_block_stop\ndata: {JsonSerializer.Serialize(new ContentBlockStopData
+                                // content_block_stop for every block opened above (text + any tool_use
+                                // blocks). Required before message_delta/message_stop for a well-formed
+                                // event sequence; strict clients (e.g. the official Anthropic SDK) reject
+                                // a stream missing it.
+                                foreach (var openIndex in new[] { 0 }.Concat(toolBlockClientIndex.Values).OrderBy(i => i))
                                 {
-                                    Type = "content_block_stop",
-                                    Index = openIndex
+                                    await httpResponse.WriteAsync($"event: content_block_stop\ndata: {JsonSerializer.Serialize(new ContentBlockStopData
+                                    {
+                                        Type = "content_block_stop",
+                                        Index = openIndex
+                                    })}\r\n\r\n", cancellationToken);
+                                }
+                                await httpResponse.Body.FlushAsync(cancellationToken);
+
+                                // message_delta event with stop reason and final usage
+                                await httpResponse.WriteAsync($"event: message_delta\ndata: {JsonSerializer.Serialize(new MessageDeltaData
+                                {
+                                    Type = "message_delta",
+                                    Delta = new DeltaMessageDelta
+                                    {
+                                        StopReason = chunk.Response.FinishReason ?? "end_turn",
+                                        StopSequence = null
+                                    },
+                                    Usage = new Usage
+                                    {
+                                        InputTokens = chunk.Response.PromptTokensProcessed,
+                                        OutputTokens = chunk.Response.GeneratedTokenCount
+                                    }
+                                })}\r\n\r\n", cancellationToken);
+
+                                // message_stop event
+                                await httpResponse.WriteAsync($"event: message_stop\ndata: {JsonSerializer.Serialize(new MessageStopData
+                                {
+                                    Type = "message_stop"
                                 })}\r\n\r\n", cancellationToken);
                             }
-                            await httpResponse.Body.FlushAsync(cancellationToken);
-
-                            // message_delta event with stop reason and final usage
-                            await httpResponse.WriteAsync($"event: message_delta\ndata: {JsonSerializer.Serialize(new MessageDeltaData
-                            {
-                                Type = "message_delta",
-                                Delta = new DeltaMessageDelta
-                                {
-                                    StopReason = chunk.Response.FinishReason ?? "end_turn",
-                                    StopSequence = null
-                                },
-                                Usage = new Usage
-                                {
-                                    InputTokens = chunk.Response.PromptTokensProcessed,
-                                    OutputTokens = chunk.Response.GeneratedTokenCount
-                                }
-                            })}\r\n\r\n", cancellationToken);
-
-                            // message_stop event
-                            await httpResponse.WriteAsync($"event: message_stop\ndata: {JsonSerializer.Serialize(new MessageStopData
-                            {
-                                Type = "message_stop"
-                            })}\r\n\r\n", cancellationToken);
+                            catch (OperationCanceledException) { }
 
                             // Record statistics from final response
                             try

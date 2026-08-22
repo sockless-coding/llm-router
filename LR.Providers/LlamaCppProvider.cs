@@ -390,6 +390,8 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
 
         Stream? stream = null;
         StreamReader? reader = null;
+        HttpResponseMessage? response = null;
+        HttpRequestMessage? httpRequest = null;
 
         // Register this request for timing data collection from stdout
         var streamResponse = new RouteResponse();
@@ -424,11 +426,12 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                 // Use SendAsync with ResponseHeadersRead so the call returns as soon as headers arrive,
                 // allowing chunks to flow through the stream incrementally instead of buffering
                 // the entire response before yielding.
-                var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{ServerUrl}{endpoint}")
+                httpRequest?.Dispose(); // dispose a prior attempt's request, if this is a retry
+                httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{ServerUrl}{endpoint}")
                 {
                     Content = requestContent
                 };
-                var response = await _httpClient.SendAsync(
+                response = await _httpClient.SendAsync(
                     httpRequest,
                     HttpCompletionOption.ResponseHeadersRead,
                     cancellationToken);
@@ -479,6 +482,8 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
             throw new InvalidOperationException($"Failed to send streaming request to {ServerUrl} after {maxRetries + 1} attempts: {lastException.Message}", lastException);
         }
 
+        try
+        {
         if (protocol == ApiProtocol.Claude)
         {
             await foreach (var claudeChunk in ReadClaudeSseStreamAsync(reader!, streamResponse, cancellationToken))
@@ -491,9 +496,22 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         bool completed = false;
         var accumulatedToolCalls = new Dictionary<int, ChatToolCall>();
 
-        while (!completed && !cancellationToken.IsCancellationRequested)
+        while (!completed)
         {
-            string? line = await reader.ReadLineAsync();
+            string? line;
+            try
+            {
+                line = await reader!.ReadLineAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Client disconnected, or the backend timeout elapsed. Stop reading immediately
+                // rather than waiting on llama.cpp for more tokens — the finally block below
+                // disposes the response/stream, which tears down the TCP connection to
+                // llama.cpp so it observes the dropped peer and stops generating, instead of
+                // continuing to burn GPU time on a response nobody will receive.
+                break;
+            }
             // EOF: the backend closed the connection. ReadLineAsync keeps returning null
             // instantly on a dead stream, so looping back here would spin forever instead
             // of blocking — stop and let the post-loop fallback flush whatever we have.
@@ -652,6 +670,17 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
             _timingCoordinator.MergeTimingData(streamResponse);
             yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
         }
+        }
+        finally
+        {
+            // Dispose eagerly (rather than relying on GC/finalizers) so a cancelled request
+            // actually closes the socket to llama.cpp right away instead of leaving the
+            // connection — and llama.cpp's in-progress generation — alive indefinitely.
+            reader?.Dispose();
+            stream?.Dispose();
+            response?.Dispose();
+            httpRequest?.Dispose();
+        }
     }
 
     /// <summary>
@@ -669,9 +698,19 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         bool completed = false;
         var accumulatedToolCalls = new Dictionary<int, ChatToolCall>();
 
-        while (!completed && !cancellationToken.IsCancellationRequested)
+        while (!completed)
         {
-            string? line = await reader.ReadLineAsync();
+            string? line;
+            try
+            {
+                line = await reader.ReadLineAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Client disconnected, or the backend timeout elapsed — stop reading; the
+                // caller's finally block tears down the connection to llama.cpp.
+                break;
+            }
             if (line is null) break;
             if (string.IsNullOrWhiteSpace(line)) continue;
 

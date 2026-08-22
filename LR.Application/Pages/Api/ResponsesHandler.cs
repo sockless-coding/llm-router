@@ -149,7 +149,12 @@ public class ResponsesHandler
 
         if (logId != Guid.Empty) { try { await _requestLogger.LogTranslatedPayloadAsync(logId, routeRequest.Payload); } catch { } }
 
-        using var backendCts = new CancellationTokenSource();
+        // Linked to the client's token so a client disconnect aborts the in-flight call to
+        // llama.cpp immediately, plus an independent backend timeout so a hung backend still
+        // gets cut off even while the client stays connected. (Not used for request.Background
+        // == true — that path is intentionally decoupled from this request's lifetime; see the
+        // separate CancellationTokenSource registered with _registry above.)
+        using var backendCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (_gatewaySettings.BackendTimeoutSeconds > 0)
             backendCts.CancelAfter(TimeSpan.FromSeconds(_gatewaySettings.BackendTimeoutSeconds));
         var backendToken = backendCts.Token;
@@ -321,10 +326,13 @@ public class ResponsesHandler
 
         try
         {
+            // Note: no early "if backendToken.IsCancellationRequested break" guard here — once
+            // cancelled (client disconnect or backend timeout), the provider stops reading from
+            // llama.cpp and yields exactly one more chunk: a synthetic final chunk carrying
+            // whatever partial content/stats it captured. Breaking before that chunk is
+            // processed would discard it and leave finalRouteResponse unset.
             await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, backendToken))
             {
-                if (backendToken.IsCancellationRequested) break;
-
                 if (chunk.IsFinal && chunk.Response is not null)
                 {
                     finalRouteResponse = chunk.Response;
@@ -403,32 +411,43 @@ public class ResponsesHandler
             throw;
         }
 
-        if (reasoningItemOpened)
+        // Best-effort from here on — the client may already be gone (that's the same disconnect
+        // that just cancelled the backend call above). Don't let a failed write skip persistence,
+        // stats recording, or logging below.
+        try
         {
-            await WriteEventAsync(bodyWriter, new ResponseStreamEvent
+            if (reasoningItemOpened)
             {
-                Type = "response.reasoning_text.done", SequenceNumber = seq++, ItemId = reasoningItemId, OutputIndex = 0, ContentIndex = 0, Text = reasoningSoFar.ToString()
-            }, clientToken);
-        }
-        if (messageItemOpened)
-        {
-            await WriteEventAsync(bodyWriter, new ResponseStreamEvent
+                await WriteEventAsync(bodyWriter, new ResponseStreamEvent
+                {
+                    Type = "response.reasoning_text.done", SequenceNumber = seq++, ItemId = reasoningItemId, OutputIndex = 0, ContentIndex = 0, Text = reasoningSoFar.ToString()
+                }, clientToken);
+            }
+            if (messageItemOpened)
             {
-                Type = "response.output_text.done", SequenceNumber = seq++, ItemId = messageItemId, OutputIndex = reasoningItemOpened ? 1 : 0, ContentIndex = 0, Text = textSoFar.ToString()
-            }, clientToken);
+                await WriteEventAsync(bodyWriter, new ResponseStreamEvent
+                {
+                    Type = "response.output_text.done", SequenceNumber = seq++, ItemId = messageItemId, OutputIndex = reasoningItemOpened ? 1 : 0, ContentIndex = 0, Text = textSoFar.ToString()
+                }, clientToken);
+            }
         }
+        catch (OperationCanceledException) { }
 
         var routeResponse = finalRouteResponse ?? new RouteResponse { Payload = textSoFar.ToString(), ReasoningContent = reasoningSoFar.Length > 0 ? reasoningSoFar.ToString() : null };
         var outputItems = BuildOutputItems(routeResponse);
         var usage = BuildUsage(routeResponse);
 
-        foreach (var item in outputItems)
+        try
         {
-            await WriteEventAsync(bodyWriter, new ResponseStreamEvent { Type = "response.output_item.done", SequenceNumber = seq++, Item = item }, clientToken);
-        }
+            foreach (var item in outputItems)
+            {
+                await WriteEventAsync(bodyWriter, new ResponseStreamEvent { Type = "response.output_item.done", SequenceNumber = seq++, Item = item }, clientToken);
+            }
 
-        var completedResponse = BuildResponseObject(responseId, createdAt, request, "completed", outputItems, usage);
-        await WriteEventAsync(bodyWriter, new ResponseStreamEvent { Type = "response.completed", SequenceNumber = seq++, Response = completedResponse }, clientToken);
+            var completedResponse = BuildResponseObject(responseId, createdAt, request, "completed", outputItems, usage);
+            await WriteEventAsync(bodyWriter, new ResponseStreamEvent { Type = "response.completed", SequenceNumber = seq++, Response = completedResponse }, clientToken);
+        }
+        catch (OperationCanceledException) { }
 
         if (store) await PersistCompletedAsync(_db, responseId, routeResponse, outputItems, CancellationToken.None);
         if (request.Background) _registry.Remove(responseId);

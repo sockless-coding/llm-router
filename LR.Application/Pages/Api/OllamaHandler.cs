@@ -263,8 +263,10 @@ public class OllamaHandler : IProtocolHandler
         // Log translated payload
         if (logId != Guid.Empty) { try { await _requestLogger.LogTranslatedPayloadAsync(logId, routeRequest.Payload); } catch { } }
 
-        // Create a backend-specific cancellation token that is NOT tied to client disconnection.
-        using var backendCts = new CancellationTokenSource();
+        // Backend-call cancellation: linked to the client's token so a client disconnect
+        // aborts the in-flight call to llama.cpp immediately, plus an independent backend
+        // timeout so a hung backend still gets cut off even while the client stays connected.
+        using var backendCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (_gatewaySettings.BackendTimeoutSeconds > 0)
         {
             backendCts.CancelAfter(TimeSpan.FromSeconds(_gatewaySettings.BackendTimeoutSeconds));
@@ -273,7 +275,7 @@ public class OllamaHandler : IProtocolHandler
         // Use the HTTP context token for routing (fast DB query — safe to cancel on client disconnect)
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
 
-        // Backend token — survives client disconnect but respects the backend timeout
+        // Backend token — cancels on client disconnect or the backend timeout, whichever is first
         var backendToken = backendCts.Token;
 
         if (server != null)
@@ -290,29 +292,38 @@ public class OllamaHandler : IProtocolHandler
                 if (provider is null)
                     return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
 
+                // Note: no early "if cancellationToken.IsCancellationRequested break" guard here —
+                // once cancelled (client disconnect), the provider stops reading from llama.cpp
+                // and yields exactly one more chunk: a synthetic final chunk carrying whatever
+                // partial content/stats it captured. Breaking before that chunk is processed
+                // would discard it and skip the stats recording below.
                 await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken))
                 {
-                    if (cancellationToken.IsCancellationRequested) break;
-
                     if (chunk.IsFinal && chunk.Response is not null)
                     {
-                        // Final chunk with done=true and metadata
-                        await httpResponse.WriteAsync(JsonSerializer.Serialize(new ChatResponse
+                        // Final chunk with done=true and metadata. Best-effort write — the client
+                        // may already be gone (that's the same disconnect that just cancelled the
+                        // backend call above) — don't let a failed write skip stats recording.
+                        try
                         {
-                            Model = request.Model,
-                            CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                            Message = new LR.Core.Models.Ollama.ChatMessage
+                            await httpResponse.WriteAsync(JsonSerializer.Serialize(new ChatResponse
                             {
-                                Role = "assistant",
-                                Content = string.Empty,
-                                ToolCalls = MapToolCallsToOllama(chunk.Response.ToolCalls)
-                            },
-                            Done = true,
-                            DoneReason = "stop",
-                            PromptEvalCount = chunk.Response.PromptTokensProcessed,
-                            EvalCount = chunk.Response.GeneratedTokenCount,
-                            TotalDuration = (long)chunk.Response.TotalLatencyMs * 1_000_000L
-                        }) + "\n", cancellationToken);
+                                Model = request.Model,
+                                CreatedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                                Message = new LR.Core.Models.Ollama.ChatMessage
+                                {
+                                    Role = "assistant",
+                                    Content = string.Empty,
+                                    ToolCalls = MapToolCallsToOllama(chunk.Response.ToolCalls)
+                                },
+                                Done = true,
+                                DoneReason = "stop",
+                                PromptEvalCount = chunk.Response.PromptTokensProcessed,
+                                EvalCount = chunk.Response.GeneratedTokenCount,
+                                TotalDuration = (long)chunk.Response.TotalLatencyMs * 1_000_000L
+                            }) + "\n", cancellationToken);
+                        }
+                        catch (OperationCanceledException) { }
 
                         // Record statistics from final response
                         try

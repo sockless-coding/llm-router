@@ -143,10 +143,11 @@ public class OpenAiHandler : IProtocolHandler
         // Log translated payload
         if (logId != Guid.Empty) { try { await _requestLogger.LogTranslatedPayloadAsync(logId, routeRequest.Payload); } catch { } }
 
-        // Create a backend-specific cancellation token that is NOT tied to client disconnection.
-        // This prevents the backend call from being cancelled when the client disconnects or times out,
-        // which was causing lost connections and missing backend response logs.
-        using var backendCts = new CancellationTokenSource();
+        // Backend-call cancellation: linked to the client's token so a client disconnect
+        // aborts the in-flight call to llama.cpp immediately (instead of leaving it to burn
+        // GPU time on a response nobody will receive), plus an independent backend timeout so
+        // a hung backend still gets cut off even while the client stays connected.
+        using var backendCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (_gatewaySettings.BackendTimeoutSeconds > 0)
         {
             backendCts.CancelAfter(TimeSpan.FromSeconds(_gatewaySettings.BackendTimeoutSeconds));
@@ -159,7 +160,7 @@ public class OpenAiHandler : IProtocolHandler
         // failing the request outright.
         var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
 
-        // Backend token — survives client disconnect but respects the backend timeout
+        // Backend token — cancels on client disconnect or the backend timeout, whichever is first
         var backendToken = backendCts?.Token ?? CancellationToken.None;
 
         if (server != null)
@@ -201,10 +202,13 @@ public class OpenAiHandler : IProtocolHandler
                     await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(firstChunk), cancellationToken);
                     await bodyWriter.FlushAsync(cancellationToken);
 
+                    // Note: no early "if backendToken.IsCancellationRequested break" guard here —
+                    // once cancelled (client disconnect or backend timeout), the provider stops
+                    // reading from llama.cpp and yields exactly one more chunk: a synthetic final
+                    // chunk carrying whatever partial content/stats it captured. Breaking before
+                    // that chunk is processed would discard it and skip stats/logging below.
                     await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, backendToken))
                     {
-                        if (backendToken.IsCancellationRequested) break;
-
                         if (chunk.IsFinal && chunk.Response is not null)
                         {
                             // Final chunk with finish_reason, usage, and timings
@@ -240,8 +244,15 @@ public class OpenAiHandler : IProtocolHandler
                                 },
                                 Timings = timing
                             })}\r\n\r\n";
-                            await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(finalChunkText), cancellationToken);
-                            await bodyWriter.FlushAsync(cancellationToken);
+                            // Best-effort: the client may already be gone (that's the same
+                            // disconnect that just cancelled the backend call above) — don't let
+                            // a failed write skip the statistics/logging below.
+                            try
+                            {
+                                await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(finalChunkText), cancellationToken);
+                                await bodyWriter.FlushAsync(cancellationToken);
+                            }
+                            catch (OperationCanceledException) { }
 
                             // Record statistics from final response
                             try
@@ -291,9 +302,13 @@ public class OpenAiHandler : IProtocolHandler
                         await bodyWriter.FlushAsync(cancellationToken);
                     }
 
-                    // Signal end of stream
-                    await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes("data: [DONE]\r\n\r\n"), cancellationToken);
-                    await bodyWriter.FlushAsync(cancellationToken);
+                    // Signal end of stream (best-effort — the client may already be gone)
+                    try
+                    {
+                        await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes("data: [DONE]\r\n\r\n"), cancellationToken);
+                        await bodyWriter.FlushAsync(cancellationToken);
+                    }
+                    catch (OperationCanceledException) { }
 
                 return Results.Empty;
             }
