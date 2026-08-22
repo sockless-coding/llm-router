@@ -41,6 +41,11 @@
                                 data-params="@m.ParameterSize"
                                 data-quant="@m.QuantizationLevel"
                                 data-context="@m.ContextLength"
+                                data-filesize="@m.FileSizeBytes"
+                                data-blocks="@m.BlockCount"
+                                data-heads="@m.HeadCount"
+                                data-kvheads="@m.KvHeadCount"
+                                data-embed="@m.EmbeddingLength"
                                 selected="@(Model.ViewModel.ModelId == m.Id)">@m.Name</option>
                     }
                 </select>
@@ -78,17 +83,27 @@
                 </div>
                 <div>
                     <label asp-for="ViewModel.GpuLayers" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                    <input asp-for="ViewModel.GpuLayers" type="number"
+                    <input asp-for="ViewModel.GpuLayers" type="number" id="gpu-layers-input"
                            placeholder="auto"
                            class="@inpCls" />
                 </div>
+            </div>
+
+            <!-- VRAM Estimate -->
+            <div id="vram-estimate" class="hidden rounded-lg border border-neon-cyan/20 bg-cyber-bg-dark/50 p-4 space-y-1.5">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-semibold text-text-primary">Estimated VRAM Usage</h3>
+                    <span id="vram-total" class="text-sm font-semibold text-neon-cyan"></span>
+                </div>
+                <div id="vram-breakdown" class="text-xs text-text-secondary space-y-0.5"></div>
+                <p id="vram-caveat" class="text-xs text-text-secondary italic pt-1"></p>
             </div>
 
             <!-- KV Cache Types -->
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label asp-for="ViewModel.CacheTypeK" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                    <select asp-for="ViewModel.CacheTypeK" class="@selCls">
+                    <select asp-for="ViewModel.CacheTypeK" id="cache-type-k-select" class="@selCls">
                         <option value="">— default (f16) —</option>
                         @foreach (var v in new[] { "f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1" })
                         {
@@ -98,7 +113,7 @@
                 </div>
                 <div>
                     <label asp-for="ViewModel.CacheTypeV" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                    <select asp-for="ViewModel.CacheTypeV" class="@selCls">
+                    <select asp-for="ViewModel.CacheTypeV" id="cache-type-v-select" class="@selCls">
                         <option value="">— default (f16) —</option>
                         @foreach (var v in new[] { "f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1" })
                         {
@@ -219,11 +234,11 @@
                 <div class="grid grid-cols-3 gap-4">
                     <div>
                         <label asp-for="ViewModel.BatchSize" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                        <input asp-for="ViewModel.BatchSize" type="number" placeholder="2048" class="@inpCls" />
+                        <input asp-for="ViewModel.BatchSize" type="number" id="batch-size-input" placeholder="2048" class="@inpCls" />
                     </div>
                     <div>
                         <label asp-for="ViewModel.UbatchSize" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                        <input asp-for="ViewModel.UbatchSize" type="number" placeholder="512" class="@inpCls" />
+                        <input asp-for="ViewModel.UbatchSize" type="number" id="ubatch-size-input" placeholder="512" class="@inpCls" />
                     </div>
                     <div>
                         <label asp-for="ViewModel.KeepN" class="block text-sm font-medium text-text-secondary mb-1"></label>
@@ -318,7 +333,7 @@
                 <div class="grid grid-cols-3 gap-4">
                     <div>
                         <label asp-for="ViewModel.CpuMoe" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                        <select asp-for="ViewModel.CpuMoe" class="@selCls">
+                        <select asp-for="ViewModel.CpuMoe" id="cpu-moe-select" class="@selCls">
                             <option value="">— default (disabled) —</option>
                             <option value="True">enabled (all experts on CPU)</option>
                             <option value="False">disabled</option>
@@ -326,7 +341,7 @@
                     </div>
                     <div>
                         <label asp-for="ViewModel.NCpuMoe" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                        <input asp-for="ViewModel.NCpuMoe" type="number" placeholder="first N layers on CPU" class="@inpCls" />
+                        <input asp-for="ViewModel.NCpuMoe" id="n-cpu-moe-input" type="number" placeholder="first N layers on CPU" class="@inpCls" />
                     </div>
                     <div>
                         <label asp-for="ViewModel.OverrideTensor" class="block text-sm font-medium text-text-secondary mb-1"></label>
@@ -901,6 +916,94 @@
 
     select.addEventListener('change', render);
     render();
+})();
+</script>
+
+<script>
+(function () {
+    const select = document.getElementById('model-select');
+    const box = document.getElementById('vram-estimate');
+    const totalEl = document.getElementById('vram-total');
+    const breakdownEl = document.getElementById('vram-breakdown');
+    const caveatEl = document.getElementById('vram-caveat');
+    const ctxInput = document.getElementById('context-size-input');
+    const gpuLayersInput = document.getElementById('gpu-layers-input');
+    const cacheKSelect = document.getElementById('cache-type-k-select');
+    const cacheVSelect = document.getElementById('cache-type-v-select');
+    const ubatchInput = document.getElementById('ubatch-size-input');
+    const cpuMoeSelect = document.getElementById('cpu-moe-select');
+    const nCpuMoeInput = document.getElementById('n-cpu-moe-input');
+    if (!select || !box) return;
+
+    // Approximate bytes-per-element for llama.cpp's K/V cache quant types (block-quant
+    // overhead included). Weight size doesn't need a similar table because the model's
+    // file size on disk already reflects its quantization.
+    const CACHE_BYTES_PER_ELEM = {
+        f32: 4, f16: 2, bf16: 2,
+        q8_0: 1.0625, q5_1: 0.75, q5_0: 0.6875,
+        q4_1: 0.625, q4_0: 0.5625, iq4_nl: 0.5625
+    };
+
+    function fmtGiB(bytes) {
+        return (bytes / 1073741824).toFixed(2) + ' GiB';
+    }
+
+    function calc() {
+        const opt = select.options[select.selectedIndex];
+        const fileSize = opt ? Number(opt.dataset.filesize) : NaN;
+        const blocks = opt ? Number(opt.dataset.blocks) : NaN;
+        const heads = opt ? Number(opt.dataset.heads) : NaN;
+        const kvHeads = opt ? Number(opt.dataset.kvheads) : NaN;
+        const embed = opt ? Number(opt.dataset.embed) : NaN;
+
+        if (!opt || !opt.value || !fileSize || !blocks || !heads || !kvHeads || !embed) {
+            box.classList.add('hidden');
+            return;
+        }
+
+        const modelContext = Number(opt.dataset.context) || 4096;
+        const ctxSize = Number(ctxInput?.value) || modelContext;
+        const gpuLayersRaw = (gpuLayersInput?.value ?? '').trim();
+        const gpuLayers = gpuLayersRaw === '' ? blocks : Math.max(0, Math.min(Number(gpuLayersRaw), blocks));
+        const offloadFrac = blocks > 0 ? gpuLayers / blocks : 0;
+
+        const weightsBytes = fileSize * offloadFrac;
+
+        const kTypeBytes = CACHE_BYTES_PER_ELEM[cacheKSelect?.value] ?? CACHE_BYTES_PER_ELEM.f16;
+        const vTypeBytes = CACHE_BYTES_PER_ELEM[cacheVSelect?.value] ?? CACHE_BYTES_PER_ELEM.f16;
+        const headDim = embed / heads;
+        // Only the layers actually offloaded to GPU keep their KV cache in VRAM.
+        const kvCacheBytes = gpuLayers * kvHeads * headDim * ctxSize * (kTypeBytes + vTypeBytes);
+
+        // The compute (activation) buffer scales roughly with micro-batch size and hidden
+        // dimension; this is the least precise term (varies with backend/flash-attention/build).
+        const ubatch = Number(ubatchInput?.value) || 512;
+        const computeBufferBytes = Math.max(268435456, ubatch * embed * 4 * 4);
+
+        const totalBytes = weightsBytes + kvCacheBytes + computeBufferBytes;
+
+        breakdownEl.innerHTML =
+            `<div class="flex justify-between"><span>Weights (${gpuLayers}/${blocks} layers on GPU)</span><span>${fmtGiB(weightsBytes)}</span></div>` +
+            `<div class="flex justify-between"><span>KV cache (ctx ${ctxSize})</span><span>${fmtGiB(kvCacheBytes)}</span></div>` +
+            `<div class="flex justify-between"><span>Compute buffer &amp; overhead (rough)</span><span>${fmtGiB(computeBufferBytes)}</span></div>`;
+        totalEl.textContent = fmtGiB(totalBytes);
+
+        const notes = ['Rough estimate only — actual usage varies by llama.cpp build, backend, and flash-attention settings.'];
+        const cpuMoeOn = cpuMoeSelect?.value === 'True' || (nCpuMoeInput?.value ?? '').trim() !== '';
+        if (cpuMoeOn) notes.push('MoE CPU offload is enabled but not modeled here, so actual GPU weight usage will likely be lower.');
+        if (gpuLayersRaw === '') notes.push('GPU Layers is "auto" — assuming full offload (all layers on GPU).');
+        caveatEl.textContent = notes.join(' ');
+
+        box.classList.remove('hidden');
+    }
+
+    [select, ctxInput, gpuLayersInput, cacheKSelect, cacheVSelect, ubatchInput, cpuMoeSelect, nCpuMoeInput].forEach(el => {
+        if (!el) return;
+        el.addEventListener('input', calc);
+        el.addEventListener('change', calc);
+    });
+
+    calc();
 })();
 </script>
 
