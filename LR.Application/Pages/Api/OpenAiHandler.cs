@@ -68,6 +68,50 @@ public class OpenAiHandler : IProtocolHandler
         return new { data = models };
     }
 
+    /// <summary>
+    /// Extended model listing for clients that need to self-configure without a manual model
+    /// setup step (e.g. the Sockless LLM Router VS Code Copilot provider) — context size, output
+    /// budget, and modality/tool support per preset, none of which the plain OpenAI
+    /// <c>/v1/models</c> shape carries.
+    /// </summary>
+    public async Task<object> HandleListModelCapabilitiesAsync()
+    {
+        var presets = await _presetManager.GetAllPresetsAsync();
+        var models = _apiKeyContext.FilterAllowed(presets).Select(BuildCapabilities).ToList();
+
+        return new { data = models };
+    }
+
+    private static ModelCapabilitiesInfo BuildCapabilities(ModelPreset preset)
+    {
+        // ContextSize (-c) is what the server is actually launched with; GgufContextLength is
+        // only the model's native maximum, used as a fallback when -c wasn't set explicitly.
+        var contextLength = preset.ContextSize ?? preset.GgufContextLength ?? 4096;
+
+        // PredictN (-n) is an explicit generation cap when set and positive. Otherwise fall back
+        // to a fraction of the context window, since llama.cpp has no fixed output limit of its
+        // own and a client still needs a concrete number to budget against.
+        var maxOutputTokens = preset.PredictN is > 0
+            ? preset.PredictN.Value
+            : Math.Max(contextLength / 2, 1024);
+
+        return new ModelCapabilitiesInfo
+        {
+            Id = preset.Name,
+            Name = preset.Name,
+            ContextLength = contextLength,
+            MaxOutputTokens = maxOutputTokens,
+            // A projector must be explicitly configured (file or URL) for this preset to accept
+            // image input — MmprojAuto alone doesn't guarantee one exists for the model.
+            Vision = !string.IsNullOrEmpty(preset.Mmproj) || !string.IsNullOrEmpty(preset.MmprojUrl),
+            // Tool calling relies on llama.cpp's jinja template rendering; only an explicit
+            // Jinja=false rules it out, since null means "use llama.cpp's default".
+            ToolCalling = preset.Jinja != false,
+            ParameterSize = preset.GgufParameterSize,
+            Quantization = preset.GgufQuantizationLevel
+        };
+    }
+
     public async Task<IResult> HandleChatCompletionAsync(HttpRequest httpRequest, HttpResponse httpResponse, CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(httpRequest.Body);

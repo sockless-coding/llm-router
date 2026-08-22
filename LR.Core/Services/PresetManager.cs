@@ -70,14 +70,7 @@ public class PresetManager : IPresetManager
             return;
 
         preset.ModelPath = model.FilePath;
-        preset.GgufArchitecture = model.Architecture;
-        preset.GgufModelName = model.GgufModelName;
-        preset.GgufParameterSize = model.ParameterSize;
-        preset.GgufQuantizationLevel = model.QuantizationLevel;
-        preset.GgufContextLength = model.ContextLength;
-        preset.GgufEmbeddingLength = model.EmbeddingLength;
-        preset.GgufRopeFreqBase = model.RopeFreqBase;
-        preset.GgufChatTemplate = model.ChatTemplate;
+        PresetGgufSync.ApplyFromModel(preset, model);
     }
 
     private async Task ReadGgufMetadataAsync(ModelPreset preset, string? modelPath)
@@ -97,6 +90,13 @@ public class PresetManager : IPresetManager
         preset.GgufEmbeddingLength = metadata.EmbeddingLength;
         preset.GgufRopeFreqBase = metadata.RopeFreqBase;
         preset.GgufChatTemplate = metadata.ChatTemplate;
+
+        if (string.IsNullOrEmpty(preset.Mmproj) && string.IsNullOrEmpty(preset.MmprojUrl))
+        {
+            var detectedMmproj = MmprojLocator.FindSiblingMmproj(modelPath);
+            if (!string.IsNullOrEmpty(detectedMmproj))
+                preset.Mmproj = detectedMmproj;
+        }
 
         await _context.SaveChangesAsync();
     }

@@ -14,8 +14,8 @@ namespace LR.Core.Services;
 public class GgufMetadataReader : IGgufMetadataReader
 {
     /// <summary>
-    /// Maps GGUF file_type integer to human-readable quantization level string.
-    /// Based on llama.cpp ggml_ftype enum (https://github.com/ggerganov/llama.cpp/blob/master/include/ggml.h)
+    /// Maps GGUF general.file_type integer to human-readable quantization level string.
+    /// Based on llama.cpp's llama_ftype enum (https://github.com/ggml-org/llama.cpp/blob/master/include/llama.h)
     /// </summary>
     private static readonly Dictionary<int, string> QuantizationMap = new()
     {
@@ -23,29 +23,38 @@ public class GgufMetadataReader : IGgufMetadataReader
         { 1,  "F16" },
         { 2,  "Q4_0" },
         { 3,  "Q4_1" },
-        { 6,  "Q5_0" },
-        { 7,  "Q5_1" },
-        { 8,  "Q8_0" },
-        { 9,  "Q2_K" },
-        { 10, "Q3_K_S" },
-        { 11, "Q3_K_M" },
-        { 12, "Q3_K_L" },
-        { 13, "Q4_K_S" },
-        { 14, "Q4_K_M" },
-        { 15, "Q5_K_S" },
-        { 16, "Q5_K_M" },
-        { 17, "Q6_K" },
-        { 18, "Q8_K_S" },
-        { 19, "Q8_K_M" },
-        { 20, "IQ4_NL" },
-        { 21, "IQ3_XS" },
-        { 22, "IQ3_XXS" },
-        { 23, "IQ2_XXS" },
-        { 24, "IQ2_XS" },
-        { 25, "IQ4_XS" },
-        { 26, "IQ1_S" },
-        { 27, "IQ1_M" },
-        { 28, "BSQ3" }
+        { 7,  "Q8_0" },
+        { 8,  "Q5_0" },
+        { 9,  "Q5_1" },
+        { 10, "Q2_K" },
+        { 11, "Q3_K_S" },
+        { 12, "Q3_K_M" },
+        { 13, "Q3_K_L" },
+        { 14, "Q4_K_S" },
+        { 15, "Q4_K_M" },
+        { 16, "Q5_K_S" },
+        { 17, "Q5_K_M" },
+        { 18, "Q6_K" },
+        { 19, "IQ2_XXS" },
+        { 20, "IQ2_XS" },
+        { 21, "Q2_K_S" },
+        { 22, "IQ3_XS" },
+        { 23, "IQ3_XXS" },
+        { 24, "IQ1_S" },
+        { 25, "IQ4_NL" },
+        { 26, "IQ3_S" },
+        { 27, "IQ3_M" },
+        { 28, "IQ2_S" },
+        { 29, "IQ2_M" },
+        { 30, "IQ4_XS" },
+        { 31, "IQ1_M" },
+        { 32, "BF16" },
+        { 36, "TQ1_0" },
+        { 37, "TQ2_0" },
+        { 38, "MXFP4_MOE" },
+        { 39, "NVFP4" },
+        { 40, "Q1_0" },
+        { 41, "Q2_0" }
     };
 
     /// <summary>
@@ -118,9 +127,9 @@ public class GgufMetadataReader : IGgufMetadataReader
         metadata.Architecture = GetString(rawKvPairs, "general.architecture") ?? "llama";
         metadata.ModelName = GetString(rawKvPairs, "general.name");
 
-        // Parameter count → human-readable size
-        if (TryGetLong(rawKvPairs, "general.parameter_count", out var paramCount))
-            metadata.ParameterSize = FormatParameterSize(paramCount);
+        // GGUF has no numeric parameter-count key — general.size_label is already the
+        // pre-formatted human-readable label (e.g. "8B", "8x7B") that convert scripts write.
+        metadata.ParameterSize = GetString(rawKvPairs, "general.size_label");
 
         // File type → quantization level
         if (TryGetInt(rawKvPairs, "general.file_type", out var fileType))
@@ -175,25 +184,6 @@ public class GgufMetadataReader : IGgufMetadataReader
     }
 
     /// <summary>
-    /// Converts a parameter count (e.g. 7_000_000_000) to a human-readable string ("7B").
-    /// </summary>
-    private static string FormatParameterSize(long count)
-    {
-        if (count >= 1_000_000_000_000L)
-            return $"{count / 1_000_000_000_000L}T";
-        if (count >= 1_000_000_000L)
-        {
-            var billions = count / 1_000_000_000.0;
-            return billions == Math.Floor(billions)
-                ? $"{billions:B0}B"
-                : $"{billions:F1}B";
-        }
-        if (count >= 1_000_000L)
-            return $"{count / 1_000_000.0:F0}M";
-        return count.ToString();
-    }
-
-    /// <summary>
     /// Converts a raw GGUF value to a JSON-safe type.
     /// </summary>
     private static object? ConvertToJsonSafe(object value)
@@ -202,7 +192,9 @@ public class GgufMetadataReader : IGgufMetadataReader
         {
             bool b => b,
             int i => i,
+            uint u => u,
             long l => l,
+            ulong ul => ul,
             double d when double.IsNaN(d) || double.IsInfinity(d) => null,
             double d => d,
             string s => s,
@@ -316,19 +308,28 @@ public class GgufMetadataReader : IGgufMetadataReader
         return dict.TryGetValue(key, out var val) && val is string s ? s : null;
     }
 
+    // GGUF integer metadata is read as the raw unsigned type the value's GgufValueType calls for
+    // (UINT32 -> uint, UINT64 -> ulong via ReadUInt32/ReadUInt64) and boxed as such, not as the
+    // signed int/long C# literals default to — every case below has to be matched explicitly or
+    // the lookup silently misses (this is why general.file_type and friends used to come back null).
     private static bool TryGetInt(Dictionary<string, object> dict, string key, out int value)
     {
         if (dict.TryGetValue(key, out var val))
         {
-            if (val is int i)
+            switch (val)
             {
-                value = i;
-                return true;
-            }
-            if (val is long l && l >= int.MinValue && l <= int.MaxValue)
-            {
-                value = (int)l;
-                return true;
+                case int i:
+                    value = i;
+                    return true;
+                case uint u when u <= int.MaxValue:
+                    value = (int)u;
+                    return true;
+                case long l when l >= int.MinValue && l <= int.MaxValue:
+                    value = (int)l;
+                    return true;
+                case ulong ul when ul <= int.MaxValue:
+                    value = (int)ul;
+                    return true;
             }
         }
         value = 0;
@@ -339,15 +340,20 @@ public class GgufMetadataReader : IGgufMetadataReader
     {
         if (dict.TryGetValue(key, out var val))
         {
-            if (val is long l)
+            switch (val)
             {
-                value = l;
-                return true;
-            }
-            if (val is int i)
-            {
-                value = i;
-                return true;
+                case long l:
+                    value = l;
+                    return true;
+                case int i:
+                    value = i;
+                    return true;
+                case uint u:
+                    value = u;
+                    return true;
+                case ulong ul when ul <= long.MaxValue:
+                    value = (long)ul;
+                    return true;
             }
         }
         value = 0;
@@ -358,20 +364,26 @@ public class GgufMetadataReader : IGgufMetadataReader
     {
         if (dict.TryGetValue(key, out var val))
         {
-            if (val is double d)
+            switch (val)
             {
-                value = d;
-                return true;
-            }
-            if (val is float f)
-            {
-                value = f;
-                return true;
-            }
-            if (val is int i)
-            {
-                value = i;
-                return true;
+                case double d:
+                    value = d;
+                    return true;
+                case float f:
+                    value = f;
+                    return true;
+                case int i:
+                    value = i;
+                    return true;
+                case uint u:
+                    value = u;
+                    return true;
+                case long l:
+                    value = l;
+                    return true;
+                case ulong ul:
+                    value = ul;
+                    return true;
             }
         }
         value = 0.0;

@@ -23,7 +23,7 @@ public class GgufMetadata
 
     /// <summary>
     /// Human-readable parameter size (e.g. "7B", "13B").
-    /// Computed from general.parameter_count if available, otherwise null.
+    /// From general.size_label if present, otherwise null.
     /// </summary>
     [JsonPropertyName("parameterSize")]
     public string? ParameterSize { get; set; }

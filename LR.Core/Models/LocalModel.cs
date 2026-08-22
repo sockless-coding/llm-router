@@ -108,6 +108,15 @@ public class LocalModel
     [Column(TypeName = "TEXT")]
     public string? AllKvPairsJson { get; set; }
 
+    /// <summary>
+    /// Path to a multimodal projector (mmproj) .gguf file found next to this model's file at
+    /// scan/refresh time (see <see cref="Services.MmprojLocator"/>). Vision models are usually
+    /// converted to GGUF as two separate files — the text backbone and the projector — sitting
+    /// in the same folder, so this lets presets pick up the projector without manual wiring.
+    /// </summary>
+    [MaxLength(1024)]
+    public string? DetectedMmprojPath { get; set; }
+
     // ==================== MISC ====================
 
     [MaxLength(2048)]

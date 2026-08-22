@@ -95,6 +95,12 @@ public class ModelLibraryManager : IModelLibrary
         model.LastVerifiedAt = DateTimeOffset.UtcNow;
         model.UpdatedAt = DateTimeOffset.UtcNow;
 
+        // A model's metadata is only read here, but any preset linking to it caches its own copy
+        // (for launch-time use without a join) — keep those in sync, not just the model row.
+        var linkedPresets = await _context.ModelPresets.Where(p => p.ModelId == id).ToListAsync();
+        foreach (var preset in linkedPresets)
+            PresetGgufSync.ApplyFromModel(preset, model);
+
         await _context.SaveChangesAsync();
         return true;
     }
@@ -159,6 +165,7 @@ public class ModelLibraryManager : IModelLibrary
         model.AllKvPairsJson = metadata.AllKvPairs is not null
             ? JsonSerializer.Serialize(metadata.AllKvPairs)
             : null;
+        model.DetectedMmprojPath = MmprojLocator.FindSiblingMmproj(filePath);
 
         if (string.IsNullOrWhiteSpace(model.Name) && !string.IsNullOrWhiteSpace(metadata.ModelName))
             model.Name = metadata.ModelName!;

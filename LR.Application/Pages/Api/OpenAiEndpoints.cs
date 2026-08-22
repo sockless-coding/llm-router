@@ -33,6 +33,16 @@ public static class OpenAiEndpoints
                 return Results.Json(result);
             });
 
+        // Extended model listing with context size, output budget, and modality/tool support —
+        // lets clients (e.g. the Sockless LLM Router VS Code Copilot provider) auto-populate
+        // their model list without any manual per-model configuration.
+        group.MapGet("/v1/models/capabilities", async (
+                OpenAiHandler handler) =>
+            {
+                var result = await handler.HandleListModelCapabilitiesAsync();
+                return Results.Json(result);
+            });
+
         return app;
     }
 }
