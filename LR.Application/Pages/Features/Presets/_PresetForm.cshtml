@@ -127,7 +127,7 @@
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label asp-for="ViewModel.FlashAttention" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                    <select asp-for="ViewModel.FlashAttention" class="@selCls">
+                    <select asp-for="ViewModel.FlashAttention" id="flash-attention-select" class="@selCls">
                         <option value="">— default (auto) —</option>
                         <option value="on">on</option>
                         <option value="off">off</option>
@@ -933,6 +933,7 @@
     const ubatchInput = document.getElementById('ubatch-size-input');
     const cpuMoeSelect = document.getElementById('cpu-moe-select');
     const nCpuMoeInput = document.getElementById('n-cpu-moe-input');
+    const flashAttnSelect = document.getElementById('flash-attention-select');
     if (!select || !box) return;
 
     // Approximate bytes-per-element for llama.cpp's K/V cache quant types (block-quant
@@ -943,6 +944,7 @@
         q8_0: 1.0625, q5_1: 0.75, q5_0: 0.6875,
         q4_1: 0.625, q4_0: 0.5625, iq4_nl: 0.5625
     };
+    const QUANTIZED_CACHE_TYPES = new Set(['q8_0', 'q5_0', 'q5_1', 'q4_0', 'q4_1', 'iq4_nl']);
 
     function fmtGiB(bytes) {
         return (bytes / 1073741824).toFixed(2) + ' GiB';
@@ -975,29 +977,45 @@
         // Only the layers actually offloaded to GPU keep their KV cache in VRAM.
         const kvCacheBytes = gpuLayers * kvHeads * headDim * ctxSize * (kTypeBytes + vTypeBytes);
 
-        // The compute (activation) buffer scales roughly with micro-batch size and hidden
-        // dimension; this is the least precise term (varies with backend/flash-attention/build).
+        // The compute (activation) buffer's biggest driver is whether Flash Attention is on.
+        // Without it, llama.cpp materializes the full attention score matrix (ubatch rows x
+        // context columns x heads, in f32) in the compute graph, so it scales with context
+        // length. With it fused/streamed, the buffer stays small and roughly constant. This is
+        // the least precise term overall — it also varies with backend and llama.cpp build.
         const ubatch = Number(ubatchInput?.value) || 512;
-        const computeBufferBytes = Math.max(268435456, ubatch * embed * 4 * 4);
+        const flashAttnOff = (flashAttnSelect?.value ?? '').trim().toLowerCase() === 'off';
+        const computeBufferBytes = flashAttnOff
+            ? Math.max(268435456, ubatch * ctxSize * heads * 4)
+            : Math.max(268435456, ubatch * embed * 4 * 4);
 
         const totalBytes = weightsBytes + kvCacheBytes + computeBufferBytes;
 
         breakdownEl.innerHTML =
             `<div class="flex justify-between"><span>Weights (${gpuLayers}/${blocks} layers on GPU)</span><span>${fmtGiB(weightsBytes)}</span></div>` +
             `<div class="flex justify-between"><span>KV cache (ctx ${ctxSize})</span><span>${fmtGiB(kvCacheBytes)}</span></div>` +
-            `<div class="flex justify-between"><span>Compute buffer &amp; overhead (rough)</span><span>${fmtGiB(computeBufferBytes)}</span></div>`;
+            `<div class="flex justify-between"><span>Compute buffer &amp; overhead (rough${flashAttnOff ? ', flash-attn off' : ''})</span><span>${fmtGiB(computeBufferBytes)}</span></div>`;
         totalEl.textContent = fmtGiB(totalBytes);
 
-        const notes = ['Rough estimate only — actual usage varies by llama.cpp build, backend, and flash-attention settings.'];
+        const notes = ['Rough estimate only — actual usage varies by llama.cpp build and backend.'];
         const cpuMoeOn = cpuMoeSelect?.value === 'True' || (nCpuMoeInput?.value ?? '').trim() !== '';
         if (cpuMoeOn) notes.push('MoE CPU offload is enabled but not modeled here, so actual GPU weight usage will likely be lower.');
         if (gpuLayersRaw === '') notes.push('GPU Layers is "auto" — assuming full offload (all layers on GPU).');
+        if (flashAttnOff) {
+            notes.push('Flash Attention is off, so the compute buffer grows with context length instead of staying roughly constant — enabling it usually cuts this a lot at long contexts.');
+        } else {
+            notes.push('Assumes Flash Attention is effectively on (kept small); if it ends up disabled at runtime for this backend/model, the compute buffer can grow with context instead.');
+        }
+        const kQuantized = QUANTIZED_CACHE_TYPES.has(cacheKSelect?.value);
+        const vQuantized = QUANTIZED_CACHE_TYPES.has(cacheVSelect?.value);
+        if (flashAttnOff && (kQuantized || vQuantized)) {
+            notes.push('Quantized K/V cache types normally require Flash Attention to be on in llama.cpp — this combination may fail to load.');
+        }
         caveatEl.textContent = notes.join(' ');
 
         box.classList.remove('hidden');
     }
 
-    [select, ctxInput, gpuLayersInput, cacheKSelect, cacheVSelect, ubatchInput, cpuMoeSelect, nCpuMoeInput].forEach(el => {
+    [select, ctxInput, gpuLayersInput, cacheKSelect, cacheVSelect, ubatchInput, cpuMoeSelect, nCpuMoeInput, flashAttnSelect].forEach(el => {
         if (!el) return;
         el.addEventListener('input', calc);
         el.addEventListener('change', calc);
