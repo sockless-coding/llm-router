@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Models.OpenAI;
+using LR.Core.Services;
 
 namespace LR.Application.Pages.Api;
 
@@ -26,6 +27,7 @@ public class OpenAiHandler : IProtocolHandler
     private readonly IRoutingEngine _routingEngine;
     private readonly IRequestQueueService _queue;
     private readonly IStatisticsService _statisticsService;
+    private readonly IChatTemplateVariableExtractor _templateVariableExtractor;
     private readonly IApiRequestLogger _requestLogger;
     private readonly GatewaySettings _gatewaySettings;
     private readonly IApiKeyRequestContext _apiKeyContext;
@@ -40,6 +42,7 @@ public class OpenAiHandler : IProtocolHandler
         IRoutingEngine routingEngine,
         IRequestQueueService queue,
         IStatisticsService statisticsService,
+        IChatTemplateVariableExtractor templateVariableExtractor,
         IApiRequestLogger requestLogger,
         GatewaySettings gatewaySettings,
         IApiKeyRequestContext apiKeyContext)
@@ -50,6 +53,7 @@ public class OpenAiHandler : IProtocolHandler
         _routingEngine = routingEngine;
         _queue = queue;
         _statisticsService = statisticsService;
+        _templateVariableExtractor = templateVariableExtractor;
         _requestLogger = requestLogger;
         _gatewaySettings = gatewaySettings;
         _apiKeyContext = apiKeyContext;
@@ -82,7 +86,7 @@ public class OpenAiHandler : IProtocolHandler
         return new { data = models };
     }
 
-    private static ModelCapabilitiesInfo BuildCapabilities(ModelPreset preset)
+    private ModelCapabilitiesInfo BuildCapabilities(ModelPreset preset)
     {
         // ContextSize (-c) is what the server is actually launched with; GgufContextLength is
         // only the model's native maximum, used as a fallback when -c wasn't set explicitly.
@@ -108,7 +112,10 @@ public class OpenAiHandler : IProtocolHandler
             // Jinja=false rules it out, since null means "use llama.cpp's default".
             ToolCalling = preset.Jinja != false,
             ParameterSize = preset.GgufParameterSize,
-            Quantization = preset.GgufQuantizationLevel
+            Quantization = preset.GgufQuantizationLevel,
+            SupportsReasoningEffort = ReasoningCapabilityDetector.SupportsReasoningEffort(preset.GgufChatTemplate, _templateVariableExtractor),
+            ReasoningEffort = preset.ReasoningEffort,
+            ReasoningEffortOptions = ReasoningCapabilityDetector.GetReasoningEffortOptions(preset.GgufChatTemplate, _templateVariableExtractor)
         };
     }
 

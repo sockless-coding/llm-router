@@ -40,4 +40,29 @@ public class ModelCapabilitiesInfo
 
     [JsonPropertyName("quantization")]
     public string? Quantization { get; set; }
+
+    /// <summary>
+    /// Whether this preset's chat template reads a reasoning-effort-style variable (e.g.
+    /// "reasoning_effort", "thinking_budget"), meaning a client can steer reasoning depth
+    /// per-request via the <c>reasoning_effort</c> field on chat completions.
+    /// </summary>
+    [JsonPropertyName("supports_reasoning_effort")]
+    public bool SupportsReasoningEffort { get; set; }
+
+    /// <summary>
+    /// The reasoning effort this preset is launched with by default (its <c>--reasoning-effort</c>
+    /// server arg), if configured. A client-supplied <c>reasoning_effort</c> on a request
+    /// overrides this for that request only.
+    /// </summary>
+    [JsonPropertyName("reasoning_effort")]
+    public string? ReasoningEffort { get; set; }
+
+    /// <summary>
+    /// The discrete effort levels the chat template itself checks for (e.g. "low", "medium",
+    /// "high", "xhigh"), heuristically extracted from the template's own comparisons/defaults.
+    /// Empty when <see cref="SupportsReasoningEffort"/> is false, or when it's true but the
+    /// template doesn't gate on a fixed set of values a client can pick from.
+    /// </summary>
+    [JsonPropertyName("reasoning_effort_options")]
+    public IReadOnlyList<string> ReasoningEffortOptions { get; set; } = [];
 }

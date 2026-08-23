@@ -644,7 +644,8 @@ public class ResponsesHandler
             ParallelToolCalls = request.ParallelToolCalls,
             ToolChoice = request.ToolChoice,
             Tools = request.Tools?.Select(t => t.ToChatTool()).ToList(),
-            ResponseFormat = request.Text?.Format
+            ResponseFormat = request.Text?.Format,
+            ReasoningEffort = request.Reasoning?.Effort
         };
 
         // llama.cpp (like OpenAI) only includes token usage in the SSE stream when

@@ -76,4 +76,14 @@ public class CreateMessageRequest
     /// </summary>
     [JsonPropertyName("stop_sequences")]
     public string[]? StopSequences { get; set; }
+
+    /// <summary>
+    /// Extended thinking configuration. Preserved as raw JSON and forwarded as-is to the
+    /// backend's own Anthropic-compatible /v1/messages endpoint (this handler sends the whole
+    /// request through unchanged rather than translating to Chat Completions — see
+    /// <c>ClaudeHandler.BuildRouteRequest</c>) — the router doesn't need to interpret
+    /// budget_tokens itself, only avoid dropping it.
+    /// </summary>
+    [JsonPropertyName("thinking")]
+    public JsonElement? Thinking { get; set; }
 }

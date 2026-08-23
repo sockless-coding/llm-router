@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace LR.Core.Models.Ollama;
@@ -69,5 +70,14 @@ public class GenerateRequest
     /// </summary>
     [JsonPropertyName("keep_alive")]
     public string? KeepAlive { get; set; }
+
+    /// <summary>
+    /// Ollama's reasoning toggle: a bool (thinking on/off, no discrete magnitude) or a string
+    /// level ("low"/"medium"/"high") for models with graduated reasoning effort. Kept as raw
+    /// JSON since which shape a client sends varies; only the string form maps onto a
+    /// reasoning_effort value the backend chat template understands.
+    /// </summary>
+    [JsonPropertyName("think")]
+    public JsonElement? Think { get; set; }
 }
 

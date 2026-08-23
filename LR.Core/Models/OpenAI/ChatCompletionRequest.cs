@@ -189,6 +189,16 @@ public class ChatCompletionRequest
     /// <summary>Penalizes tokens that have already appeared, to reduce repetition.</summary>
     [JsonPropertyName("repeat_penalty")]
     public float? RepeatPenalty { get; set; }
+
+    /// <summary>
+    /// Per-request override for reasoning depth (e.g. "low", "medium", "high"), forwarded
+    /// straight through to the backend as a chat-template kwarg. Only takes effect on presets
+    /// whose chat template reads a reasoning-effort-style variable — see
+    /// <c>ModelCapabilitiesInfo.SupportsReasoningEffort</c>. Overrides the preset's own
+    /// <c>--reasoning-effort</c> launch default for this request only.
+    /// </summary>
+    [JsonPropertyName("reasoning_effort")]
+    public string? ReasoningEffort { get; set; }
 }
 
 /// <summary>

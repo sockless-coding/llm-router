@@ -8,6 +8,7 @@ using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Models.Ollama;
 using LR.Core.Models.OpenAI;
+using LR.Core.Services;
 
 namespace LR.Application.Pages.Api;
 
@@ -70,7 +71,7 @@ public class OllamaHandler : IProtocolHandler
                 capabilities.Add("vision");
             if (SupportsTools(p.GgufChatTemplate))
                 capabilities.Add("tools");
-            if (SupportsThinking(p.Reasoning, p.GgufChatTemplate, _templateVariableExtractor))
+            if (ReasoningCapabilityDetector.SupportsThinking(p.Reasoning, p.GgufChatTemplate, _templateVariableExtractor))
                 capabilities.Add("thinking");
 
             long modelSize = 0L;
@@ -171,7 +172,7 @@ public class OllamaHandler : IProtocolHandler
             capabilities.Add("vision");
         if (SupportsTools(template))
             capabilities.Add("tools");
-        if (SupportsThinking(preset.Reasoning, template, _templateVariableExtractor))
+        if (ReasoningCapabilityDetector.SupportsThinking(preset.Reasoning, template, _templateVariableExtractor))
             capabilities.Add("thinking");
 
         return new ShowResponse
@@ -208,33 +209,6 @@ public class OllamaHandler : IProtocolHandler
     /// </summary>
     private static bool SupportsTools(string? chatTemplate) =>
         !string.IsNullOrEmpty(chatTemplate) && chatTemplate.Contains("tools", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Free variable names that, when a chat template reads them, signal a reasoning/thinking
-    /// toggle the template exposes via --chat-template-kwargs.
-    /// </summary>
-    private static readonly HashSet<string> ReasoningSignalVariables = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "enable_thinking", "thinking", "reasoning_effort", "thinking_budget"
-    };
-
-    /// <summary>
-    /// "thinking" capability: the preset has reasoning explicitly enabled, or the chat template
-    /// itself emits a thinking block (e.g. "&lt;think&gt;") or references a known reasoning-toggle
-    /// variable (e.g. "enable_thinking", "reasoning_effort") detected via
-    /// <see cref="IChatTemplateVariableExtractor"/>.
-    /// </summary>
-    private static bool SupportsThinking(string? reasoning, string? chatTemplate, IChatTemplateVariableExtractor templateVariableExtractor)
-    {
-        if (!string.IsNullOrEmpty(reasoning) && !reasoning.Equals("off", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (!string.IsNullOrEmpty(chatTemplate) && chatTemplate.Contains("<think>", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        return templateVariableExtractor.Extract(chatTemplate).Any(v => ReasoningSignalVariables.Contains(v.Name));
-    }
-
 
     public async Task<IResult> HandleChatCompletionAsync(HttpRequest httpRequest, HttpResponse httpResponse, CancellationToken cancellationToken)
     {
@@ -662,7 +636,8 @@ public class OllamaHandler : IProtocolHandler
             MaxTokens = ollamaRequest.Options?.NumPredict,
             Stop = ollamaRequest.Options?.Stop,
             Messages = ConvertOllamaMessages(ollamaRequest.Messages),
-            Tools = ollamaRequest.Tools
+            Tools = ollamaRequest.Tools,
+            ReasoningEffort = ExtractThinkEffort(ollamaRequest.Think)
         };
 
         // llama.cpp (like OpenAI) only includes token usage in the SSE stream when
@@ -681,6 +656,14 @@ public class OllamaHandler : IProtocolHandler
             Payload = JsonSerializer.Serialize(openAiRequest, new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull })
         };
     }
+
+    /// <summary>
+    /// Extracts a reasoning_effort value from Ollama's "think" field when the client sent it as
+    /// a string level (e.g. "low"/"medium"/"high"). A bare bool carries no discrete magnitude to
+    /// forward, so it's left for the preset's own launch-time reasoning defaults to handle.
+    /// </summary>
+    private static string? ExtractThinkEffort(JsonElement? think) =>
+        think is { ValueKind: JsonValueKind.String } value ? value.GetString() : null;
 
     /// <summary>
     /// Converts Ollama-protocol messages to OpenAI-compatible messages, preserving tool calls
@@ -809,7 +792,8 @@ public class OllamaHandler : IProtocolHandler
             Seed = generateRequest.Options?.Seed,
             MaxTokens = generateRequest.Options?.NumPredict,
             Stop = generateRequest.Options?.Stop,
-            Messages = messages
+            Messages = messages,
+            ReasoningEffort = ExtractThinkEffort(generateRequest.Think)
         };
 
         // llama.cpp (like OpenAI) only includes token usage in the SSE stream when
