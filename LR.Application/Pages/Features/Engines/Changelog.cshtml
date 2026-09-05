@@ -1,0 +1,92 @@
+@page
+@using LR.Core.Models
+@model LR.Application.Pages.Features.Engines.EngineChangelogModel
+@{
+    ViewData["Title"] = "Changelog";
+    var b = Model.Build!;
+    var s = Model.Status!;
+}
+
+<form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+<div class="flex items-center gap-3 mb-6">
+    <a href="/Features/Engines/Index" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
+    <span class="text-text-secondary">/</span>
+    <p class="text-text-primary text-sm font-medium">@b.Name — changelog</p>
+</div>
+
+@if (s.Error is not null)
+{
+    <div class="bg-red-500/10 border border-red-500/30 text-neon-red rounded-lg px-4 py-3 text-sm">@s.Error</div>
+}
+else
+{
+    <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 mb-6 text-sm">
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <span class="text-text-secondary">Installed: <span class="text-text-primary font-mono">@s.InstalledRef</span></span>
+            <span class="text-text-secondary">Latest: <span class="text-text-primary font-mono">@s.LatestTag</span></span>
+            @if (s.UpdateAvailable)
+            {
+                <span class="text-xs px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">@s.BehindBy commits behind</span>
+            }
+            else
+            {
+                <span class="text-xs px-2 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20">Up to date</span>
+            }
+            @if (s.CompareUrl is not null)
+            {
+                <a href="@s.CompareUrl" target="_blank" rel="noopener" class="text-neon-cyan hover:underline text-xs">Full compare on GitHub →</a>
+            }
+        </div>
+        @if (s.UpdateAvailable && b.Source == EngineBuildSource.OfficialRelease)
+        {
+            <div class="mt-3">
+                <button type="button" onclick="installLatest('@b.BackendType')" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">
+                    Install @s.LatestTag (@b.BackendType)
+                </button>
+            </div>
+        }
+    </div>
+
+    @if (s.Commits.Any())
+    {
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 divide-y divide-gray-700/30">
+            @foreach (var c in s.Commits)
+            {
+                <div class="px-4 py-2.5 text-sm flex items-start gap-3">
+                    <a href="@c.CommitUrl" target="_blank" rel="noopener" class="text-text-secondary font-mono text-xs mt-0.5 hover:text-neon-cyan">@c.ShortSha</a>
+                    <div class="min-w-0">
+                        <span class="text-text-primary">@c.Summary</span>
+                        <div class="text-xs text-text-secondary mt-0.5">
+                            @c.Author
+                            @if (c.Date is not null) { <span> · @c.Date.Value.ToString("yyyy-MM-dd")</span> }
+                            @if (c.PullRequestUrl is not null)
+                            {
+                                <a href="@c.PullRequestUrl" target="_blank" rel="noopener" class="text-neon-magenta hover:underline ml-1">#@c.PullRequestNumber</a>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@section Scripts {
+    <script>
+        (function () {
+            const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+            window.installLatest = async function (backend) {
+                if (!confirm(`Install the latest ${backend} release?`)) return;
+                const formData = new FormData();
+                formData.append('Command', 'installRelease');
+                formData.append('Backend', backend);
+                formData.append('__RequestVerificationToken', token());
+                const resp = await fetch('/Features/Engines/Actions', { method: 'POST', body: formData });
+                const result = await resp.json();
+                if (result.success) location.href = '/Features/Engines/Detail?id=' + result.buildId;
+                else alert(result.message || 'Could not start install.');
+            };
+        })();
+    </script>
+}

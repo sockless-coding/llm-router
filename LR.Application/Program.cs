@@ -93,6 +93,24 @@ builder.Services.AddHttpClient<IHuggingFaceClient, HuggingFaceClient>(client =>
 builder.Services.AddSingleton<IModelDownloadProgressPublisher, ModelDownloadProgressPublisher>();
 builder.Services.AddSingleton<ModelDownloadService>();
 
+// --- Engine builds (managed llama.cpp releases + compile recipes) ---
+// Builds root / GitHub token are UI-controlled settings persisted to a single-row table, same as
+// the model library. GitHubReleaseClient is a typed HttpClient with an infinite timeout so large
+// asset downloads are bounded only by the caller's CancellationToken (see EngineBuildService).
+builder.Services.AddSingleton<IEngineBuildSettingsService, EngineBuildSettingsService>();
+builder.Services.AddHttpClient<IGitHubClient, GitHubReleaseClient>(client =>
+{
+    client.Timeout = Timeout.InfiniteTimeSpan;
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = true,
+    AutomaticDecompression = DecompressionMethods.GZip,
+});
+builder.Services.AddScoped<IEngineBuildManager, EngineBuildManager>();
+builder.Services.AddSingleton<IEngineBuildProgressPublisher, EngineBuildProgressPublisher>();
+builder.Services.AddSingleton<EngineBuildService>();
+builder.Services.AddScoped<LR.Application.Services.EngineBuildReconciliationService>();
+
 // Boot-time reconciliation for presets whose model file isn't in the registry yet
 // (Scoped — needs DbContext; invoked explicitly below, not a BackgroundService).
 builder.Services.AddScoped<ModelLibraryReconciliationService>();
@@ -199,6 +217,13 @@ using (var scope = app.Services.CreateScope())
     await modelReconciliation.ReconcileAsync();
 }
 
+// Seed the built-in compile recipes and flag any managed build whose folder has gone missing.
+using (var scope = app.Services.CreateScope())
+{
+    var engineReconciliation = scope.ServiceProvider.GetRequiredService<LR.Application.Services.EngineBuildReconciliationService>();
+    await engineReconciliation.ReconcileAsync();
+}
+
 // When the routing API has its own port, keep the two surfaces strictly separated: the admin
 // port never serves routing/protocol traffic, and the routing port serves nothing else (so
 // exposing it externally doesn't also expose the dashboard, SignalR hubs, or stats API). This
@@ -228,6 +253,9 @@ app.MapHub<LR.Application.Hubs.ServerHub>("/serverHub");
 
 // SignalR hub for model download progress
 app.MapHub<LR.Application.Hubs.ModelDownloadHub>("/modelDownloadHub");
+
+// SignalR hub for engine build (download/compile) progress
+app.MapHub<LR.Application.Hubs.EngineBuildHub>("/engineBuildHub");
 
 // SignalR hub for live inference statistics
 app.MapHub<LR.Application.Hubs.StatsHub>("/statsHub");

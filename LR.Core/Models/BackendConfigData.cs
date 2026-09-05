@@ -22,4 +22,10 @@ public class BackendConfigData
     /// For example, "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" intel64 for SYCL backends on Windows.
     /// </summary>
     public string? EnvironmentSetupCommand { get; set; }
+
+    /// <summary>
+    /// Optional link to a managed <see cref="LlamaCppBuild"/>. When set, the executable folder is
+    /// resolved from that build and <see cref="LlamaCppExecutableFolderPath"/> is only a fallback.
+    /// </summary>
+    public Guid? EngineBuildId { get; set; }
 }

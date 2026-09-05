@@ -13,6 +13,8 @@ public class EditModel : PageModel
     private readonly IServerManager _serverManager;
     private readonly LRDbContext _context;
 
+    public List<LlamaCppBuild> AvailableBuilds { get; set; } = new();
+
     /// <summary>
     /// Bound from the query string (e.g., ?Id=...). SupportsGet enables binding on GET requests.
     /// </summary>
@@ -42,6 +44,12 @@ public class EditModel : PageModel
         ViewModel.LlamaCppExecutableFolderPath = Server.Config?.LlamaCppExecutableFolderPath ?? string.Empty;
         ViewModel.CompanionAppPath = Server.Config?.CompanionAppPath ?? string.Empty;
         ViewModel.EnvironmentSetupCommand = Server.Config?.EnvironmentSetupCommand ?? string.Empty;
+        ViewModel.EngineBuildId = Server.Config?.EngineBuildId;
+
+        AvailableBuilds = await _context.LlamaCppBuilds
+            .Where(b => b.Status == EngineBuildStatus.Ready)
+            .OrderByDescending(b => b.CreatedAt)
+            .ToListAsync();
 
         // Get the start command for display
         ViewModel.StartCommand = await _serverManager.GetStartCommandAsync(Id);
@@ -51,6 +59,11 @@ public class EditModel : PageModel
 
     public async Task<IActionResult> OnPostAsync()
     {
+        AvailableBuilds = await _context.LlamaCppBuilds
+            .Where(b => b.Status == EngineBuildStatus.Ready)
+            .OrderByDescending(b => b.CreatedAt)
+            .ToListAsync();
+
         if (!ModelState.IsValid)
             return Page();
 
@@ -61,21 +74,28 @@ public class EditModel : PageModel
         if (Server is null)
             return NotFound();
 
-        // Validate llama.cpp folder path exists
-        if (Server.Engine == ServerEngine.LlamaCpp && !string.IsNullOrWhiteSpace(ViewModel.LlamaCppExecutableFolderPath))
+        var boundBuild = ViewModel.EngineBuildId is { } bid
+            ? await _context.LlamaCppBuilds.FindAsync(bid)
+            : null;
+
+        // A managed build supplies the folder path; only validate a manually-entered one.
+        if (boundBuild is null
+            && Server.Engine == ServerEngine.LlamaCpp
+            && !string.IsNullOrWhiteSpace(ViewModel.LlamaCppExecutableFolderPath)
+            && !Directory.Exists(ViewModel.LlamaCppExecutableFolderPath))
         {
-            if (!Directory.Exists(ViewModel.LlamaCppExecutableFolderPath))
-            {
-                ModelState.AddModelError(nameof(ViewModel.LlamaCppExecutableFolderPath), $"The folder '{ViewModel.LlamaCppExecutableFolderPath}' does not exist.");
-                return Page();
-            }
+            ModelState.AddModelError(nameof(ViewModel.LlamaCppExecutableFolderPath), $"The folder '{ViewModel.LlamaCppExecutableFolderPath}' does not exist.");
+            return Page();
         }
 
         var configData = new BackendConfigData
         {
-            LlamaCppExecutableFolderPath = string.IsNullOrWhiteSpace(ViewModel.LlamaCppExecutableFolderPath) ? null : ViewModel.LlamaCppExecutableFolderPath,
+            LlamaCppExecutableFolderPath = boundBuild is not null
+                ? boundBuild.InstallPath
+                : string.IsNullOrWhiteSpace(ViewModel.LlamaCppExecutableFolderPath) ? null : ViewModel.LlamaCppExecutableFolderPath,
             CompanionAppPath = string.IsNullOrWhiteSpace(ViewModel.CompanionAppPath) ? null : ViewModel.CompanionAppPath,
             EnvironmentSetupCommand = string.IsNullOrWhiteSpace(ViewModel.EnvironmentSetupCommand) ? null : ViewModel.EnvironmentSetupCommand,
+            EngineBuildId = boundBuild?.Id,
         };
 
         await _serverManager.UpdateBackendConfigAsync(Id, configData);
@@ -95,4 +115,7 @@ public class EditViewModel
     public string? CompanionAppPath { get; set; }
     public string? EnvironmentSetupCommand { get; set; }
     public string? StartCommand { get; set; }
+
+    /// <summary>Optional managed build to bind this server to (auto-fills the folder path).</summary>
+    public Guid? EngineBuildId { get; set; }
 }

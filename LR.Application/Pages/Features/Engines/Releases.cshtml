@@ -1,0 +1,81 @@
+@page
+@using LR.Core.Models
+@model LR.Application.Pages.Features.Engines.EngineReleasesModel
+@{
+    ViewData["Title"] = "Install a release";
+}
+
+<form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+<div class="flex items-center gap-3 mb-6">
+    <a href="/Features/Engines/Index" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
+    <span class="text-text-secondary">/</span>
+    <p class="text-text-secondary text-sm">Prebuilt llama.cpp releases for <span class="text-text-primary font-mono">@Model.HostOs-@Model.HostArch</span></p>
+</div>
+
+@if (!Model.RootConfigured)
+{
+    <div class="bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 rounded-lg px-4 py-3 text-sm mb-6">
+        Set a builds root folder in <a href="/Features/Engines/Index" class="underline">Engine Build Settings</a> before installing.
+    </div>
+}
+
+@if (Model.LoadError is not null)
+{
+    <div class="bg-red-500/10 border border-red-500/30 text-neon-red rounded-lg px-4 py-3 text-sm mb-6">@Model.LoadError</div>
+}
+
+<div class="space-y-4">
+    @foreach (var release in Model.Releases)
+    {
+        var backends = Model.AvailableBackends(release).ToList();
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4">
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <a href="@release.HtmlUrl" target="_blank" rel="noopener" class="text-text-primary font-semibold hover:text-neon-cyan transition-colors">@(release.Name ?? release.TagName)</a>
+                    <span class="text-xs text-text-secondary ml-2 font-mono">@release.TagName</span>
+                    @if (release.PublishedAt is not null)
+                    {
+                        <span class="text-xs text-text-secondary ml-2">@release.PublishedAt.Value.ToString("yyyy-MM-dd")</span>
+                    }
+                </div>
+            </div>
+            @if (backends.Count == 0)
+            {
+                <p class="text-xs text-text-secondary">No prebuilt archive for @Model.HostOs-@Model.HostArch in this release.</p>
+            }
+            else
+            {
+                <div class="flex flex-wrap items-center gap-2">
+                    @foreach (var backend in backends)
+                    {
+                        <button type="button" onclick="installRelease('@backend', '@release.TagName')"
+                                class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">
+                            Install @backend
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@section Scripts {
+    <script>
+        (function () {
+            const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+            window.installRelease = async function (backend, tag) {
+                if (!confirm(`Install the ${backend} build from ${tag}?`)) return;
+                const formData = new FormData();
+                formData.append('Command', 'installRelease');
+                formData.append('Backend', backend);
+                formData.append('ReleaseTag', tag);
+                formData.append('__RequestVerificationToken', token());
+                const resp = await fetch('/Features/Engines/Actions', { method: 'POST', body: formData });
+                const result = await resp.json();
+                if (result.success) location.href = '/Features/Engines/Detail?id=' + result.buildId;
+                else alert(result.message || 'Could not start install.');
+            };
+        })();
+    </script>
+}

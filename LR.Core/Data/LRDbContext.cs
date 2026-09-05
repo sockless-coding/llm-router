@@ -20,6 +20,9 @@ public class LRDbContext : DbContext
     public DbSet<Models.ModelLibrarySettings> ModelLibrarySettings => Set<Models.ModelLibrarySettings>();
     public DbSet<Models.ApiKey> ApiKeys => Set<Models.ApiKey>();
     public DbSet<Models.ApiKeyModelPreset> ApiKeyModelPresets => Set<Models.ApiKeyModelPreset>();
+    public DbSet<Models.LlamaCppBuild> LlamaCppBuilds => Set<Models.LlamaCppBuild>();
+    public DbSet<Models.LlamaCppBuildRecipe> LlamaCppBuildRecipes => Set<Models.LlamaCppBuildRecipe>();
+    public DbSet<Models.EngineBuildSettings> EngineBuildSettings => Set<Models.EngineBuildSettings>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -71,6 +74,42 @@ public class LRDbContext : DbContext
             entity.Property(e => e.ExtraSettings).HasConversion(
                 v => System.Text.Json.JsonSerializer.Serialize(v),
                 v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v) ?? new Dictionary<string, string>());
+
+            // Optional link to a managed engine build — deleting the build just clears the link,
+            // the server keeps working off its manual folder path (or falls back to none).
+            entity.HasOne(c => c.EngineBuild)
+                .WithMany()
+                .HasForeignKey(c => c.EngineBuildId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Engine build registry configurations
+        var stringListConverter = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<string>, string>(
+            v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+            v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<string>());
+
+        modelBuilder.Entity<Models.LlamaCppBuild>(entity =>
+        {
+            entity.ToTable("LlamaCppBuilds");
+            entity.HasIndex(e => e.InstallPath).IsUnique();
+
+            // A deleted recipe leaves its builds in place, just unlinked.
+            entity.HasOne(b => b.Recipe)
+                .WithMany()
+                .HasForeignKey(b => b.RecipeId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<Models.LlamaCppBuildRecipe>(entity =>
+        {
+            entity.ToTable("LlamaCppBuildRecipes");
+            entity.Property(e => e.CMakeArgs).HasConversion(stringListConverter);
+            entity.Property(e => e.ExtraArtifactGlobs).HasConversion(stringListConverter);
+        });
+
+        modelBuilder.Entity<Models.EngineBuildSettings>(entity =>
+        {
+            entity.ToTable("EngineBuildSettings");
         });
 
         // ModelPreset configurations

@@ -52,6 +52,7 @@ public class ServerManager : IServerManager
                 LlamaCppExecutableFolderPath = configData.LlamaCppExecutableFolderPath,
                 CompanionAppPath = configData.CompanionAppPath,
                 EnvironmentSetupCommand = configData.EnvironmentSetupCommand,
+                EngineBuildId = configData.EngineBuildId,
             };
         }
 
@@ -63,7 +64,7 @@ public class ServerManager : IServerManager
         if (provider is not null)
         {
             // Configure the provider with backend-specific settings
-            provider.Configure(configData);
+            provider.Configure(instance.Config is not null ? await ResolveConfigDataAsync(instance.Config) : configData);
 
             // Set server instance reference so provider can log to DB and detect crashes
             provider.SetServerInstance(instance);
@@ -103,13 +104,7 @@ public class ServerManager : IServerManager
         // in case it was updated while the server was stopped
         if (instance.Config is not null)
         {
-            var configData = new BackendConfigData
-            {
-                LlamaCppExecutableFolderPath = instance.Config.LlamaCppExecutableFolderPath,
-                CompanionAppPath = instance.Config.CompanionAppPath,
-                EnvironmentSetupCommand = instance.Config.EnvironmentSetupCommand,
-            };
-            provider.Configure(configData);
+            provider.Configure(await ResolveConfigDataAsync(instance.Config));
         }
 
         ModelPreset? preset = null;
@@ -385,9 +380,35 @@ public class ServerManager : IServerManager
         config.LlamaCppExecutableFolderPath = configData.LlamaCppExecutableFolderPath;
         config.CompanionAppPath = configData.CompanionAppPath;
         config.EnvironmentSetupCommand = configData.EnvironmentSetupCommand;
+        config.EngineBuildId = configData.EngineBuildId;
 
         await _context.SaveChangesAsync();
         return config;
+    }
+
+    /// <summary>
+    /// Turns a persisted <see cref="BackendConfig"/> into the DTO the provider is configured with,
+    /// resolving <see cref="BackendConfig.EngineBuildId"/> to the managed build's install folder
+    /// (falling back to the manually-entered folder path when no build is bound or it's not ready).
+    /// </summary>
+    private async Task<BackendConfigData> ResolveConfigDataAsync(BackendConfig config)
+    {
+        var folderPath = config.LlamaCppExecutableFolderPath;
+
+        if (config.EngineBuildId is { } buildId)
+        {
+            var build = await _context.LlamaCppBuilds.FindAsync(buildId);
+            if (build is { Status: Models.EngineBuildStatus.Ready } && !string.IsNullOrWhiteSpace(build.InstallPath))
+                folderPath = build.InstallPath;
+        }
+
+        return new BackendConfigData
+        {
+            LlamaCppExecutableFolderPath = folderPath,
+            CompanionAppPath = config.CompanionAppPath,
+            EnvironmentSetupCommand = config.EnvironmentSetupCommand,
+            EngineBuildId = config.EngineBuildId,
+        };
     }
 
     public async Task RemoveInstanceAsync(Guid instanceId, CancellationToken cancellationToken = default)
@@ -417,13 +438,7 @@ public class ServerManager : IServerManager
         var provider = GetOrCreateProvider(instance);
         if (instance.Config is not null)
         {
-            var configData = new BackendConfigData
-            {
-                LlamaCppExecutableFolderPath = instance.Config.LlamaCppExecutableFolderPath,
-                CompanionAppPath = instance.Config.CompanionAppPath,
-                EnvironmentSetupCommand = instance.Config.EnvironmentSetupCommand,
-            };
-            provider.Configure(configData);
+            provider.Configure(await ResolveConfigDataAsync(instance.Config));
         }
 
         // Get active preset

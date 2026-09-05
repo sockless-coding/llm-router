@@ -1,0 +1,227 @@
+@page
+@using LR.Core.Models
+@model LR.Application.Pages.Features.Engines.EnginesIndexModel
+@{
+    ViewData["Title"] = "Engines";
+}
+
+@functions {
+    string FormatSize(long? bytes)
+    {
+        if (bytes is null) return "—";
+        double gb = bytes.Value / 1024.0 / 1024.0 / 1024.0;
+        return gb >= 1 ? $"{gb:F1} GB" : $"{bytes.Value / 1024.0 / 1024.0:F0} MB";
+    }
+
+    string BackendBadge(BackendType b) => b switch
+    {
+        BackendType.Cuda => "bg-neon-green/10 text-neon-green border-neon-green/20",
+        BackendType.Vulkan => "bg-neon-magenta/10 text-neon-magenta border-neon-magenta/20",
+        BackendType.Sycl => "bg-neon-cyan/10 text-neon-cyan border-neon-cyan/20",
+        _ => "bg-gray-700/30 text-text-secondary border-gray-600/20",
+    };
+}
+
+<form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+<div class="flex items-center justify-between mb-6">
+    <p class="text-text-secondary">Install official llama.cpp releases or compile your own from source, and track what version each backend folder holds.</p>
+    <div class="flex items-center gap-2">
+        <a href="/Features/Engines/Releases" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+            Install a release
+        </a>
+    </div>
+</div>
+
+<details class="bg-cyber-card rounded-xl border border-gray-600/20 group mb-6" @(string.IsNullOrEmpty(Model.BuildsRootFolder) ? "open" : "")>
+    <summary class="cursor-pointer px-6 py-4 text-base font-semibold text-text-primary hover:text-neon-cyan transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+        <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+        Engine Build Settings
+    </summary>
+    <div class="px-6 pb-6 space-y-4">
+        @if (!string.IsNullOrEmpty(Model.StatusMessage))
+        {
+            <div class="text-sm text-neon-green">@Model.StatusMessage</div>
+        }
+        <form method="post" asp-page-handler="SaveSettings" hx-boost="false" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            @Html.AntiForgeryToken()
+            <div>
+                <label asp-for="BuildsRootFolder" class="block text-sm font-medium text-text-secondary mb-1">Builds Root Folder</label>
+                <input asp-for="BuildsRootFolder" placeholder="C:\llama-builds" class="w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all" />
+                <p class="text-xs text-text-secondary mt-1">Each build gets its own versioned subfolder here; the shared git clone and build logs are cached alongside.</p>
+            </div>
+            <div>
+                <label asp-for="GitHubApiToken" class="block text-sm font-medium text-text-secondary mb-1">GitHub API Token (optional)</label>
+                <input asp-for="GitHubApiToken" type="password" placeholder="ghp_..." class="w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all" />
+                <p class="text-xs text-text-secondary mt-1">Raises the anonymous GitHub rate limit for release / changelog lookups.</p>
+            </div>
+            <div class="md:col-span-2">
+                <button type="submit" class="px-5 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">Save Settings</button>
+            </div>
+        </form>
+    </div>
+</details>
+
+<h2 class="text-sm font-semibold uppercase tracking-wider text-text-secondary mb-3">Installed builds</h2>
+@if (!Model.Builds.Any())
+{
+    <div class="text-center py-12 bg-cyber-card rounded-xl border border-neon-cyan/10 mb-8">
+        <p class="text-text-secondary">No managed builds yet</p>
+        <p class="text-text-secondary text-sm mt-1">Install an official release, or compile one from a recipe below.</p>
+    </div>
+}
+else
+{
+    <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden overflow-x-auto mb-8">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Backend</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Version</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Source</th>
+                    <th class="text-right px-4 py-3 text-text-secondary font-medium">Size</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Status</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Used By</th>
+                    <th class="text-right px-4 py-3 text-text-secondary font-medium"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var b in Model.Builds)
+                {
+                    var usage = Model.ServerUsageCounts.GetValueOrDefault(b.Id, 0);
+                    var inFlight = b.Status is EngineBuildStatus.Downloading or EngineBuildStatus.Building;
+                    <tr class="border-b border-gray-700/30 hover:bg-gray-800/20">
+                        <td class="px-4 py-3">
+                            <a href="/Features/Engines/Detail?id=@b.Id" class="text-text-primary font-medium hover:text-neon-cyan transition-colors">@b.Name</a>
+                            <p class="text-xs text-text-secondary mt-0.5 font-mono">@b.InstallPath</p>
+                        </td>
+                        <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded border @BackendBadge(b.BackendType)">@b.BackendType</span></td>
+                        <td class="px-4 py-3 text-text-primary font-mono">@(b.VersionTag ?? (b.CommitSha is { Length: >= 7 } sha ? sha[..7] : "—"))</td>
+                        <td class="px-4 py-3 text-text-secondary">@(b.Source == EngineBuildSource.OfficialRelease ? "Release" : "Compiled")</td>
+                        <td class="px-4 py-3 text-right text-text-primary">@FormatSize(b.SizeBytes)</td>
+                        <td class="px-4 py-3 text-center">
+                            @if (b.Status == EngineBuildStatus.Ready)
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20">Ready</span>
+                            }
+                            else if (inFlight)
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 build-status" data-build-id="@b.Id">@(b.Status == EngineBuildStatus.Downloading ? "Downloading…" : "Building…")</span>
+                            }
+                            else if (b.Status == EngineBuildStatus.Error)
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-red-500/10 text-neon-red border border-red-500/20" title="@b.StatusMessage">Error</span>
+                            }
+                            else
+                            {
+                                <span class="text-xs px-2 py-0.5 rounded bg-gray-700/30 text-text-secondary border border-gray-600/20">@b.Status</span>
+                            }
+                        </td>
+                        <td class="px-4 py-3 text-center text-text-primary">@usage</td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap">
+                            @if (b.Status == EngineBuildStatus.Ready)
+                            {
+                                <a href="/Features/Engines/Changelog?id=@b.Id" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check updates</a>
+                            }
+                            @if (inFlight)
+                            {
+                                <button type="button" onclick="cancelBuild('@b.Id')" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Cancel</button>
+                            }
+                            else
+                            {
+                                <button type="button" onclick="deleteBuild('@b.Id', '@b.Name', @usage)" class="text-xs px-2 py-1 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Delete</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold uppercase tracking-wider text-text-secondary">Compile recipes</h2>
+    <a href="/Features/Engines/Recipe" class="text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all font-medium">New recipe</a>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    @foreach (var r in Model.Recipes)
+    {
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4">
+            <div class="flex items-center justify-between mb-1">
+                <a href="/Features/Engines/Recipe?id=@r.Id" class="text-text-primary font-medium hover:text-neon-magenta transition-colors">@r.Name</a>
+                <span class="text-xs px-2 py-0.5 rounded border @BackendBadge(r.BackendType)">@r.BackendType</span>
+            </div>
+            <p class="text-xs text-text-secondary mb-3">@r.Description</p>
+            <p class="text-[11px] text-text-secondary font-mono break-words mb-3">@string.Join(" ", r.CMakeArgs)</p>
+            <div class="flex items-center gap-2">
+                <button type="button" onclick="startBuild('@r.Id', '@r.Name')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Build now</button>
+                @if (r.IsBuiltIn)
+                {
+                    <span class="text-[11px] text-text-secondary">built-in</span>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@section Scripts {
+    <script>
+        (function () {
+            const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+
+            async function postAction(fields) {
+                const formData = new FormData();
+                for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+                formData.append('__RequestVerificationToken', token());
+                const resp = await fetch('/Features/Engines/Actions', { method: 'POST', body: formData });
+                return resp.json();
+            }
+
+            window.deleteBuild = async function (id, name, usage) {
+                let msg = `Delete build "${name}"?`;
+                if (usage > 0) msg += ` ${usage} server(s) are bound to it — they will lose the link.`;
+                if (!confirm(msg)) return;
+                const deleteFiles = confirm('Also delete the install folder from disk?');
+                const result = await postAction({ Command: 'delete', BuildId: id, DeleteFiles: deleteFiles });
+                if (result.success) location.reload(); else alert(result.message || 'Delete failed.');
+            };
+
+            window.cancelBuild = async function (id) {
+                if (!confirm('Cancel this build?')) return;
+                const result = await postAction({ Command: 'cancel', BuildId: id });
+                if (result.success) location.reload(); else alert(result.message || 'Cancel failed.');
+            };
+
+            window.startBuild = async function (recipeId, name) {
+                if (!confirm(`Start a source build from recipe "${name}"? This can take a while.`)) return;
+                const result = await postAction({ Command: 'startBuild', RecipeId: recipeId });
+                if (result.success) location.href = '/Features/Engines/Detail?id=' + result.buildId;
+                else alert(result.message || 'Could not start build.');
+            };
+
+            // Live status for in-flight builds — reload the row's page when one finishes.
+            const badges = document.querySelectorAll('.build-status');
+            if (badges.length > 0) {
+                let connection = window.__engineBuildHubConnection;
+                const isLive = connection && connection.state !== signalR.HubConnectionState.Disconnected;
+                if (!isLive) {
+                    connection = new signalR.HubConnectionBuilder().withUrl('/engineBuildHub').build();
+                    window.__engineBuildHubConnection = connection;
+                }
+                if (window.__engineBuildIndexHandler) connection.off('ReceiveBuildProgress', window.__engineBuildIndexHandler);
+                const handler = (p) => {
+                    const badge = document.querySelector(`.build-status[data-build-id="${p.buildId}"]`);
+                    if (!badge) return;
+                    if (p.status === 'completed' || p.status === 'error') location.reload();
+                    else if (p.percent != null) badge.textContent = `Working… ${p.percent}%`;
+                    else if (p.message) badge.textContent = p.message.length > 24 ? p.message.slice(0, 24) + '…' : p.message;
+                };
+                connection.on('ReceiveBuildProgress', handler);
+                window.__engineBuildIndexHandler = handler;
+                if (!isLive) connection.start().catch(() => {});
+            }
+        })();
+    </script>
+}

@@ -34,6 +34,18 @@ public class BackendConfig
     public BackendType? GpuBackendType { get; set; }
 
     /// <summary>
+    /// Optional link to a managed <see cref="LlamaCppBuild"/>. When set, the server's executable
+    /// folder is taken from that build's <see cref="LlamaCppBuild.InstallPath"/> and
+    /// <see cref="LlamaCppExecutableFolderPath"/> acts only as a manual override/fallback. Nulled
+    /// out (not cascade-deleted) if the referenced build is removed.
+    /// </summary>
+    [ForeignKey(nameof(EngineBuild))]
+    public Guid? EngineBuildId { get; set; }
+
+    /// <summary>Navigation: the managed build this server is bound to, if any.</summary>
+    public LlamaCppBuild? EngineBuild { get; set; }
+
+    /// <summary>
     /// Path to a companion application that should run alongside the server.
     /// For example, the SYCL VRAM keeper app on Windows when no display is connected,
     /// or similar Vulkan helper processes.
