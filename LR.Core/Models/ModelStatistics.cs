@@ -24,6 +24,14 @@ public class ModelStatistics
     public Guid? PresetId { get; set; }
 
     /// <summary>
+    /// The API key that authenticated the client for this request (if any). Null when API-key
+    /// auth is disabled or the request was unauthenticated. Set null (not cascade-deleted) if
+    /// the key is later removed, so historical stats survive.
+    /// </summary>
+    [ForeignKey(nameof(ApiKey))]
+    public Guid? ApiKeyId { get; set; }
+
+    /// <summary>
     /// When the request was processed.
     /// </summary>
     [Required]
@@ -130,4 +138,5 @@ public class ModelStatistics
 
     public ServerInstance? ServerInstance { get; set; }
     public ModelPreset? Preset { get; set; }
+    public ApiKey? ApiKey { get; set; }
 }

@@ -145,8 +145,17 @@ public class LRDbContext : DbContext
                 .HasForeignKey(s => s.PresetId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            // Optional FK to ApiKey — stats survive key deletion
+            entity.HasOne(s => s.ApiKey)
+                .WithMany()
+                .HasForeignKey(s => s.ApiKeyId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             // Composite index for time-range queries per server
             entity.HasIndex(e => new { e.ServerInstanceId, e.Timestamp });
+
+            // Index for per-key usage aggregation over a time range
+            entity.HasIndex(e => new { e.ApiKeyId, e.Timestamp });
 
             // Index for preset-based context usage queries
             entity.HasIndex(e => new { e.PresetId, e.Timestamp });
@@ -167,6 +176,12 @@ public class LRDbContext : DbContext
             entity.HasOne(l => l.Preset)
                 .WithMany()
                 .HasForeignKey(l => l.PresetId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Optional FK to ApiKey — logs survive key deletion
+            entity.HasOne(l => l.ApiKey)
+                .WithMany()
+                .HasForeignKey(l => l.ApiKeyId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             // Index for retention cleanup queries (delete old records by timestamp)

@@ -34,4 +34,12 @@ public class RouteRequest
     /// The inference payload (e.g., prompt text, JSON body).
     /// </summary>
     public string Payload { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The API key that authenticated the client for this request, if any. Carried through the
+    /// routing/queue pipeline so statistics can be attributed per key even when the request is
+    /// recorded from a background dispatch scope that never saw the HTTP auth context. Null when
+    /// API-key auth is disabled or the request arrived unauthenticated.
+    /// </summary>
+    public Guid? ApiKeyId { get; set; }
 }

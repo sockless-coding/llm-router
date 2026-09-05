@@ -21,12 +21,13 @@ public class StatisticsService : IStatisticsService
     }
 
     /// <inheritdoc />
-    public async Task RecordRequestAsync(ServerInstance server, ModelPreset? preset, RouteResponse response)
+    public async Task RecordRequestAsync(ServerInstance server, ModelPreset? preset, RouteResponse response, Guid? apiKeyId = null)
     {
         var stat = new ModelStatistics
         {
             ServerInstanceId = server.Id,
             PresetId = preset?.Id,
+            ApiKeyId = apiKeyId,
             Timestamp = DateTimeOffset.UtcNow,
             PromptTokensProcessed = response.PromptTokensProcessed,
             PromptProcessingMs = response.PromptProcessingMs,
@@ -117,6 +118,85 @@ public class StatisticsService : IStatisticsService
             query = query.Where(s => s.Timestamp <= to.Value);
 
         return await query.SumAsync(s => (long)s.PromptTokensProcessed + s.GeneratedTokenCount);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TokenBreakdownBucket>> GetTokenBreakdownOverTimeAsync(DateTimeOffset from, DateTimeOffset to, int buckets = 48)
+    {
+        if (to <= from) return Array.Empty<TokenBreakdownBucket>();
+        if (buckets < 1) buckets = 1;
+
+        // Pull just the three columns we need; bucketing is done in memory because the SQLite
+        // provider stores Timestamp as an ISO-8601 string (see the value converter in
+        // LRDbContext) and can't do arithmetic date bucketing in SQL.
+        var rows = await _context.ModelStatistics
+            .Where(s => s.Timestamp >= from && s.Timestamp <= to)
+            .Select(s => new { s.Timestamp, s.PromptTokensProcessed, s.GeneratedTokenCount })
+            .ToListAsync();
+
+        var span = to - from;
+        var bucketSize = TimeSpan.FromTicks(Math.Max(1, span.Ticks / buckets));
+
+        var acc = new (long Prompt, long Gen)[buckets];
+        foreach (var r in rows)
+        {
+            int idx = (int)((r.Timestamp - from).Ticks / bucketSize.Ticks);
+            if (idx < 0) idx = 0;
+            if (idx >= buckets) idx = buckets - 1;
+            acc[idx].Prompt += r.PromptTokensProcessed;
+            acc[idx].Gen += r.GeneratedTokenCount;
+        }
+
+        var result = new List<TokenBreakdownBucket>(buckets);
+        for (int i = 0; i < buckets; i++)
+            result.Add(new TokenBreakdownBucket(from + TimeSpan.FromTicks(bucketSize.Ticks * i), acc[i].Prompt, acc[i].Gen));
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ApiKeyUsage>> GetUsageByApiKeyAsync(DateTimeOffset from, DateTimeOffset to)
+    {
+        var grouped = await _context.ModelStatistics
+            .Where(s => s.Timestamp >= from && s.Timestamp <= to)
+            .GroupBy(s => s.ApiKeyId)
+            .Select(g => new
+            {
+                ApiKeyId = g.Key,
+                RequestCount = (long)g.Count(),
+                PromptTokens = g.Sum(s => (long)s.PromptTokensProcessed),
+                GeneratedTokens = g.Sum(s => (long)s.GeneratedTokenCount),
+                AvgLatencyMs = g.Average(s => s.TotalLatencyMs),
+            })
+            .ToListAsync();
+
+        // Resolve key names/prefixes in one lookup rather than a join (keeps the query above
+        // translatable and tolerates keys that have since been deleted → SetNull → null id).
+        var keyIds = grouped.Where(x => x.ApiKeyId.HasValue).Select(x => x.ApiKeyId!.Value).ToList();
+        var keys = await _context.ApiKeys
+            .Where(k => keyIds.Contains(k.Id))
+            .Select(k => new { k.Id, k.Name, k.KeyPrefix })
+            .ToDictionaryAsync(k => k.Id);
+
+        return grouped
+            .Select(x =>
+            {
+                string name = "No key";
+                string? prefix = null;
+                if (x.ApiKeyId.HasValue && keys.TryGetValue(x.ApiKeyId.Value, out var k))
+                {
+                    name = k.Name;
+                    prefix = k.KeyPrefix;
+                }
+                else if (x.ApiKeyId.HasValue)
+                {
+                    name = "Deleted key";
+                }
+
+                return new ApiKeyUsage(x.ApiKeyId, name, prefix, x.RequestCount, x.PromptTokens, x.GeneratedTokens, x.AvgLatencyMs);
+            })
+            .OrderByDescending(u => u.TotalTokens)
+            .ToList();
     }
 
     /// <inheritdoc />

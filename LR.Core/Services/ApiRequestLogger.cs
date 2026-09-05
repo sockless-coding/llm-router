@@ -17,17 +17,20 @@ public class ApiRequestLogger : IApiRequestLogger
     private readonly LRDbContext _context;
     private readonly ILogger<ApiRequestLogger> _logger;
     private readonly GatewaySettings _settings;
+    private readonly IApiKeyRequestContext _apiKeyContext;
 
     public bool IsEnabled => _settings.EnableRequestLogging;
 
     public ApiRequestLogger(
         LRDbContext context,
         ILogger<ApiRequestLogger> logger,
-        IOptions<GatewaySettings> settings)
+        IOptions<GatewaySettings> settings,
+        IApiKeyRequestContext apiKeyContext)
     {
         _context = context;
         _logger = logger;
         _settings = settings.Value;
+        _apiKeyContext = apiKeyContext;
     }
 
     /// <inheritdoc />
@@ -40,7 +43,10 @@ public class ApiRequestLogger : IApiRequestLogger
             Protocol = protocol,
             EndpointPath = endpointPath,
             IncomingPayload = TruncateForStorage(incomingPayload),
-            ModelName = modelName
+            ModelName = modelName,
+            // Auth runs (as an endpoint filter) before the handler calls this, so the key — if
+            // any — is already resolved on the shared request scope.
+            ApiKeyId = _apiKeyContext.CurrentKey?.Id
         };
 
         _context.ApiRequestLogs.Add(log);

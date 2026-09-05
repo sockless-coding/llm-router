@@ -10,7 +10,8 @@ public interface IStatisticsService
     /// <summary>
     /// Records a single completed inference request as a statistics entry.
     /// </summary>
-    Task RecordRequestAsync(ServerInstance server, ModelPreset? preset, RouteResponse response);
+    /// <param name="apiKeyId">The API key that authenticated the request, if any (for per-key usage stats).</param>
+    Task RecordRequestAsync(ServerInstance server, ModelPreset? preset, RouteResponse response, Guid? apiKeyId = null);
 
     /// <summary>
     /// Gets all statistics for a given server within the specified time range.
@@ -40,6 +41,19 @@ public interface IStatisticsService
     /// Optionally scoped by time range.
     /// </summary>
     Task<long> GetTotalTokensProcessedAsync(Guid? serverId = null, DateTimeOffset? from = null, DateTimeOffset? to = null);
+
+    /// <summary>
+    /// Gets the input (prompt) vs output (generated) token split, summed across all servers and
+    /// grouped into evenly spaced time buckets across the range. Used for the token-usage chart.
+    /// </summary>
+    Task<IReadOnlyList<TokenBreakdownBucket>> GetTokenBreakdownOverTimeAsync(DateTimeOffset from, DateTimeOffset to, int buckets = 48);
+
+    /// <summary>
+    /// Gets aggregated per-API-key usage (request count, token totals, average latency) over the
+    /// time range. Includes a synthetic entry with a null key id for requests that carried no key.
+    /// Ordered by total tokens descending.
+    /// </summary>
+    Task<IReadOnlyList<ApiKeyUsage>> GetUsageByApiKeyAsync(DateTimeOffset from, DateTimeOffset to);
 
     /// <summary>
     /// Gets total request count across all or a specific server.

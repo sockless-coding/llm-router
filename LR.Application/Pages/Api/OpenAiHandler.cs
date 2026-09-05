@@ -266,7 +266,7 @@ public class OpenAiHandler : IProtocolHandler
                             {
                                 var presetId = routeRequest.PresetId ?? server.ActivePresetId;
                                 var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                                await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
+                                await _statisticsService.RecordRequestAsync(server, preset, chunk.Response, routeRequest.ApiKeyId);
                             }
                             catch { /* Stats recording failure shouldn't block the response */ }
 
@@ -364,7 +364,7 @@ public class OpenAiHandler : IProtocolHandler
         {
             var presetId = routeRequest.PresetId ?? server.ActivePresetId;
             var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-            await _statisticsService.RecordRequestAsync(server, preset, response);
+            await _statisticsService.RecordRequestAsync(server, preset, response, routeRequest.ApiKeyId);
         }
         catch { /* Stats recording failure shouldn't block the response */ }
 
@@ -445,6 +445,7 @@ public class OpenAiHandler : IProtocolHandler
         {
             ModelName = request.Model,
             PresetId = preset?.Id,
+            ApiKeyId = _apiKeyContext.CurrentKey?.Id,
             Payload = payload
         };
     }

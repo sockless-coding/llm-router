@@ -228,7 +228,7 @@ public class ClaudeHandler : IProtocolHandler
                             {
                                 var presetId = routeRequest.PresetId ?? server.ActivePresetId;
                                 var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                                await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
+                                await _statisticsService.RecordRequestAsync(server, preset, chunk.Response, routeRequest.ApiKeyId);
                             }
                             catch { /* Stats recording failure shouldn't block the response */ }
 
@@ -381,7 +381,7 @@ public class ClaudeHandler : IProtocolHandler
         {
             var presetId = routeRequest.PresetId ?? server.ActivePresetId;
             var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-            await _statisticsService.RecordRequestAsync(server, preset, response);
+            await _statisticsService.RecordRequestAsync(server, preset, response, routeRequest.ApiKeyId);
         }
         catch { /* Stats recording failure shouldn't block the response */ }
 
@@ -410,6 +410,7 @@ public class ClaudeHandler : IProtocolHandler
         {
             ModelName = request.Model,
             PresetId = preset?.Id,
+            ApiKeyId = _apiKeyContext.CurrentKey?.Id,
             Protocol = ApiProtocol.Claude,
             // Omit null fields — backend rejects "name":null etc.
             Payload = JsonSerializer.Serialize(request, new System.Text.Json.JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull })

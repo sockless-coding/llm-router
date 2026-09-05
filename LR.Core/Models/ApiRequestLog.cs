@@ -57,6 +57,15 @@ public class ApiRequestLog
 
     public virtual ModelPreset? Preset { get; set; }
 
+    /// <summary>
+    /// The API key that authenticated this request (if any). Null when API-key auth is disabled
+    /// or the request was unauthenticated. Set null (not cascade-deleted) if the key is removed.
+    /// </summary>
+    [ForeignKey(nameof(ApiKey))]
+    public Guid? ApiKeyId { get; set; }
+
+    public virtual ApiKey? ApiKey { get; set; }
+
     // ── Payload chain (the full transformation pipeline) ─────────────
 
     /// <summary>

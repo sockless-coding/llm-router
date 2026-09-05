@@ -304,7 +304,7 @@ public class OllamaHandler : IProtocolHandler
                         {
                             var presetId = routeRequest.PresetId ?? server.ActivePresetId;
                             var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                            await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
+                            await _statisticsService.RecordRequestAsync(server, preset, chunk.Response, routeRequest.ApiKeyId);
                         }
                         catch { /* Stats recording failure shouldn't block the response */ }
                     }
@@ -453,7 +453,7 @@ public class OllamaHandler : IProtocolHandler
                         {
                             var presetId = routeRequest.PresetId ?? server.ActivePresetId;
                             var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                            await _statisticsService.RecordRequestAsync(server, preset, chunk.Response);
+                            await _statisticsService.RecordRequestAsync(server, preset, chunk.Response, routeRequest.ApiKeyId);
                         }
                         catch { /* Stats recording failure shouldn't block the response */ }
                     }
@@ -487,7 +487,7 @@ public class OllamaHandler : IProtocolHandler
             {
                 var presetId = routeRequest.PresetId ?? server.ActivePresetId;
                 var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-                await _statisticsService.RecordRequestAsync(server, preset, result);
+                await _statisticsService.RecordRequestAsync(server, preset, result, routeRequest.ApiKeyId);
             }
             catch { /* Stats recording failure shouldn't block the response */ }
 
@@ -652,6 +652,7 @@ public class OllamaHandler : IProtocolHandler
         {
             ModelName = ollamaRequest.Model,
             PresetId = preset?.Id,
+            ApiKeyId = _apiKeyContext.CurrentKey?.Id,
             // Omit null fields — backend rejects "name":null etc.
             Payload = JsonSerializer.Serialize(openAiRequest, new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull })
         };
@@ -808,6 +809,7 @@ public class OllamaHandler : IProtocolHandler
         {
             ModelName = generateRequest.Model,
             PresetId = preset?.Id,
+            ApiKeyId = _apiKeyContext.CurrentKey?.Id,
             // Omit null fields — backend rejects "name":null etc.
             Payload = JsonSerializer.Serialize(openAiRequest, new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull })
         };

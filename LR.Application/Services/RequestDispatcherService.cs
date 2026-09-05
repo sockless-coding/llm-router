@@ -93,7 +93,7 @@ public class RequestDispatcherService : BackgroundService
                     var statisticsService = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
                     var presetId = request.PresetId ?? server.ActivePresetId;
                     var preset = presetId.HasValue ? presetManager.GetById(presetId.Value) : null;
-                    await statisticsService.RecordRequestAsync(server, preset, response);
+                    await statisticsService.RecordRequestAsync(server, preset, response, request.ApiKeyId);
                 }
                 catch
                 {

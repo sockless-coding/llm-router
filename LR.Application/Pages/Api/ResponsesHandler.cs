@@ -263,7 +263,7 @@ public class ResponsesHandler
                 try
                 {
                     var preset = routeRequest.PresetId.HasValue ? presetManager.GetById(routeRequest.PresetId.Value) : null;
-                    await statisticsService.RecordRequestAsync(server, preset, routeResponse);
+                    await statisticsService.RecordRequestAsync(server, preset, routeResponse, routeRequest.ApiKeyId);
                 }
                 catch { /* stats recording failure shouldn't fail the background job */ }
             }
@@ -456,7 +456,7 @@ public class ResponsesHandler
         {
             var presetIdForStats = routeRequest.PresetId ?? server.ActivePresetId;
             var presetForStats = presetIdForStats.HasValue ? _presetManager.GetById(presetIdForStats.Value) : null;
-            await _statisticsService.RecordRequestAsync(server, presetForStats, routeResponse);
+            await _statisticsService.RecordRequestAsync(server, presetForStats, routeResponse, routeRequest.ApiKeyId);
         }
         catch { /* stats recording failure shouldn't block the response */ }
 
@@ -478,7 +478,7 @@ public class ResponsesHandler
         if (response is null)
             throw new InvalidOperationException($"Backend returned no response from server {server.Name}");
 
-        try { await _statisticsService.RecordRequestAsync(server, preset, response); } catch { }
+        try { await _statisticsService.RecordRequestAsync(server, preset, response, routeRequest.ApiKeyId); } catch { }
 
         if (logId != Guid.Empty)
         {
@@ -656,10 +656,11 @@ public class ResponsesHandler
         return chatRequest;
     }
 
-    private static RouteRequest BuildRouteRequest(string model, Guid? presetId, ChatCompletionRequest chatRequest) => new()
+    private RouteRequest BuildRouteRequest(string model, Guid? presetId, ChatCompletionRequest chatRequest) => new()
     {
         ModelName = model,
         PresetId = presetId,
+        ApiKeyId = _apiKeyContext.CurrentKey?.Id,
         // Omit null fields — backend rejects "name":null etc.
         Payload = JsonSerializer.Serialize(chatRequest, BackendJsonOpts)
     };

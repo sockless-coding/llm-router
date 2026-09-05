@@ -91,6 +91,37 @@
             <canvas id="latencyChart"></canvas>
         </div>
     </div>
+
+    <!-- Charts Row 3 -->
+    <div class="grid grid-cols-1 gap-6 mb-8">
+        <!-- Token Usage (input vs output) -->
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-green">
+            <h2 class="text-lg font-semibold mb-4 text-neon-green"><span aria-hidden="true">🔤</span> Token Usage — Input vs Output</h2>
+            <canvas id="tokenBreakdownChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Usage by API Key -->
+    <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan mb-8">
+        <h2 class="text-lg font-semibold mb-4 text-neon-cyan"><span aria-hidden="true">🔑</span> Usage by API Key</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-text-secondary border-b border-gray-700/40">
+                        <th class="py-2 pr-4 font-medium">Key</th>
+                        <th class="py-2 px-4 font-medium text-right">Requests</th>
+                        <th class="py-2 px-4 font-medium text-right">Input tokens</th>
+                        <th class="py-2 px-4 font-medium text-right">Output tokens</th>
+                        <th class="py-2 px-4 font-medium text-right">Total tokens</th>
+                        <th class="py-2 pl-4 font-medium text-right">Avg latency</th>
+                    </tr>
+                </thead>
+                <tbody id="keyUsageBody">
+                    <tr><td colspan="6" class="py-4 text-text-secondary italic">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -204,6 +235,56 @@ window.updateContextChart = function() {
     loadContextUsage(activeRange);
 };
 
+async function loadTokenBreakdown(rangeKey = '24h') {
+    const from = getFromTimestamp(rangeKey);
+    try {
+        const resp = await fetch(`/api/stats/token-breakdown?from=${encodeURIComponent(from)}`);
+        const data = await resp.json();
+
+        charts.tokens.data.labels = data.map(d => new Date(d.timestamp).toLocaleTimeString('en-GB', { hour12: false }));
+        charts.tokens.data.datasets[0].data = data.map(d => d.input);
+        charts.tokens.data.datasets[1].data = data.map(d => d.output);
+        charts.tokens.update();
+    } catch (e) { console.error('Failed to load token breakdown:', e); }
+}
+
+const numberFmt = new Intl.NumberFormat('en-GB');
+
+async function loadKeyUsage(rangeKey = '24h') {
+    const from = getFromTimestamp(rangeKey);
+    const body = document.getElementById('keyUsageBody');
+    try {
+        const resp = await fetch(`/api/stats/key-usage?from=${encodeURIComponent(from)}`);
+        const rows = await resp.json();
+
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="6" class="py-4 text-text-secondary italic">No requests in this range.</td></tr>';
+            return;
+        }
+
+        body.innerHTML = rows.map(r => {
+            const label = r.keyPrefix
+                ? `${escapeHtml(r.name)} <span class="text-text-secondary font-mono text-xs">${escapeHtml(r.keyPrefix)}…</span>`
+                : `<span class="text-text-secondary italic">${escapeHtml(r.name)}</span>`;
+            return `<tr class="border-b border-gray-800/60">
+                <td class="py-2 pr-4">${label}</td>
+                <td class="py-2 px-4 text-right tabular-nums">${numberFmt.format(r.requestCount)}</td>
+                <td class="py-2 px-4 text-right tabular-nums">${numberFmt.format(r.inputTokens)}</td>
+                <td class="py-2 px-4 text-right tabular-nums">${numberFmt.format(r.outputTokens)}</td>
+                <td class="py-2 px-4 text-right tabular-nums font-medium">${numberFmt.format(r.totalTokens)}</td>
+                <td class="py-2 pl-4 text-right tabular-nums">${numberFmt.format(r.avgLatencyMs)} ms</td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        console.error('Failed to load key usage:', e);
+        body.innerHTML = '<tr><td colspan="6" class="py-4 text-neon-red">Failed to load.</td></tr>';
+    }
+}
+
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function buildMultiServerChart(dataPointsByServerId, servers, colors, labelPrefix) {
     const datasets = [];
     let allLabels = new Set();
@@ -313,6 +394,12 @@ window.updateAllCharts = async function(rangeKey = '24h') {
 
     // Context usage
     loadContextUsage(rangeKey);
+
+    // Token breakdown (input vs output)
+    loadTokenBreakdown(rangeKey);
+
+    // Per-key usage table
+    loadKeyUsage(rangeKey);
 };
 
 // Runs immediately rather than waiting for DOMContentLoaded: the canvases above are
@@ -344,6 +431,31 @@ charts.context = new Chart(ctxContext, {
         scales: {
             x: { title: { display: true, text: 'Time' } },
             y: { beginAtZero: true, title: { display: true, text: 'Tokens Used' } }
+        }
+    }
+});
+
+// Token usage chart (stacked bar — input vs output tokens per time bucket)
+const ctxTokens = document.getElementById('tokenBreakdownChart').getContext('2d');
+charts.tokens = new Chart(ctxTokens, {
+    type: 'bar',
+    data: {
+        labels: [],
+        datasets: [
+            { label: 'Input (prompt)', data: [], backgroundColor: chartColors[0] + 'cc', borderColor: chartColors[0], borderWidth: 1 },
+            { label: 'Output (generated)', data: [], backgroundColor: chartColors[1] + 'cc', borderColor: chartColors[1], borderWidth: 1 },
+        ]
+    },
+    options: {
+        responsive: true,
+        animation: false,
+        scales: {
+            x: { stacked: true, title: { display: true, text: 'Time' } },
+            y: { stacked: true, beginAtZero: true, title: { display: true, text: 'Tokens' } }
+        },
+        plugins: {
+            legend: { position: 'top' },
+            tooltip: { mode: 'index', intersect: false }
         }
     }
 });
