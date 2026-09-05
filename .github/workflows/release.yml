@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create (e.g. v1.2.3)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: LR.Application/package-lock.json
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = if ('${{ github.event.inputs.tag }}') { '${{ github.event.inputs.tag }}' } else { '${{ github.ref_name }}' }
+          $version = $tag -replace '^v', ''
+          "tag=$tag"         | Out-File $env:GITHUB_OUTPUT -Append
+          "version=$version" | Out-File $env:GITHUB_OUTPUT -Append
+          Write-Host "Releasing $tag (version $version)"
+
+      - name: Build frontend CSS
+        working-directory: LR.Application
+        run: |
+          npm ci
+          npm run build:css
+
+      - name: Restore .NET dependencies
+        run: dotnet restore LR.slnx
+
+      - name: Test
+        run: dotnet test LR.slnx -c Release
+
+      - name: Publish (framework-dependent, win-x64)
+        run: >
+          dotnet publish LR.Application -c Release -r win-x64 --self-contained false
+          -o publish/framework-dependent
+          -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Publish (self-contained, win-x64)
+        run: >
+          dotnet publish LR.Application -c Release -r win-x64 --self-contained true
+          -o publish/self-contained
+          -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Package release archives
+        shell: pwsh
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          $extras = 'install-service.ps1', 'uninstall-service.ps1', 'README.md', 'LICENSE'
+          foreach ($dir in 'framework-dependent', 'self-contained') {
+            Copy-Item $extras "publish/$dir"
+          }
+          Compress-Archive publish/framework-dependent/* "llm-router-$v-win-x64.zip"
+          Compress-Archive publish/self-contained/*   "llm-router-$v-win-x64-self-contained.zip"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          draft: true
+          files: |
+            llm-router-*.zip
