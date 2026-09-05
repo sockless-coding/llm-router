@@ -30,6 +30,7 @@ public class StatisticsService : IStatisticsService
             Timestamp = DateTimeOffset.UtcNow,
             PromptTokensProcessed = response.PromptTokensProcessed,
             PromptProcessingMs = response.PromptProcessingMs,
+            PromptTokensPerSecReported = response.PromptTokensPerSecond ?? 0,
             GeneratedTokenCount = response.GeneratedTokenCount,
             GenerationMs = response.GenerationMs,
             TotalLatencyMs = response.TotalLatencyMs,
@@ -62,9 +63,16 @@ public class StatisticsService : IStatisticsService
     public async Task<Dictionary<Guid, double>> GetAvgPromptTokensPerSecByServerAsync(DateTimeOffset from, DateTimeOffset to)
     {
         var stats = await _context.ModelStatistics
-            .Where(s => s.Timestamp >= from && s.Timestamp <= to && s.PromptProcessingMs > 0)
+            .Where(s => s.Timestamp >= from && s.Timestamp <= to
+                && (s.PromptTokensPerSecReported > 0 || s.PromptProcessingMs > 0))
             .GroupBy(s => s.ServerInstanceId)
-            .Select(g => new { ServerId = g.Key, AvgTokensPerSec = g.Average(s => (double)s.PromptTokensProcessed / s.PromptProcessingMs * 1000) })
+            .Select(g => new
+            {
+                ServerId = g.Key,
+                AvgTokensPerSec = g.Average(s => s.PromptTokensPerSecReported > 0
+                    ? s.PromptTokensPerSecReported
+                    : (double)s.PromptTokensProcessed / s.PromptProcessingMs * 1000)
+            })
             .ToListAsync();
 
         return stats.ToDictionary(x => x.ServerId, x => x.AvgTokensPerSec);

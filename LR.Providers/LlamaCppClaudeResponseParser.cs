@@ -71,6 +71,11 @@ public static class LlamaCppClaudeResponseParser
         {
             response.PromptProcessingMs = GetDouble(timings, "prompt_ms") ?? 0;
             response.GenerationMs = GetDouble(timings, "predicted_ms") ?? GetDouble(timings, "generation_ms") ?? 0;
+
+            // Prefer llama.cpp's own prompt-processing rate — see RouteResponse.PromptTokensPerSecond.
+            var promptPerSecond = GetDouble(timings, "prompt_per_second");
+            if (promptPerSecond is > 0)
+                response.PromptTokensPerSecond = promptPerSecond;
         }
 
         response.TotalLatencyMs = response.PromptProcessingMs + response.GenerationMs;

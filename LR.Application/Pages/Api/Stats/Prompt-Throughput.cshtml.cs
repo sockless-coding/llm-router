@@ -38,10 +38,10 @@ public class PromptThroughputModel : PageModel
         foreach (var serverId in serverIds)
         {
             var statsList = await _stats.GetByServerAsync(serverId, from, to);
-            var points = statsList.Where(s => s.PromptProcessingMs > 0).Select(s => new
+            var points = statsList.Where(s => s.PromptTokensPerSec > 0).Select(s => new
             {
                 timestamp = s.Timestamp.ToString("O"),
-                value = (double)s.PromptTokensProcessed / s.PromptProcessingMs * 1000
+                value = s.PromptTokensPerSec
             }).ToList();
             result[serverId.ToString()] = points.Cast<object>().ToList();
         }

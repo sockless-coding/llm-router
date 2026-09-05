@@ -84,6 +84,16 @@ public class RouteResponse
     public double PromptProcessingMs { get; set; }
 
     /// <summary>
+    /// Prompt processing throughput (tokens/sec) as reported directly by the backend
+    /// (llama.cpp <c>timings.prompt_per_second</c> / the stdout "tokens per second" figure).
+    /// Preferred over dividing <see cref="PromptTokensProcessed"/> by <see cref="PromptProcessingMs"/>:
+    /// that count is the full prompt including cache hits, while the time covers only the
+    /// non-cached tokens actually run through the model, so the quotient is inflated whenever
+    /// prompt caching kicks in. Null when the backend didn't report a rate.
+    /// </summary>
+    public double? PromptTokensPerSecond { get; set; }
+
+    /// <summary>
     /// Time in milliseconds spent generating output tokens.
     /// </summary>
     public double GenerationMs { get; set; }

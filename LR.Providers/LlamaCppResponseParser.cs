@@ -76,6 +76,23 @@ public static class LlamaCppResponseParser
             response.GenerationMs = GetDouble(timing, "predicted_ms") ?? 0;
         }
 
+        // llama-cpp-server returns a richer "timings" object on non-streaming responses too;
+        // capture it for BackendTimings and, crucially, its self-computed prompt_per_second,
+        // which is based on the tokens actually processed (cache hits excluded).
+        if (root.TryGetProperty("timings", out JsonElement timingsJson))
+        {
+            var parsedTimings = ParseLlamaCppTimings(timingsJson);
+            response.BackendTimings = parsedTimings;
+
+            if (response.PromptProcessingMs == 0 && parsedTimings.PromptMs.HasValue)
+                response.PromptProcessingMs = parsedTimings.PromptMs.Value;
+            var genMsFromTimings = parsedTimings.GenerationMs ?? parsedTimings.PredictedMs;
+            if (response.GenerationMs == 0 && genMsFromTimings.HasValue)
+                response.GenerationMs = genMsFromTimings.Value;
+            if (parsedTimings.PromptPerSecond is > 0)
+                response.PromptTokensPerSecond = parsedTimings.PromptPerSecond;
+        }
+
         // Some llama.cpp versions put timings in usage
         if (root.TryGetProperty("usage", out JsonElement usageTiming))
         {
@@ -136,6 +153,8 @@ public static class LlamaCppResponseParser
             var genMs = parsedTimings.GenerationMs ?? parsedTimings.PredictedMs;
             if (genMs.HasValue && response.GenerationMs == 0)
                 response.GenerationMs = genMs.Value;
+            if (parsedTimings.PromptPerSecond is > 0)
+                response.PromptTokensPerSecond = parsedTimings.PromptPerSecond;
         }
 
         // Extract timing data from top-level "timing" object (alternative key)
@@ -147,6 +166,9 @@ public static class LlamaCppResponseParser
             var promptMs = GetDouble(timingJson, "prompt_ms");
             if (promptMs.HasValue && response.PromptProcessingMs == 0)
                 response.PromptProcessingMs = promptMs.Value;
+
+            if (parsedTiming.PromptPerSecond is > 0)
+                response.PromptTokensPerSecond = parsedTiming.PromptPerSecond;
 
             var genMs2 = GetDouble(timingJson, "predicted_ms") ?? GetDouble(timingJson, "eval_ms");
             if (genMs2.HasValue && response.GenerationMs == 0)

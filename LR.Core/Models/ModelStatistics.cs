@@ -42,11 +42,24 @@ public class ModelStatistics
     public double PromptProcessingMs { get; set; }
 
     /// <summary>
-    /// Derived: tokens per second for prompt processing.
+    /// Prompt processing throughput (tokens/sec) as reported directly by the backend.
+    /// Zero when the backend didn't report a rate (older rows, non-llama.cpp providers).
+    /// See <see cref="RouteResponse.PromptTokensPerSecond"/> for why this is preferred over
+    /// recomputing from the token count and elapsed time.
+    /// </summary>
+    public double PromptTokensPerSecReported { get; set; }
+
+    /// <summary>
+    /// Derived: tokens per second for prompt processing. Uses the backend-reported rate when
+    /// available, falling back to <c>PromptTokensProcessed / PromptProcessingMs</c> for rows
+    /// recorded before that figure was captured (that fallback over-reports when prompt caching
+    /// is in play, since the token count includes cache hits the time doesn't cover).
     /// </summary>
     [NotMapped]
     public double PromptTokensPerSec =>
-        PromptProcessingMs > 0 ? (PromptTokensProcessed / PromptProcessingMs) * 1000 : 0;
+        PromptTokensPerSecReported > 0
+            ? PromptTokensPerSecReported
+            : PromptProcessingMs > 0 ? (PromptTokensProcessed / PromptProcessingMs) * 1000 : 0;
 
     // --- Generation metrics ---
 

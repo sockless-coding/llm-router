@@ -204,6 +204,12 @@ public class LlamaCppTimingCoordinator
         if (timing.PromptEvalMs.HasValue && timing.PromptEvalMs.Value > 0)
             response.PromptProcessingMs = timing.PromptEvalMs.Value;
 
+        // llama.cpp prints the prompt-processing rate it computed itself ("... / 91.54 tokens per
+        // second"), derived from the tokens it actually ran through the model. Prefer that over
+        // recomputing from PromptTokensProcessed (which includes cache hits) / PromptProcessingMs.
+        if (timing.PromptTokensPerSec.HasValue && timing.PromptTokensPerSec.Value > 0)
+            response.PromptTokensPerSecond = timing.PromptTokensPerSec.Value;
+
         if (timing.EvalMs.HasValue && timing.EvalMs.Value > 0)
             response.GenerationMs = timing.EvalMs.Value;
 
