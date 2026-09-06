@@ -912,6 +912,12 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         if (lower.Contains("cuda")) return BackendType.Cuda;
         if (lower.Contains("vulkan")) return BackendType.Vulkan;
         if (lower.Contains("sycl") || lower.Contains("oneapi")) return BackendType.Sycl;
+        if (lower.Contains("rocm") || lower.Contains("hip")) return BackendType.Hip;
+        if (lower.Contains("metal")) return BackendType.Metal;
+        if (lower.Contains("opencl") || lower.Contains("adreno")) return BackendType.OpenCL;
+        if (lower.Contains("openvino")) return BackendType.OpenVino;
+        if (lower.Contains("musa")) return BackendType.Musa;
+        if (lower.Contains("cann") || lower.Contains("ascend")) return BackendType.Cann;
 
         return BackendType.Unknown;
     }

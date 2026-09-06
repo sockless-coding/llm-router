@@ -49,7 +49,12 @@ public class EngineReleasesModel : PageModel
     /// <summary>The backends that have a prebuilt archive in the given release for this host.</summary>
     public IEnumerable<BackendType> AvailableBackends(GitHubRelease release)
     {
-        foreach (var backend in new[] { BackendType.Cpu, BackendType.Cuda, BackendType.Vulkan, BackendType.Sycl })
+        var candidates = new[]
+        {
+            BackendType.Cpu, BackendType.Cuda, BackendType.Vulkan, BackendType.Sycl,
+            BackendType.Hip, BackendType.OpenVino, BackendType.OpenCL, BackendType.Metal,
+        };
+        foreach (var backend in candidates)
         {
             if (ReleaseAssetResolver.IsAvailable(release.Assets, backend, HostOs, HostArch))
                 yield return backend;

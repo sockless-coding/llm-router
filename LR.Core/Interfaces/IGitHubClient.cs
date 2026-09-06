@@ -25,6 +25,12 @@ public interface IGitHubClient
     Task<GitHubCompareResult?> CompareAsync(string repo, string baseRef, string headRef, CancellationToken ct = default);
 
     /// <summary>
+    /// Reads a text file from the repo at a given ref (branch/tag/SHA). Returns null if it's not
+    /// found. Used to surface llama.cpp's own build docs / example scripts in the recipe editor.
+    /// </summary>
+    Task<string?> GetRawFileAsync(string repo, string reference, string path, CancellationToken ct = default);
+
+    /// <summary>
     /// Streams a release asset to <paramref name="destinationPath"/>, reporting byte progress via
     /// <paramref name="progress"/> (BuildId is filled in by the caller).
     /// </summary>

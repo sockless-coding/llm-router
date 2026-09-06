@@ -54,6 +54,19 @@
         <label class="@label" asp-for="Input.CMakeArgsText">CMake arguments (one per line)</label>
         <textarea class="@input font-mono text-xs" rows="6" asp-for="Input.CMakeArgsText" placeholder="-DGGML_SYCL=ON&#10;-DGGML_SYCL_F16=ON"></textarea>
     </div>
+
+    <details class="rounded-lg border border-gray-600/30 bg-cyber-bg-dark/40 group">
+        <summary class="cursor-pointer px-4 py-2.5 text-sm font-medium text-text-secondary hover:text-neon-cyan transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+            <svg class="w-4 h-4 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            Upstream build reference
+        </summary>
+        <div class="px-4 pb-4 pt-1 space-y-3">
+            <p class="text-xs text-text-secondary">The <code>cmake</code> commands llama.cpp documents for the selected backend, pulled live from its repo. "Apply" fills the fields above — review before saving.</p>
+            <button type="button" id="ref-load" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">Load reference</button>
+            <div id="ref-body" class="space-y-4"></div>
+        </div>
+    </details>
+
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
             <label class="@label" asp-for="Input.CMakeGenerator">CMake generator (optional)</label>
@@ -94,4 +107,68 @@
             }
         </div>
     </div>
+}
+
+@section Scripts {
+    <script>
+        (function () {
+            const backendSelect = document.getElementById('Input_BackendType');
+            const loadBtn = document.getElementById('ref-load');
+            const body = document.getElementById('ref-body');
+            if (!loadBtn || !body) return;
+
+            const argsField = document.getElementById('Input_CMakeArgsText');
+            const genField = document.getElementById('Input_CMakeGenerator');
+            const cfgField = document.getElementById('Input_BuildConfig');
+
+            const esc = (s) => (s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            let loadedFor = null;
+
+            function applyParsed(p) {
+                if (Array.isArray(p.cmakeArgs) && p.cmakeArgs.length) argsField.value = p.cmakeArgs.join('\n');
+                if (p.generator) genField.value = p.generator;
+                if (p.buildConfig) cfgField.value = p.buildConfig;
+                argsField.dispatchEvent(new Event('input'));
+            }
+            window.__applyParsed = applyParsed;
+
+            async function load() {
+                const backend = backendSelect ? backendSelect.value : 'Cpu';
+                loadedFor = backend;
+                body.innerHTML = '<p class="text-xs text-text-secondary">Loading…</p>';
+                try {
+                    const resp = await fetch(`/Features/Engines/Recipe?handler=Reference&backend=${encodeURIComponent(backend)}`);
+                    const data = await resp.json();
+                    body.innerHTML = data.docs.map(renderDoc).join('') || '<p class="text-xs text-text-secondary">Nothing found.</p>';
+                } catch (e) {
+                    body.innerHTML = `<p class="text-xs text-neon-red">Could not load reference: ${esc(String(e))}</p>`;
+                }
+            }
+
+            function renderDoc(d) {
+                const head = `<div class="text-xs"><a href="${esc(d.url)}" target="_blank" rel="noopener" class="text-neon-cyan hover:underline font-mono">${esc(d.path)}</a></div>`;
+                if (d.error) return `${head}<p class="text-xs text-text-secondary mt-1">${esc(d.error)}</p>`;
+                if (!d.commands.length) return `${head}<p class="text-xs text-text-secondary mt-1">No cmake configure commands found.</p>`;
+                const cmds = d.commands.map((c, i) => {
+                    const p = c.parsed;
+                    const btn = p
+                        ? `<button type="button" class="text-[11px] px-2 py-1 rounded bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all font-medium" onclick='window.__applyParsed(${JSON.stringify(p)})'>Apply</button>`
+                        : '';
+                    const ignored = (p && p.ignored && p.ignored.length)
+                        ? `<p class="text-[11px] text-yellow-400/80 mt-1">not applied (put in the environment setup command if needed): <span class="font-mono">${esc(p.ignored.join(' '))}</span></p>`
+                        : '';
+                    return `<div class="mt-2">
+                        <div class="flex items-start gap-2">
+                            <pre class="flex-1 bg-black/50 border border-gray-700/30 rounded p-2 text-[11px] font-mono text-text-secondary overflow-x-auto whitespace-pre-wrap">${esc(c.command)}</pre>
+                            ${btn}
+                        </div>${ignored}
+                    </div>`;
+                }).join('');
+                return `${head}${cmds}`;
+            }
+
+            loadBtn.addEventListener('click', load);
+            if (backendSelect) backendSelect.addEventListener('change', () => { if (loadedFor && loadedFor !== backendSelect.value) load(); });
+        })();
+    </script>
 }

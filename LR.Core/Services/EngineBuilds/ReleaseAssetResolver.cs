@@ -42,13 +42,21 @@ public static class ReleaseAssetResolver
             ("win", BackendType.Cuda) => Rx($@"^llama-.*-bin-win-cuda-[\d.]+-{a}\.zip$"),
             ("win", BackendType.Vulkan) => Rx($@"^llama-.*-bin-win-vulkan-{a}\.zip$"),
             ("win", BackendType.Sycl) => Rx($@"^llama-.*-bin-win-sycl-{a}\.zip$"),
+            ("win", BackendType.Hip) => Rx($@"^llama-.*-bin-win-rocm-[\d.]+-{a}\.zip$"),
+            ("win", BackendType.OpenVino) => Rx($@"^llama-.*-bin-win-openvino-[\d.]+-{a}\.zip$"),
+            // Adreno OpenCL is published for Windows-on-ARM only.
+            ("win", BackendType.OpenCL) when arch == "arm64" => Rx(@"^llama-.*-bin-win-opencl-adreno-arm64\.zip$"),
 
             ("ubuntu", BackendType.Cpu) => Rx($@"^llama-.*-bin-ubuntu-{a}\.tar\.gz$"),
             ("ubuntu", BackendType.Vulkan) => Rx($@"^llama-.*-bin-ubuntu-vulkan-{a}\.tar\.gz$"),
             ("ubuntu", BackendType.Sycl) => Rx($@"^llama-.*-bin-ubuntu-sycl-fp32-{a}\.tar\.gz$"),
+            ("ubuntu", BackendType.Hip) => Rx($@"^llama-.*-bin-ubuntu-rocm-[\d.]+-{a}\.tar\.gz$"),
+            ("ubuntu", BackendType.OpenVino) => Rx($@"^llama-.*-bin-ubuntu-openvino-[\d.]+-{a}\.tar\.gz$"),
 
-            ("macos", BackendType.Cpu) => Rx($@"^llama-.*-bin-macos-{a}\.tar\.gz$"),
+            // macOS archives are CPU + Metal in one; there's no separate Metal asset.
+            ("macos", BackendType.Cpu or BackendType.Metal) => Rx($@"^llama-.*-bin-macos-{a}\.tar\.gz$"),
 
+            // MUSA / CANN have no prebuilt archives — source compile only.
             _ => null,
         };
     }
@@ -108,7 +116,9 @@ public static class ReleaseAssetResolver
 
     private static Version ExtractVersion(string name)
     {
-        var m = Regex.Match(name, @"cuda-(\d+)\.(\d+)");
+        // e.g. "…-cuda-12.4-x64", "…-rocm-10.0-x64", "…-openvino-2026.3.1-x64" — order by the
+        // first two numeric components so the newest toolkit build wins.
+        var m = Regex.Match(name, @"-(?:cuda|rocm|openvino)-(\d+)\.(\d+)");
         return m.Success ? new Version(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value)) : new Version(0, 0);
     }
 

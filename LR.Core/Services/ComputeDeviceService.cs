@@ -230,6 +230,12 @@ public partial class ComputeDeviceService : IComputeDeviceService
                     backends.Add(BackendType.Vulkan);
                 break;
             case GpuVendor.Amd:
+                // amdhip64.dll ships with the AMD Adrenalin driver's HIP runtime / the HIP SDK.
+                if (RuntimeDllInstalled("amdhip64.dll") || RuntimeDllInstalled("amdhip64_6.dll"))
+                    backends.Add(BackendType.Hip);
+                if (vulkanInstalled)
+                    backends.Add(BackendType.Vulkan);
+                break;
             case GpuVendor.Unknown:
             default:
                 if (vulkanInstalled)

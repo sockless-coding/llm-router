@@ -15,4 +15,22 @@ public enum BackendType
     Vulkan = 2,
     Sycl = 3,
     Cpu = 4,
+
+    /// <summary>AMD ROCm / HIP (Windows, Linux).</summary>
+    Hip = 5,
+
+    /// <summary>Apple Metal (macOS).</summary>
+    Metal = 6,
+
+    /// <summary>OpenCL — Qualcomm Adreno on Windows-on-ARM, and Linux.</summary>
+    OpenCL = 7,
+
+    /// <summary>Intel OpenVINO (Windows, Linux).</summary>
+    OpenVino = 8,
+
+    /// <summary>Moore Threads MUSA (Linux).</summary>
+    Musa = 9,
+
+    /// <summary>Huawei Ascend CANN (Linux).</summary>
+    Cann = 10,
 }

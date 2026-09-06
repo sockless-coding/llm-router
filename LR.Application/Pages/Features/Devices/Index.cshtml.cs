@@ -37,6 +37,11 @@ public class DevicesListModel : PageModel
     {
         BackendType.Cuda => "CUDA",
         BackendType.Sycl => "SYCL",
+        BackendType.Hip => "HIP / ROCm",
+        BackendType.OpenCL => "OpenCL",
+        BackendType.OpenVino => "OpenVINO",
+        BackendType.Musa => "MUSA",
+        BackendType.Cann => "CANN",
         _ => backend.ToString(),
     };
 

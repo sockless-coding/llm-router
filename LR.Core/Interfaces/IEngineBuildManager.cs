@@ -39,4 +39,18 @@ public interface IEngineBuildManager
     /// the commits/PRs in between.
     /// </summary>
     Task<EngineBuildUpdateStatus> GetUpdateStatusAsync(Guid buildId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetches llama.cpp's own build docs / example scripts for a backend and extracts the
+    /// candidate <c>cmake</c> configure commands (with a best-effort parse into recipe fields), so
+    /// the recipe editor can show and offer to apply them.
+    /// </summary>
+    Task<IReadOnlyList<UpstreamDocReference>> GetUpstreamReferenceAsync(Models.BackendType backend, CancellationToken ct = default);
 }
+
+/// <summary>One upstream doc/script and the build commands pulled out of it.</summary>
+public record UpstreamDocReference(
+    string Path,
+    string Url,
+    IReadOnlyList<Services.EngineBuilds.CommandBlock> Commands,
+    string? Error);

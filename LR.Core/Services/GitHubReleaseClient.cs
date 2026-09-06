@@ -75,6 +75,23 @@ public class GitHubReleaseClient : IGitHubClient
         return await response.Content.ReadFromJsonAsync<GitHubCompareResult>(cancellationToken: ct);
     }
 
+    public async Task<string?> GetRawFileAsync(string repo, string reference, string path, CancellationToken ct = default)
+    {
+        var escapedPath = string.Join('/', path.Split('/').Select(Uri.EscapeDataString));
+        var url = $"{ApiBaseUrl}/repos/{repo}/contents/{escapedPath}?ref={Uri.EscapeDataString(reference)}";
+        using var request = await CreateRequestAsync(HttpMethod.Get, url, ct);
+        // Ask for the raw bytes rather than the base64-wrapped JSON metadata.
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.ParseAdd("application/vnd.github.raw+json");
+        using var response = await _httpClient.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("GitHub raw-file fetch {Repo}/{Path}@{Ref} failed: {Status}", repo, path, reference, response.StatusCode);
+            return null;
+        }
+        return await response.Content.ReadAsStringAsync(ct);
+    }
+
     public async Task DownloadAssetAsync(
         string downloadUrl,
         string destinationPath,

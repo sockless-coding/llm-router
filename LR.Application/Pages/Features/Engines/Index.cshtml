@@ -18,7 +18,19 @@
         BackendType.Cuda => "bg-neon-green/10 text-neon-green border-neon-green/20",
         BackendType.Vulkan => "bg-neon-magenta/10 text-neon-magenta border-neon-magenta/20",
         BackendType.Sycl => "bg-neon-cyan/10 text-neon-cyan border-neon-cyan/20",
+        BackendType.Hip => "bg-red-500/10 text-red-400 border-red-500/20",
+        BackendType.Metal => "bg-gray-400/10 text-gray-300 border-gray-400/20",
+        BackendType.OpenCL => "bg-amber-500/10 text-amber-400 border-amber-500/20",
+        BackendType.OpenVino => "bg-blue-500/10 text-blue-400 border-blue-500/20",
         _ => "bg-gray-700/30 text-text-secondary border-gray-600/20",
+    };
+
+    string BackendLabel(BackendType b) => b switch
+    {
+        BackendType.Hip => "HIP/ROCm",
+        BackendType.OpenVino => "OpenVINO",
+        BackendType.OpenCL => "OpenCL",
+        _ => b.ToString(),
     };
 }
 
@@ -97,7 +109,7 @@ else
                             <a href="/Features/Engines/Detail?id=@b.Id" class="text-text-primary font-medium hover:text-neon-cyan transition-colors">@b.Name</a>
                             <p class="text-xs text-text-secondary mt-0.5 font-mono">@b.InstallPath</p>
                         </td>
-                        <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded border @BackendBadge(b.BackendType)">@b.BackendType</span></td>
+                        <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded border @BackendBadge(b.BackendType)">@BackendLabel(b.BackendType)</span></td>
                         <td class="px-4 py-3 text-text-primary font-mono">@(b.VersionTag ?? (b.CommitSha is { Length: >= 7 } sha ? sha[..7] : "—"))</td>
                         <td class="px-4 py-3 text-text-secondary">@(b.Source == EngineBuildSource.OfficialRelease ? "Release" : "Compiled")</td>
                         <td class="px-4 py-3 text-right text-text-primary">@FormatSize(b.SizeBytes)</td>
@@ -151,7 +163,7 @@ else
         <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4">
             <div class="flex items-center justify-between mb-1">
                 <a href="/Features/Engines/Recipe?id=@r.Id" class="text-text-primary font-medium hover:text-neon-magenta transition-colors">@r.Name</a>
-                <span class="text-xs px-2 py-0.5 rounded border @BackendBadge(r.BackendType)">@r.BackendType</span>
+                <span class="text-xs px-2 py-0.5 rounded border @BackendBadge(r.BackendType)">@BackendLabel(r.BackendType)</span>
             </div>
             <p class="text-xs text-text-secondary mb-3">@r.Description</p>
             <p class="text-[11px] text-text-secondary font-mono break-words mb-3">@string.Join(" ", r.CMakeArgs)</p>

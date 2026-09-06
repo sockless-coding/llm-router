@@ -80,6 +80,35 @@ public class EngineRecipeModel : PageModel
         return RedirectToPage("Index");
     }
 
+    /// <summary>
+    /// Fetches llama.cpp's own build docs / example scripts for a backend and returns the candidate
+    /// cmake commands (with a best-effort parse). Called from the recipe editor's reference panel.
+    /// </summary>
+    public async Task<IActionResult> OnGetReferenceAsync(BackendType backend, CancellationToken ct)
+    {
+        var docs = await _manager.GetUpstreamReferenceAsync(backend, ct);
+        return new JsonResult(new
+        {
+            docs = docs.Select(d => new
+            {
+                path = d.Path,
+                url = d.Url,
+                error = d.Error,
+                commands = d.Commands.Select(c => new
+                {
+                    command = c.Command,
+                    parsed = c.Parsed is null ? null : new
+                    {
+                        cmakeArgs = c.Parsed.CMakeArgs,
+                        generator = c.Parsed.Generator,
+                        buildConfig = c.Parsed.BuildConfig,
+                        ignored = c.Parsed.Ignored,
+                    },
+                }),
+            }),
+        });
+    }
+
     public class RecipeInput
     {
         public string Name { get; set; } = string.Empty;

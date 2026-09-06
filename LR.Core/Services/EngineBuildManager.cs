@@ -125,13 +125,32 @@ public class EngineBuildManager : IEngineBuildManager
     {
         var existing = await _context.LlamaCppBuildRecipes
             .Where(r => r.IsBuiltIn)
-            .Select(r => r.Name)
             .ToListAsync(ct);
-        var have = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var byName = existing.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
 
         foreach (var template in BuiltInRecipeTemplates.All())
         {
-            if (have.Contains(template.Name)) continue;
+            if (byName.TryGetValue(template.Name, out var current))
+            {
+                // Keep built-in rows in sync with the templates (they're read-only in the UI —
+                // editing one saves a user copy — so overwriting here is safe and lets doc-based
+                // fixes reach existing installs).
+                if (!SameConfig(current, template))
+                {
+                    current.Description = template.Description;
+                    current.BackendType = template.BackendType;
+                    current.GitRepoUrl = template.GitRepoUrl;
+                    current.GitRef = template.GitRef;
+                    current.CMakeArgs = template.CMakeArgs;
+                    current.CMakeGenerator = template.CMakeGenerator;
+                    current.BuildConfig = template.BuildConfig;
+                    current.EnvironmentSetupCommand = template.EnvironmentSetupCommand;
+                    current.ExtraArtifactGlobs = template.ExtraArtifactGlobs;
+                    current.UpdatedAt = DateTime.UtcNow;
+                }
+                continue;
+            }
+
             template.Id = Guid.NewGuid();
             template.IsBuiltIn = true;
             template.CreatedAt = template.UpdatedAt = DateTime.UtcNow;
@@ -140,6 +159,17 @@ public class EngineBuildManager : IEngineBuildManager
 
         await _context.SaveChangesAsync(ct);
     }
+
+    private static bool SameConfig(LlamaCppBuildRecipe a, LlamaCppBuildRecipe b) =>
+        a.Description == b.Description &&
+        a.BackendType == b.BackendType &&
+        a.GitRepoUrl == b.GitRepoUrl &&
+        a.GitRef == b.GitRef &&
+        a.CMakeGenerator == b.CMakeGenerator &&
+        a.BuildConfig == b.BuildConfig &&
+        a.EnvironmentSetupCommand == b.EnvironmentSetupCommand &&
+        a.CMakeArgs.SequenceEqual(b.CMakeArgs) &&
+        a.ExtraArtifactGlobs.SequenceEqual(b.ExtraArtifactGlobs);
 
     public async Task ReconcileAsync(CancellationToken ct = default)
     {
@@ -222,5 +252,30 @@ public class EngineBuildManager : IEngineBuildManager
         result.UpdateAvailable = compare.AheadBy > 0 || compare.Status is "behind" or "diverged";
         result.Commits = ChangelogParser.ToEntries(compare, Repo);
         return result;
+    }
+
+    public async Task<IReadOnlyList<UpstreamDocReference>> GetUpstreamReferenceAsync(BackendType backend, CancellationToken ct = default)
+    {
+        var refs = new List<UpstreamDocReference>();
+        foreach (var path in UpstreamBuildDocs.SourcesFor(backend))
+        {
+            var url = UpstreamBuildDocs.GitHubUrlFor(Repo, path);
+            try
+            {
+                var content = await _github.GetRawFileAsync(Repo, UpstreamBuildDocs.DocsRef, path, ct);
+                if (content is null)
+                {
+                    refs.Add(new UpstreamDocReference(path, url, Array.Empty<CommandBlock>(), "Not found upstream."));
+                    continue;
+                }
+                var commands = UpstreamBuildDocs.ExtractCommandBlocks(path, content, backend);
+                refs.Add(new UpstreamDocReference(path, url, commands, null));
+            }
+            catch (Exception ex)
+            {
+                refs.Add(new UpstreamDocReference(path, url, Array.Empty<CommandBlock>(), ex.Message));
+            }
+        }
+        return refs;
     }
 }
