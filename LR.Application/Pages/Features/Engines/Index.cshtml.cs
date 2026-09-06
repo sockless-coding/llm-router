@@ -18,7 +18,10 @@ public class EnginesIndexModel : PageModel
     public Dictionary<Guid, int> ServerUsageCounts { get; set; } = new();
 
     [BindProperty]
-    public string BuildsRootFolder { get; set; } = string.Empty;
+    public string InstallRootFolder { get; set; } = string.Empty;
+
+    [BindProperty]
+    public string? BuildWorkspaceFolder { get; set; }
 
     [BindProperty]
     public string? GitHubApiToken { get; set; }
@@ -35,7 +38,8 @@ public class EnginesIndexModel : PageModel
     public async Task OnGetAsync()
     {
         var settings = await _settings.GetAsync();
-        BuildsRootFolder = settings.BuildsRootFolder;
+        InstallRootFolder = settings.InstallRootFolder;
+        BuildWorkspaceFolder = settings.BuildWorkspaceFolder;
         GitHubApiToken = settings.GitHubApiToken;
         await LoadAsync();
     }
@@ -44,7 +48,7 @@ public class EnginesIndexModel : PageModel
     {
         try
         {
-            await _settings.SaveAsync(BuildsRootFolder ?? string.Empty, GitHubApiToken);
+            await _settings.SaveAsync(InstallRootFolder ?? string.Empty, BuildWorkspaceFolder, GitHubApiToken);
             StatusMessage = "Engine build settings saved.";
         }
         catch (Exception ex)

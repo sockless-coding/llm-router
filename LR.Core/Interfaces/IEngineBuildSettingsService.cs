@@ -11,5 +11,5 @@ public interface IEngineBuildSettingsService
 {
     Task<EngineBuildSettings> GetAsync(CancellationToken ct = default);
 
-    Task SaveAsync(string buildsRootFolder, string? gitHubApiToken, CancellationToken ct = default);
+    Task SaveAsync(string installRootFolder, string? buildWorkspaceFolder, string? gitHubApiToken, CancellationToken ct = default);
 }

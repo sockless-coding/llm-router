@@ -30,7 +30,7 @@ public class EngineBuildSettingsService : IEngineBuildSettingsService
         return settings ?? new EngineBuildSettings();
     }
 
-    public async Task SaveAsync(string buildsRootFolder, string? gitHubApiToken, CancellationToken ct = default)
+    public async Task SaveAsync(string installRootFolder, string? buildWorkspaceFolder, string? gitHubApiToken, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
@@ -42,7 +42,8 @@ public class EngineBuildSettingsService : IEngineBuildSettingsService
             context.EngineBuildSettings.Add(settings);
         }
 
-        settings.BuildsRootFolder = buildsRootFolder;
+        settings.InstallRootFolder = installRootFolder;
+        settings.BuildWorkspaceFolder = buildWorkspaceFolder ?? string.Empty;
         settings.GitHubApiToken = gitHubApiToken;
         await context.SaveChangesAsync(ct);
     }

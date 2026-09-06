@@ -46,9 +46,10 @@ public class EngineBuildService
     /// <summary>The staging folder for a build's transient files and its <c>build.log</c>.</summary>
     public async Task<string?> GetWorkRootAsync(Guid buildId)
     {
-        var root = (await _settings.GetAsync()).BuildsRootFolder;
-        if (string.IsNullOrWhiteSpace(root)) return null;
-        return Path.Combine(root, ".work", buildId.ToString("N"));
+        var settings = await _settings.GetAsync();
+        if (string.IsNullOrWhiteSpace(settings.InstallRootFolder) && string.IsNullOrWhiteSpace(settings.BuildWorkspaceFolder))
+            return null;
+        return Path.Combine(settings.ResolveWorkspaceRoot(), ".work", buildId.ToString("N"));
     }
 
     /// <summary>Full transcript of a build's <c>build.log</c>, or null if there isn't one.</summary>
@@ -80,9 +81,11 @@ public class EngineBuildService
     /// </summary>
     public async Task<Guid> StartReleaseInstallAsync(BackendType backend, string? releaseTag, string? name)
     {
-        var root = (await _settings.GetAsync()).BuildsRootFolder;
-        if (string.IsNullOrWhiteSpace(root))
-            throw new InvalidOperationException("Set an engine builds root folder in Settings before installing builds.");
+        var settings = await _settings.GetAsync();
+        var installRoot = settings.InstallRootFolder;
+        if (string.IsNullOrWhiteSpace(installRoot))
+            throw new InvalidOperationException("Set an engine install root folder in Settings before installing builds.");
+        var workspaceRoot = settings.ResolveWorkspaceRoot();
 
         // Resolve "latest" up front so the folder is named for the actual build number.
         if (releaseTag is null)
@@ -94,7 +97,7 @@ public class EngineBuildService
 
         var tagLabel = releaseTag;
         var folderName = SanitizeFolder($"{tagLabel}-{backend.ToString().ToLowerInvariant()}");
-        var outputDir = Path.GetFullPath(Path.Combine(root, folderName));
+        var outputDir = Path.GetFullPath(Path.Combine(installRoot, folderName));
 
         Guid buildId;
         using (var scope = _scopeFactory.CreateScope())
@@ -121,7 +124,7 @@ public class EngineBuildService
 
         var cts = new CancellationTokenSource();
         _active[buildId] = cts;
-        _ = Task.Run(() => RunReleaseInstallAsync(buildId, backend, releaseTag, root, outputDir, cts.Token));
+        _ = Task.Run(() => RunReleaseInstallAsync(buildId, backend, releaseTag, workspaceRoot, outputDir, cts.Token));
         return buildId;
     }
 
@@ -131,9 +134,11 @@ public class EngineBuildService
     /// </summary>
     public async Task<Guid> StartSourceBuildAsync(Guid recipeId, string? gitRefOverride, string? name)
     {
-        var root = (await _settings.GetAsync()).BuildsRootFolder;
-        if (string.IsNullOrWhiteSpace(root))
-            throw new InvalidOperationException("Set an engine builds root folder in Settings before building.");
+        var settings = await _settings.GetAsync();
+        var installRoot = settings.InstallRootFolder;
+        if (string.IsNullOrWhiteSpace(installRoot))
+            throw new InvalidOperationException("Set an engine install root folder in Settings before building.");
+        var workspaceRoot = settings.ResolveWorkspaceRoot();
 
         LlamaCppBuildRecipe recipe;
         Guid buildId;
@@ -147,7 +152,7 @@ public class EngineBuildService
             var refLabel = string.IsNullOrWhiteSpace(gitRefOverride) ? recipe.GitRef : gitRefOverride!;
             var recipeSlug = SanitizeFolder(recipe.Name).Replace(' ', '-').ToLowerInvariant();
             var folderName = SanitizeFolder($"{refLabel}-{recipe.BackendType.ToString().ToLowerInvariant()}-{recipeSlug}");
-            outputDir = Path.GetFullPath(Path.Combine(root, folderName));
+            outputDir = Path.GetFullPath(Path.Combine(installRoot, folderName));
 
             if (await context.LlamaCppBuilds.AnyAsync(b => b.InstallPath == outputDir))
                 throw new InvalidOperationException($"A build already exists at {outputDir}. Delete it or change the recipe/ref.");
@@ -169,21 +174,22 @@ public class EngineBuildService
 
         var cts = new CancellationTokenSource();
         _active[buildId] = cts;
-        _ = Task.Run(() => RunSourceBuildAsync(buildId, recipe, gitRefOverride, root, outputDir, cts.Token));
+        _ = Task.Run(() => RunSourceBuildAsync(buildId, recipe, gitRefOverride, workspaceRoot, outputDir, cts.Token));
         return buildId;
     }
 
     private async Task RunSourceBuildAsync(
-        Guid buildId, LlamaCppBuildRecipe recipe, string? gitRefOverride, string root, string outputDir, CancellationToken ct)
+        Guid buildId, LlamaCppBuildRecipe recipe, string? gitRefOverride, string workspaceRoot, string outputDir, CancellationToken ct)
     {
-        var workRoot = Path.Combine(root, ".work", buildId.ToString("N"));
+        var workRoot = Path.Combine(workspaceRoot, ".work", buildId.ToString("N"));
         Directory.CreateDirectory(workRoot);
         var sink = new BuildProgressSink(buildId, _progressPublisher, Path.Combine(workRoot, "build.log"), _logger);
 
-        // Shared, reused git checkout keyed by repo URL.
+        // Shared, reused git checkout keyed by repo URL — lives in the workspace so it's shared
+        // across every recipe that builds from the same repo.
         var repoKey = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(
             System.Text.Encoding.UTF8.GetBytes(recipe.GitRepoUrl)))[..12].ToLowerInvariant();
-        var sharedSrc = Path.Combine(root, ".src", repoKey);
+        var sharedSrc = Path.Combine(workspaceRoot, ".src", repoKey);
 
         var ctx = new BuildContext
         {
@@ -251,9 +257,9 @@ public class EngineBuildService
     }
 
     private async Task RunReleaseInstallAsync(
-        Guid buildId, BackendType backend, string? releaseTag, string root, string outputDir, CancellationToken ct)
+        Guid buildId, BackendType backend, string? releaseTag, string workspaceRoot, string outputDir, CancellationToken ct)
     {
-        var workRoot = Path.Combine(root, ".work", buildId.ToString("N"));
+        var workRoot = Path.Combine(workspaceRoot, ".work", buildId.ToString("N"));
         Directory.CreateDirectory(workRoot);
         var sink = new BuildProgressSink(buildId, _progressPublisher, Path.Combine(workRoot, "build.log"), _logger);
 

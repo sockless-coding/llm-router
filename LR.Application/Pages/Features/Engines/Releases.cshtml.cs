@@ -29,7 +29,7 @@ public class EngineReleasesModel : PageModel
     public async Task OnGetAsync()
     {
         (HostOs, HostArch) = ReleaseAssetResolver.DetectHost();
-        RootConfigured = !string.IsNullOrWhiteSpace((await _settings.GetAsync()).BuildsRootFolder);
+        RootConfigured = !string.IsNullOrWhiteSpace((await _settings.GetAsync()).InstallRootFolder);
 
         try
         {
