@@ -151,7 +151,7 @@ public class EngineRecipeModel : PageModel
             ExtraArtifactGlobs = SplitLines(ExtraArtifactGlobsText),
         };
 
-        private static List<string> SplitLines(string text) => text
+        private static List<string> SplitLines(string? text) => (text ?? string.Empty)
             .Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToList();
     }
