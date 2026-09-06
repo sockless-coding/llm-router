@@ -35,6 +35,7 @@ public class EngineActionsModel : PageModel
         return Command?.ToLowerInvariant() switch
         {
             "installrelease" => await InstallReleaseAsync(),
+            "update" => await UpdateAsync(),
             "startbuild" => await StartBuildAsync(),
             "cancel" => Cancel(),
             "delete" => await DeleteAsync(),
@@ -52,6 +53,22 @@ public class EngineActionsModel : PageModel
             var tag = string.IsNullOrWhiteSpace(ReleaseTag) ? null : ReleaseTag.Trim();
             var id = await _buildService.StartReleaseInstallAsync(Backend, tag, string.IsNullOrWhiteSpace(Name) ? null : Name);
             return new JsonResult(new { success = true, buildId = id, message = "Install started." });
+        }
+        catch (Exception ex)
+        {
+            return new JsonResult(new { success = false, message = ex.Message });
+        }
+    }
+
+    private async Task<IActionResult> UpdateAsync()
+    {
+        try
+        {
+            var refOverride = !string.IsNullOrWhiteSpace(ReleaseTag) ? ReleaseTag!.Trim()
+                : !string.IsNullOrWhiteSpace(GitRef) ? GitRef!.Trim()
+                : null;
+            var id = await _buildService.StartUpdateAsync(BuildId, refOverride);
+            return new JsonResult(new { success = true, buildId = id, message = "Update started." });
         }
         catch (Exception ex)
         {

@@ -102,7 +102,8 @@ public class GgufMetadataReader : IGgufMetadataReader
                 var key = ReadString(reader);
                 var valueType = (GgufValueType)reader.ReadUInt32();
                 var value = ReadValue(reader, valueType);
-                rawKvPairs[key] = value;
+                if (value is not null)
+                    rawKvPairs[key] = value;
             }
 
             // Build GgufMetadata from parsed KV pairs

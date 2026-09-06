@@ -495,7 +495,7 @@ public class ServerManager : IServerManager
     {
         // Check registry first (fast path — already registered from CreateInstanceAsync or previous call)
         if (_registry.TryGet(instance.Id, out var provider))
-            return provider;
+            return provider!;
 
         // Lazy registration: create and register a provider for the instance's engine.
         // This handles cases where the app was restarted and existing DB instances

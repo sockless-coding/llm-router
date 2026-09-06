@@ -38,13 +38,21 @@ else
                 <a href="@s.CompareUrl" target="_blank" rel="noopener" class="text-neon-cyan hover:underline text-xs">Full compare on GitHub →</a>
             }
         </div>
-        @if (s.UpdateAvailable && b.Source == EngineBuildSource.OfficialRelease)
+        @if (s.UpdateAvailable)
         {
-            <div class="mt-3">
-                <button type="button" onclick="installLatest('@b.BackendType')" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">
-                    Install @s.LatestTag (@b.BackendType)
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button type="button" onclick="updateInPlace('@b.Id')" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">
+                    Update in place to @s.LatestTag
                 </button>
+                <span class="text-[11px] text-text-secondary">Replaces the files in <span class="font-mono break-all">@b.InstallPath</span> — the @Model.ServerUsage bound server(s) keep working, no re-pointing.</span>
             </div>
+            <p class="text-[11px] text-text-secondary mt-1">
+                @if (b.Source == EngineBuildSource.SourceCompile)
+                {
+                    <text>This is a source build — updating recompiles it from the recipe, which can take a while.</text>
+                }
+                Stop any server using this build before updating.
+            </p>
         }
     </div>
 
@@ -76,16 +84,16 @@ else
     <script>
         (function () {
             const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
-            window.installLatest = async function (backend) {
-                if (!confirm(`Install the latest ${backend} release?`)) return;
+            window.updateInPlace = async function (buildId) {
+                if (!confirm('Update this build in place? Its install folder is replaced with the new version. Stop any server using it first.')) return;
                 const formData = new FormData();
-                formData.append('Command', 'installRelease');
-                formData.append('Backend', backend);
+                formData.append('Command', 'update');
+                formData.append('BuildId', buildId);
                 formData.append('__RequestVerificationToken', token());
                 const resp = await fetch('/Features/Engines/Actions', { method: 'POST', body: formData });
                 const result = await resp.json();
                 if (result.success) location.href = '/Features/Engines/Detail?id=' + result.buildId;
-                else alert(result.message || 'Could not start install.');
+                else alert(result.message || 'Could not start update.');
             };
         })();
     </script>

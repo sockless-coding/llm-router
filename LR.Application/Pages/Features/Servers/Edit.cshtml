@@ -98,6 +98,15 @@
             }
         });
     }
+
+    // The manual folder path only applies when no managed build is selected.
+    function toggleFolderField() {
+        const buildSelect = document.getElementById('ViewModel_EngineBuildId');
+        const folderField = document.getElementById('llamacppFolderField');
+        if (buildSelect && folderField) {
+            folderField.classList.toggle('hidden', !!buildSelect.value);
+        }
+    }
     </script>
 
         <!-- Config section -->
@@ -109,12 +118,12 @@
                 <!-- Managed build -->
                 <div>
                     <label asp-for="ViewModel.EngineBuildId" class="block text-sm font-medium text-text-secondary mb-1">
-                        Managed Build <span class="text-gray-500">(optional)</span>
+                        Engine Build
                     </label>
-                    <p class="text-xs text-gray-500 mb-2">Bind this server to a build from <a href="/Features/Engines/Index" class="text-neon-cyan/70 hover:text-neon-cyan">Engines</a>. Its install folder is used automatically and the path below is ignored.</p>
-                    <select asp-for="ViewModel.EngineBuildId"
+                    <p class="text-xs text-gray-500 mb-2">Bind this server to a build from <a href="/Features/Engines/Index" class="text-neon-cyan/70 hover:text-neon-cyan">Engines</a>. Its install folder is used automatically and the path below is ignored. Choose <em>custom folder</em> to manage the build yourself.</p>
+                    <select asp-for="ViewModel.EngineBuildId" onchange="toggleFolderField()"
                             class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all text-sm">
-                        <option value="">— none (use folder path below) —</option>
+                        <option value="">— custom folder (use folder path below) —</option>
                         @foreach (var build in Model.AvailableBuilds)
                         {
                             <option value="@build.Id" selected="@(Model.ViewModel.EngineBuildId == build.Id)">@build.Name — @build.BackendType (@(build.VersionTag ?? "?"))</option>
@@ -123,7 +132,7 @@
                 </div>
 
                 <!-- Executable Folder Path -->
-                <div>
+                <div id="llamacppFolderField">
                     <label asp-for="ViewModel.LlamaCppExecutableFolderPath" class="block text-sm font-medium text-text-secondary mb-1">
                         Server Folder Path
                     </label>
@@ -169,4 +178,9 @@
             </div>
         }
     </form>
+
+    <script>
+        // Runs inline (not on DOMContentLoaded) so it also fires on htmx-boosted revisits.
+        toggleFolderField();
+    </script>
 }

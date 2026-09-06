@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
@@ -13,11 +14,13 @@ public class RequestDispatcherService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IRequestQueueService _queue;
+    private readonly ILogger<RequestDispatcherService> _logger;
 
-    public RequestDispatcherService(IServiceScopeFactory scopeFactory, IRequestQueueService queue)
+    public RequestDispatcherService(IServiceScopeFactory scopeFactory, IRequestQueueService queue, ILogger<RequestDispatcherService> logger)
     {
         _scopeFactory = scopeFactory;
         _queue = queue;
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -59,6 +62,7 @@ public class RequestDispatcherService : BackgroundService
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 // Log but don't crash the dispatcher
+                _logger.LogError(ex, "Request dispatcher loop iteration failed; continuing.");
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(50), stoppingToken);

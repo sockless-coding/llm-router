@@ -44,7 +44,7 @@ public class DashboardModel : PageModel
         // Also include any server IDs that appear in statistics but aren't currently active
         var statServerIds = await _context.ModelStatistics
             .Where(s => s.Timestamp >= now.AddDays(-1))
-            .Select(s => new { s.ServerInstanceId, s.ServerInstance.Name })
+            .Select(s => new { s.ServerInstanceId, s.ServerInstance!.Name })
             .Distinct()
             .ToListAsync();
 

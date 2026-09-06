@@ -263,10 +263,6 @@ app.MapHub<LR.Application.Hubs.StatsHub>("/statsHub");
 // --- Health endpoint for agents ---
 app.MapGet("/health", async (IServerManager serverManager) =>
 {
-    return Results.Json(new
-    {
-        status = "ok"
-    });
     var instances = await serverManager.GetAllInstancesAsync();
     var hasHealthyServer = instances.Any(s => s.Status == ServerStatus.Running && s.IsHealthy);
 

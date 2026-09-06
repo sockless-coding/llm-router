@@ -7,7 +7,7 @@
 
 @functions {
     string Truncate(string? s, int max)
-        => (s?.Length ?? 0) > max ? s[..(max - 3)] + "..." : (s ?? "");
+        => s is not null && s.Length > max ? s[..(max - 3)] + "..." : (s ?? "");
 
     string FormatSize(long? bytes)
     {

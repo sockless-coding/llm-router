@@ -633,7 +633,11 @@ public class OllamaHandler : IProtocolHandler
             PresencePenalty = ollamaRequest.Options != null && ollamaRequest.Options.PresencePenalty.HasValue ? (float)ollamaRequest.Options.PresencePenalty.Value : null,
             FrequencyPenalty = ollamaRequest.Options != null && ollamaRequest.Options.FrequencyPenalty.HasValue ? (float)ollamaRequest.Options.FrequencyPenalty.Value : null,
             Seed = ollamaRequest.Options?.Seed,
+            // Emitted as OpenAI "max_tokens": llama.cpp's server reads that field on every build,
+            // whereas "max_completion_tokens" is only honoured by newer ones.
+#pragma warning disable CS0618
             MaxTokens = ollamaRequest.Options?.NumPredict,
+#pragma warning restore CS0618
             Stop = ollamaRequest.Options?.Stop,
             Messages = ConvertOllamaMessages(ollamaRequest.Messages),
             Tools = ollamaRequest.Tools,
@@ -791,7 +795,11 @@ public class OllamaHandler : IProtocolHandler
             PresencePenalty = generateRequest.Options != null && generateRequest.Options.PresencePenalty.HasValue ? (float)generateRequest.Options.PresencePenalty.Value : null,
             FrequencyPenalty = generateRequest.Options != null && generateRequest.Options.FrequencyPenalty.HasValue ? (float)generateRequest.Options.FrequencyPenalty.Value : null,
             Seed = generateRequest.Options?.Seed,
+            // Emitted as OpenAI "max_tokens": llama.cpp's server reads that field on every build,
+            // whereas "max_completion_tokens" is only honoured by newer ones.
+#pragma warning disable CS0618
             MaxTokens = generateRequest.Options?.NumPredict,
+#pragma warning restore CS0618
             Stop = generateRequest.Options?.Stop,
             Messages = messages,
             ReasoningEffort = ExtractThinkEffort(generateRequest.Think)

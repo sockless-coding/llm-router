@@ -119,7 +119,7 @@
                     <span aria-hidden="true">@(section.Icon)</span> @(section.Title)
                     @if (hasContent)
                     {
-                        <span class="ml-2 text-xs text-text-secondary font-normal">@string.Format("{0:N0}", section.Content.Length) chars</span>
+                        <span class="ml-2 text-xs text-text-secondary font-normal">@string.Format("{0:N0}", section.Content!.Length) chars</span>
                     }
                 </span>
                 @{

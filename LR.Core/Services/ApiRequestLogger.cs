@@ -42,7 +42,7 @@ public class ApiRequestLogger : IApiRequestLogger
         {
             Protocol = protocol,
             EndpointPath = endpointPath,
-            IncomingPayload = TruncateForStorage(incomingPayload),
+            IncomingPayload = TruncateForStorage(incomingPayload) ?? string.Empty,
             ModelName = modelName,
             // Auth runs (as an endpoint filter) before the handler calls this, so the key — if
             // any — is already resolved on the shared request scope.

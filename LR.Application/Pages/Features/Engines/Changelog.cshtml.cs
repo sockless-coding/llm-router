@@ -15,6 +15,7 @@ public class EngineChangelogModel : PageModel
 
     public LlamaCppBuild? Build { get; set; }
     public EngineBuildUpdateStatus? Status { get; set; }
+    public int ServerUsage { get; set; }
 
     public EngineChangelogModel(IEngineBuildManager manager) => _manager = manager;
 
@@ -23,6 +24,7 @@ public class EngineChangelogModel : PageModel
         Build = await _manager.GetBuildAsync(Id);
         if (Build is null) return NotFound();
 
+        ServerUsage = await _manager.GetServerUsageCountAsync(Id);
         Status = await _manager.GetUpdateStatusAsync(Id, ct);
         return Page();
     }
