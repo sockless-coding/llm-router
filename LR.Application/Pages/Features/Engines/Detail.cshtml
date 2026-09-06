@@ -8,13 +8,16 @@
 
 <form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
 
-<div class="flex items-center gap-3 mb-6">
+<!-- Full-height flex column so the build log can stretch to fill the viewport and scroll internally -->
+<div class="flex flex-col h-full min-h-0">
+
+<div class="flex items-center gap-3 mb-6 shrink-0">
     <a href="/Features/Engines/Index" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
     <span class="text-text-secondary">/</span>
     <p class="text-text-primary text-sm font-medium">@b.Name</p>
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 shrink-0">
     <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-2 text-sm">
         <div class="flex justify-between"><span class="text-text-secondary">Backend</span><span class="text-text-primary">@b.BackendType</span></div>
         <div class="flex justify-between"><span class="text-text-secondary">Source</span><span class="text-text-primary">@(b.Source == EngineBuildSource.OfficialRelease ? "Official release" : "Compiled from source")</span></div>
@@ -39,8 +42,10 @@
     </div>
 </div>
 
-<h2 class="text-sm font-semibold uppercase tracking-wider text-text-secondary mb-2">Build log</h2>
-<pre id="build-log" class="bg-black/60 border border-gray-700/30 rounded-xl p-4 text-xs font-mono text-text-secondary overflow-auto max-h-[32rem] whitespace-pre-wrap">@(Model.BuildLog ?? "(no log)")</pre>
+<h2 class="text-sm font-semibold uppercase tracking-wider text-text-secondary mb-2 shrink-0">Build log</h2>
+<pre id="build-log" class="flex-1 min-h-[12rem] bg-black/60 border border-gray-700/30 rounded-xl p-4 text-xs font-mono text-text-secondary overflow-auto whitespace-pre-wrap">@(Model.BuildLog ?? "(no log)")</pre>
+
+</div>
 
 @section Scripts {
     <script>
@@ -63,12 +68,24 @@
             const logEl = document.getElementById('build-log');
             const statusEl = document.getElementById('build-status');
 
+            // Stick to the bottom as new output streams in, but stop fighting the user
+            // the moment they scroll up to read something further back.
+            const stuckToBottom = () => logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+            const scrollToBottom = () => { logEl.scrollTop = logEl.scrollHeight; };
+
+            // Server-rendered log starts scrolled to the bottom too.
+            scrollToBottom();
+
             async function poll() {
                 if (!inFlight) return;
                 try {
                     const resp = await fetch(`/Features/Engines/Detail?handler=Log&id=${buildId}`);
                     const data = await resp.json();
-                    if (data.log) { logEl.textContent = data.log; logEl.scrollTop = logEl.scrollHeight; }
+                    if (data.log) {
+                        const wasStuck = stuckToBottom();
+                        logEl.textContent = data.log;
+                        if (wasStuck) scrollToBottom();
+                    }
                     if (statusEl && data.status) statusEl.textContent = data.status;
                     if (!data.inFlight) { inFlight = false; setTimeout(() => location.reload(), 800); return; }
                 } catch { /* transient */ }

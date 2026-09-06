@@ -150,20 +150,61 @@ public class ApiRequestLogger : IApiRequestLogger
         ApiProtocol? protocolFilter = null,
         DateTimeOffset? from = null)
     {
-        // Fetch all (client-side filter for DateTimeOffset — SQLite can't translate it)
-        var query = _context.ApiRequestLogs.AsQueryable();
+        var query = _context.ApiRequestLogs.AsNoTracking();
 
         if (protocolFilter.HasValue)
             query = query.Where(l => l.Protocol == protocolFilter.Value);
 
-        var all = await query.ToListAsync();
+        // The time-window filter and ordering run client-side because the SQLite EF
+        // provider can't translate DateTimeOffset comparisons. To keep that affordable we
+        // first project away the payload chain — those TEXT columns run to ~1 MB each and
+        // the list view never shows them — and pull only the columns the table renders.
+        var rows = await query
+            .Select(l => new
+            {
+                l.Id,
+                l.Timestamp,
+                l.Protocol,
+                l.EndpointPath,
+                l.ModelName,
+                ServerName = l.ServerInstance != null ? l.ServerInstance.Name : null,
+                l.TotalLatencyMs,
+                l.FirstTokenLatencyMs,
+                l.PromptTokensProcessed,
+                l.GeneratedTokenCount,
+                l.StatusCode,
+                l.IsStreaming,
+                l.WasQueued,
+                l.ErrorMessage,
+            })
+            .ToListAsync();
 
-        // Client-side time filter
-        if (from.HasValue)
-            all = all.Where(l => l.Timestamp >= from.Value).ToList();
+        var window = from.HasValue
+            ? rows.Where(r => r.Timestamp >= from.Value).ToList()
+            : rows;
 
-        long totalCount = (long)all.Count;
-        var logs = all.OrderByDescending(l => l.Timestamp).Take(count).ToList();
+        long totalCount = window.Count;
+        var logs = window
+            .OrderByDescending(r => r.Timestamp)
+            .Take(count)
+            .Select(r => new ApiRequestLog
+            {
+                Id = r.Id,
+                Timestamp = r.Timestamp,
+                Protocol = r.Protocol,
+                EndpointPath = r.EndpointPath,
+                ModelName = r.ModelName,
+                ServerInstance = r.ServerName is null ? null : new ServerInstance { Name = r.ServerName },
+                TotalLatencyMs = r.TotalLatencyMs,
+                FirstTokenLatencyMs = r.FirstTokenLatencyMs,
+                PromptTokensProcessed = r.PromptTokensProcessed,
+                GeneratedTokenCount = r.GeneratedTokenCount,
+                StatusCode = r.StatusCode,
+                IsStreaming = r.IsStreaming,
+                WasQueued = r.WasQueued,
+                ErrorMessage = r.ErrorMessage,
+            })
+            .ToList();
 
         return (logs, totalCount);
     }
@@ -177,18 +218,23 @@ public class ApiRequestLogger : IApiRequestLogger
     /// <inheritdoc />
     public async Task<long> DeleteOlderThanAsync(DateTimeOffset cutoff)
     {
-        // SQLite EF provider can't translate DateTimeOffset comparisons in SQL.
-        // Fetch the entities and filter client-side, then delete from context.
-        var allLogs = await _context.ApiRequestLogs.ToListAsync();
-        var toDelete = allLogs.Where(l => l.Timestamp < cutoff).ToList();
+        // SQLite EF provider can't translate DateTimeOffset comparisons in SQL, so the
+        // cutoff filter runs client-side — but scan only (Id, Timestamp) rather than
+        // pulling every row's payload columns just to decide what to delete.
+        var stamps = await _context.ApiRequestLogs
+            .AsNoTracking()
+            .Select(l => new { l.Id, l.Timestamp })
+            .ToListAsync();
+        var idsToDelete = stamps.Where(l => l.Timestamp < cutoff).Select(l => l.Id).ToList();
 
-        if (toDelete.Count == 0) return 0;
+        if (idsToDelete.Count == 0) return 0;
 
-        _context.ApiRequestLogs.RemoveRange(toDelete);
-        await _context.SaveChangesAsync();
+        // Guid IN (...) translates fine; chunk so the parameter list never gets huge.
+        foreach (var chunk in idsToDelete.Chunk(500))
+            await _context.ApiRequestLogs.Where(l => chunk.Contains(l.Id)).ExecuteDeleteAsync();
 
-        _logger.LogInformation("Deleted {Count} request logs older than {Cutoff}", toDelete.Count, cutoff);
-        return toDelete.Count;
+        _logger.LogInformation("Deleted {Count} request logs older than {Cutoff}", idsToDelete.Count, cutoff);
+        return idsToDelete.Count;
     }
 
     /// <inheritdoc />
@@ -196,8 +242,13 @@ public class ApiRequestLogger : IApiRequestLogger
     {
         var startOfDay = DateTimeOffset.UtcNow.Date;
 
-        // Client-side filter for DateTimeOffset — SQLite can't translate it
-        var allLogs = await _context.ApiRequestLogs.ToListAsync();
+        // Client-side filter for DateTimeOffset — SQLite can't translate it — but project
+        // to just the three fields the cards need rather than loading whole entities
+        // (payload columns included) for the entire table.
+        var allLogs = await _context.ApiRequestLogs
+            .AsNoTracking()
+            .Select(l => new { l.Timestamp, l.Protocol, l.TotalLatencyMs })
+            .ToListAsync();
         var todayLogs = allLogs.Where(l => l.Timestamp >= startOfDay).ToList();
 
         long totalToday = (long)todayLogs.Count;
