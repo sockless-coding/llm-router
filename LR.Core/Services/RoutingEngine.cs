@@ -266,9 +266,8 @@ public class RoutingEngine : IRoutingEngine
         if (instance.Engine != ServerEngine.LlamaCpp)
             return new RouteDecision { Server = instance, Lease = ServerConcurrencyLimiter.NoopLease };
 
-        int capacity =
-            (_serverManager.GetProvider(instance.Id) as IServerCapacityProvider)?.MaxConcurrentRequests
-            ?? (preset?.Parallel is int p && p > 0 ? p : _settings.DefaultParallelSlots);
+        int capacity = LlamaSlotCapacity.Resolve(
+            _serverManager.GetProvider(instance.Id), preset, _settings.DefaultParallelSlots);
 
         var lease = _concurrencyLimiter.TryAcquire(instance.Id, capacity);
         return lease is null ? null : new RouteDecision { Server = instance, Lease = lease };

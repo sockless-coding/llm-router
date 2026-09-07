@@ -188,6 +188,7 @@ builder.Services.AddScoped<LR.Application.Pages.Api.ResponsesHandler>();
 // Background services
 builder.Services.AddHostedService<ServerHealthMonitorService>();
 builder.Services.AddHostedService<LR.Application.Services.RequestDispatcherService>();
+builder.Services.AddHostedService<LR.Application.Services.ServerLoadBroadcastService>();
 
 // Retention cleanup for request logs (runs hourly)
 builder.Services.AddHostedService<RetentionCleanupService>();

@@ -26,14 +26,17 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     public int? ServerPid => _processManager.ServerPid;
 
     /// <summary>
-    /// Slot count reported by the running llama.cpp server via <c>/props</c> (<c>total_slots</c>,
-    /// which equals the resolved <c>-np</c>). 0 until the first successful health check reads it;
-    /// reset on stop/restart so a restart with a different <c>-np</c> is re-read.
+    /// Snapshot of the running server's <c>/props</c> (slot count, context window, modalities,
+    /// build info). Null until the first successful health check reads it; reset on stop/restart
+    /// so a restart with a different config is re-read.
     /// </summary>
-    private volatile int _reportedSlotCount;
+    private volatile LlamaServerProps? _serverProps;
 
     /// <inheritdoc />
-    public int? MaxConcurrentRequests => _reportedSlotCount > 0 ? _reportedSlotCount : null;
+    public int? MaxConcurrentRequests => _serverProps?.TotalSlots is int n && n > 0 ? n : null;
+
+    /// <inheritdoc />
+    public LlamaServerProps? ServerProps => _serverProps;
 
     /// <summary>
     /// Path to the folder containing the llama.cpp server executable (e.g., "llama-server").
@@ -184,8 +187,8 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
         if (!File.Exists(ServerExecutablePath))
             throw new FileNotFoundException($"Server executable not found at: {ServerExecutablePath}");
 
-        // Forget any slot count from a previous run — this start may use a different -np.
-        _reportedSlotCount = 0;
+        // Forget the previous run's /props — this start may use a different config.
+        _serverProps = null;
 
         // Update port if provided
         if (port.HasValue)
@@ -241,7 +244,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
         _logger.LogInformation("Stopping server at {ServerUrl}", ServerUrl);
         await LogProviderMessage(ServerLogLevel.Info, "Server stop initiated.");
 
-        _reportedSlotCount = 0;
+        _serverProps = null;
 
         await _processManager.StopAllProcessesAsync(cancellationToken);
     }
@@ -259,10 +262,10 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
             if (!response.IsSuccessStatusCode)
                 return false;
 
-            // Now that the server is up, learn its real slot count once (equals the resolved
-            // -np). The router uses this to cap how many requests it sends here concurrently.
-            if (_reportedSlotCount == 0)
-                await TryRefreshSlotCountAsync(httpClient, cancellationToken);
+            // Now that the server is up, read its /props once — slot count (the resolved -np,
+            // used by the router to cap concurrency), context window, modalities, build info.
+            if (_serverProps is null)
+                await TryRefreshServerPropsAsync(httpClient, cancellationToken);
 
             return true;
         }
@@ -273,11 +276,11 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     }
 
     /// <summary>
-    /// Best-effort read of <c>total_slots</c> from llama.cpp's <c>/props</c> endpoint. Any
-    /// failure is swallowed — the server is already known healthy and the router falls back to
-    /// the preset / configured default until this succeeds on a later health check.
+    /// Best-effort read of llama.cpp's <c>/props</c> endpoint. Any failure is swallowed — the
+    /// server is already known healthy and callers fall back to preset/GGUF data until this
+    /// succeeds on a later health check.
     /// </summary>
-    private async Task TryRefreshSlotCountAsync(HttpClient httpClient, CancellationToken cancellationToken)
+    private async Task TryRefreshServerPropsAsync(HttpClient httpClient, CancellationToken cancellationToken)
     {
         try
         {
@@ -287,13 +290,43 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            if (doc.RootElement.TryGetProperty("total_slots", out var slots) &&
-                slots.TryGetInt32(out var count) &&
-                count > 0)
+            var root = doc.RootElement;
+
+            int? totalSlots = root.TryGetProperty("total_slots", out var slots) && slots.TryGetInt32(out var s) && s > 0
+                ? s : null;
+
+            int? ctxPerSlot = root.TryGetProperty("default_generation_settings", out var gen) &&
+                              gen.ValueKind == JsonValueKind.Object &&
+                              gen.TryGetProperty("n_ctx", out var nctx) && nctx.TryGetInt32(out var c) && c > 0
+                ? c : null;
+
+            bool? vision = null, audio = null;
+            if (root.TryGetProperty("modalities", out var mods) && mods.ValueKind == JsonValueKind.Object)
             {
-                _reportedSlotCount = count;
-                await LogProviderMessage(ServerLogLevel.Info, $"Server reports {count} parallel slot(s).");
+                if (mods.TryGetProperty("vision", out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False))
+                    vision = v.GetBoolean();
+                if (mods.TryGetProperty("audio", out var a) && (a.ValueKind == JsonValueKind.True || a.ValueKind == JsonValueKind.False))
+                    audio = a.GetBoolean();
             }
+
+            string? modelPath = root.TryGetProperty("model_path", out var mp) && mp.ValueKind == JsonValueKind.String
+                ? mp.GetString() : null;
+            string? buildInfo = root.TryGetProperty("build_info", out var bi) && bi.ValueKind == JsonValueKind.String
+                ? bi.GetString() : null;
+
+            _serverProps = new LlamaServerProps
+            {
+                TotalSlots = totalSlots,
+                ContextSizePerSlot = ctxPerSlot,
+                Vision = vision,
+                Audio = audio,
+                ModelPath = modelPath,
+                BuildInfo = buildInfo,
+            };
+
+            await LogProviderMessage(ServerLogLevel.Info,
+                $"Server /props: {(totalSlots?.ToString() ?? "?")} slot(s), ctx/slot {(ctxPerSlot?.ToString() ?? "?")}" +
+                $"{(vision == true ? ", vision" : "")}{(audio == true ? ", audio" : "")}.");
         }
         catch
         {

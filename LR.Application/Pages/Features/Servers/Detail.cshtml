@@ -68,6 +68,48 @@ else
         }
     </div>
 
+    @* Runtime Card — live slot usage + facts read from the running server's /props *@
+    <div id="runtime-card" class="bg-cyber-card rounded-xl border border-neon-cyan/10 p-6 mb-6 @(Model.Server.Status == ServerStatus.Running ? "" : "hidden")" data-server-id="@Model.Server.Id">
+        <h3 class="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-4">Runtime</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Slots in use</span>
+                <p class="mt-1 flex items-baseline gap-1.5">
+                    <span id="rt-slots" class="text-sm text-text-primary font-medium">@(Model.MaxSlots > 0 ? $"{Model.InFlight} / {Model.MaxSlots}" : "—")</span>
+                </p>
+                <div class="mt-1.5 h-1.5 rounded-full bg-gray-700/40 overflow-hidden">
+                    <div id="rt-slots-bar" class="h-full bg-neon-cyan transition-all duration-300" style="width: @(Model.MaxSlots > 0 ? (int)Math.Round(100.0 * Math.Min(Model.InFlight, Model.MaxSlots) / Model.MaxSlots) : 0)%"></div>
+                </div>
+            </div>
+            <div>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Context / slot</span>
+                <p class="text-sm text-text-primary mt-1">@(Model.ServerProps?.ContextSizePerSlot?.ToString("N0") ?? "—")</p>
+            </div>
+            <div>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Modalities</span>
+                <p class="text-sm text-text-primary mt-1">
+                    @{
+                        var mods = new List<string> { "text" };
+                        if (Model.ServerProps?.Vision == true) { mods.Add("vision"); }
+                        if (Model.ServerProps?.Audio == true) { mods.Add("audio"); }
+                    }
+                    @string.Join(", ", mods)
+                </p>
+            </div>
+            <div>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Build</span>
+                <p class="text-sm text-text-primary mt-1 truncate" title="@Model.ServerProps?.BuildInfo">@(Model.ServerProps?.BuildInfo ?? "—")</p>
+            </div>
+            @if (!string.IsNullOrEmpty(Model.ServerProps?.ModelPath))
+            {
+                <div class="col-span-2 md:col-span-4">
+                    <span class="text-xs text-text-secondary uppercase tracking-wider">Loaded model</span>
+                    <p class="text-sm text-text-primary mt-1 break-all">@Model.ServerProps!.ModelPath</p>
+                </div>
+            }
+        </div>
+    </div>
+
     @* Logs Section *@
     <div class="bg-cyber-card rounded-xl border border-neon-cyan/10 overflow-hidden">
         <div class="flex items-center justify-between px-6 py-3 border-b border-gray-700/50">
@@ -127,6 +169,51 @@ else
 }
 
 <script>
+(function () {
+    const card = document.getElementById('runtime-card');
+    if (!card || typeof signalR === 'undefined') return;
+    const serverId = card.dataset.serverId;
+
+    const slotsEl = document.getElementById('rt-slots');
+    const barEl = document.getElementById('rt-slots-bar');
+
+    function apply(rows) {
+        const row = Array.isArray(rows) ? rows.find(r => r.id === serverId) : null;
+        if (!row) return;
+
+        card.classList.toggle('hidden', row.status !== 'Running');
+
+        if (row.maxSlots > 0) {
+            slotsEl.textContent = row.inFlight + ' / ' + row.maxSlots;
+            const pct = Math.round(100 * Math.min(row.inFlight, row.maxSlots) / row.maxSlots);
+            barEl.style.width = pct + '%';
+            barEl.classList.toggle('bg-neon-red', row.inFlight >= row.maxSlots);
+            barEl.classList.toggle('bg-neon-cyan', row.inFlight < row.maxSlots);
+        } else {
+            slotsEl.textContent = '—';
+            barEl.style.width = '0%';
+        }
+    }
+
+    // Reuse the shared serverHub connection if the app already opened one, else make our own.
+    let connection = window.__serverHubConnection;
+    if (!connection) {
+        connection = new signalR.HubConnectionBuilder()
+            .withUrl('/serverHub', { transport: signalR.HttpTransportType.WebSockets })
+            .withAutomaticReconnect()
+            .build();
+        window.__serverHubConnection = connection;
+        connection.start().catch(err => console.warn('[SignalR] serverHub connect failed:', err.message));
+    }
+
+    // Detach a stale handler from a previous detail visit (htmx-boosted nav keeps the socket).
+    if (window.__detailServerLoadHandler) {
+        connection.off('ReceiveServerLoad', window.__detailServerLoadHandler);
+    }
+    window.__detailServerLoadHandler = apply;
+    connection.on('ReceiveServerLoad', apply);
+})();
+
 async function clearLogs() {
     if (!confirm('Clear all log entries for this server?')) return;
     try {

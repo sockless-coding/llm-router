@@ -22,7 +22,10 @@
 
         <!-- Info section -->
         <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5 mb-4">
-            <h2 class="text-lg font-semibold text-text-primary">Server Details</h2>
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-text-primary">Server Details</h2>
+                <a href="/Features/Servers/Detail?id=@Model.Server.Id" class="text-sm text-neon-cyan hover:underline">Runtime &amp; logs →</a>
+            </div>
 
             <!-- Name -->
             <div>

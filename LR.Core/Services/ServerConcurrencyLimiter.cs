@@ -47,6 +47,14 @@ public sealed class ServerConcurrencyLimiter : IServerConcurrencyLimiter
         }
     }
 
+    public IReadOnlyDictionary<Guid, int> Snapshot()
+    {
+        lock (_gate)
+        {
+            return new Dictionary<Guid, int>(_inFlight);
+        }
+    }
+
     private void Release(Guid serverId)
     {
         lock (_gate)

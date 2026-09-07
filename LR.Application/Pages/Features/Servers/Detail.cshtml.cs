@@ -1,4 +1,6 @@
 using LR.Core.Interfaces;
+using LR.Core.Models;
+using LR.Core.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
@@ -8,6 +10,9 @@ public class ServerDetailModel : PageModel
 {
     private readonly IServerManager _serverManager;
     private readonly IServerLogService _logService;
+    private readonly IServerConcurrencyLimiter _concurrencyLimiter;
+    private readonly IPresetManager _presetManager;
+    private readonly GatewaySettings _settings;
 
     public Core.Models.ServerInstance? Server { get; set; }
     public IReadOnlyList<Core.Models.ServerLog> Logs { get; set; } = new List<Core.Models.ServerLog>();
@@ -18,13 +23,30 @@ public class ServerDetailModel : PageModel
     /// <summary>Managed server process ID, if currently running. Diagnostics only.</summary>
     public int? ServerPid { get; set; }
 
+    /// <summary>Live runtime facts read from the running llama.cpp server's /props, if available.</summary>
+    public Core.Models.LlamaServerProps? ServerProps { get; set; }
+
+    /// <summary>Requests the router currently has in flight to this server.</summary>
+    public int InFlight { get; set; }
+
+    /// <summary>Parallel-request capacity the router applies to this server (0 if not applicable).</summary>
+    public int MaxSlots { get; set; }
+
     [BindProperty(SupportsGet = true)]
     public Guid Id { get; set; }
 
-    public ServerDetailModel(IServerManager serverManager, IServerLogService logService)
+    public ServerDetailModel(
+        IServerManager serverManager,
+        IServerLogService logService,
+        IServerConcurrencyLimiter concurrencyLimiter,
+        IPresetManager presetManager,
+        GatewaySettings settings)
     {
         _serverManager = serverManager;
         _logService = logService;
+        _concurrencyLimiter = concurrencyLimiter;
+        _presetManager = presetManager;
+        _settings = settings;
     }
 
     public async Task OnGetAsync()
@@ -36,10 +58,23 @@ public class ServerDetailModel : PageModel
         {
             Logs = await _logService.GetLogsAsync(Server.Id, 200);
 
-            if (_serverManager.GetProvider(Server.Id) is IWrapperDiagnostics diagnostics)
+            var provider = _serverManager.GetProvider(Server.Id);
+
+            if (provider is IWrapperDiagnostics diagnostics)
             {
                 WrapperPid = diagnostics.WrapperPid;
                 ServerPid = diagnostics.ServerPid;
+            }
+
+            if (provider is IServerCapacityProvider capacity)
+                ServerProps = capacity.ServerProps;
+
+            InFlight = _concurrencyLimiter.InFlight(Server.Id);
+
+            if (Server.Engine == ServerEngine.LlamaCpp && Server.Status == ServerStatus.Running)
+            {
+                var preset = Server.ActivePresetId is Guid pid ? _presetManager.GetById(pid) : null;
+                MaxSlots = LlamaSlotCapacity.Resolve(provider, preset, _settings.DefaultParallelSlots);
             }
         }
     }

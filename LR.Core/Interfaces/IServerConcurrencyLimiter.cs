@@ -21,4 +21,10 @@ public interface IServerConcurrencyLimiter
     /// Current number of in-flight requests reserved against <paramref name="serverId"/>.
     /// </summary>
     int InFlight(Guid serverId);
+
+    /// <summary>
+    /// A point-in-time copy of the in-flight count for every server that currently has one.
+    /// Servers with no reservations are omitted. Used by the live slot-usage broadcast.
+    /// </summary>
+    IReadOnlyDictionary<Guid, int> Snapshot();
 }

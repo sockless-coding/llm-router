@@ -27,9 +27,17 @@ public class ModelCapabilitiesInfo
     [JsonPropertyName("max_output_tokens")]
     public int MaxOutputTokens { get; set; }
 
-    /// <summary>Whether this preset is configured with a multimodal projector (image input).</summary>
+    /// <summary>
+    /// Whether the model accepts image input — reported live by the running server's
+    /// <c>/props</c> modalities when available, otherwise inferred from a configured multimodal
+    /// projector on the preset.
+    /// </summary>
     [JsonPropertyName("vision")]
     public bool Vision { get; set; }
+
+    /// <summary>Whether the model accepts audio input (live from the running server's <c>/props</c>).</summary>
+    [JsonPropertyName("audio")]
+    public bool Audio { get; set; }
 
     /// <summary>Whether this preset is expected to support OpenAI-style tool/function calling.</summary>
     [JsonPropertyName("tool_calling")]

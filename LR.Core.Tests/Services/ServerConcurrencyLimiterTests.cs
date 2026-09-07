@@ -84,4 +84,24 @@ public class ServerConcurrencyLimiterTests
         ServerConcurrencyLimiter.NoopLease.Dispose();
         ServerConcurrencyLimiter.NoopLease.Dispose();
     }
+
+    [Fact]
+    public void Snapshot_ReportsOnlyServersWithReservations_AndIsADetachedCopy()
+    {
+        var s1 = Guid.NewGuid();
+        var s2 = Guid.NewGuid();
+
+        _limiter.TryAcquire(s1, capacity: 3);
+        _limiter.TryAcquire(s1, capacity: 3);
+        var lease2 = _limiter.TryAcquire(s2, capacity: 3);
+
+        var snap = _limiter.Snapshot();
+        Assert.Equal(2, snap[s1]);
+        Assert.Equal(1, snap[s2]);
+
+        // Releasing after the snapshot must not mutate the returned copy.
+        lease2!.Dispose();
+        Assert.Equal(1, snap[s2]);
+        Assert.False(_limiter.Snapshot().ContainsKey(s2));
+    }
 }

@@ -88,8 +88,13 @@ public class OpenAiHandler : IProtocolHandler
 
     private ModelCapabilitiesInfo BuildCapabilities(ModelPreset preset)
     {
-        // ContextSize (-c) is what the server is actually launched with; GgufContextLength is
-        // only the model's native maximum, used as a fallback when -c wasn't set explicitly.
+        // When the preset's server is running, its live /props modalities are the most accurate
+        // source for vision/audio support — fall back to preset data otherwise.
+        var props = (_serverManager.GetProvider(preset.ServerInstanceId) as IServerCapacityProvider)?.ServerProps;
+
+        // ContextSize (-c) is what the server is launched with — the figure clients should budget
+        // against; GgufContextLength is only the model's native maximum. (Not taken from /props:
+        // its default_generation_settings.n_ctx is the per-slot slice, i.e. -c divided by -np.)
         var contextLength = preset.ContextSize ?? preset.GgufContextLength ?? 4096;
 
         // PredictN (-n) is an explicit generation cap when set and positive. Otherwise fall back
@@ -105,9 +110,11 @@ public class OpenAiHandler : IProtocolHandler
             Name = preset.Name,
             ContextLength = contextLength,
             MaxOutputTokens = maxOutputTokens,
-            // A projector must be explicitly configured (file or URL) for this preset to accept
-            // image input — MmprojAuto alone doesn't guarantee one exists for the model.
-            Vision = !string.IsNullOrEmpty(preset.Mmproj) || !string.IsNullOrEmpty(preset.MmprojUrl),
+            // Prefer the running server's declared modalities; else a projector must be
+            // explicitly configured (file or URL) for this preset to accept image input —
+            // MmprojAuto alone doesn't guarantee one exists for the model.
+            Vision = props?.Vision ?? (!string.IsNullOrEmpty(preset.Mmproj) || !string.IsNullOrEmpty(preset.MmprojUrl)),
+            Audio = props?.Audio ?? false,
             // Tool calling relies on llama.cpp's jinja template rendering; only an explicit
             // Jinja=false rules it out, since null means "use llama.cpp's default".
             ToolCalling = preset.Jinja != false,

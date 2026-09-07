@@ -110,14 +110,8 @@ public class RequestDispatcherService : BackgroundService
     /// </summary>
     private int ResolveLlamaCapacity(ServerInstance server, IServerManager serverManager, IPresetManager presetManager)
     {
-        if ((serverManager.GetProvider(server.Id) as IServerCapacityProvider)?.MaxConcurrentRequests is int reported && reported > 0)
-            return reported;
-
         var preset = server.ActivePresetId is Guid pid ? presetManager.GetById(pid) : null;
-        if (preset?.Parallel is int p && p > 0)
-            return p;
-
-        return _settings.DefaultParallelSlots;
+        return LlamaSlotCapacity.Resolve(serverManager.GetProvider(server.Id), preset, _settings.DefaultParallelSlots);
     }
 
     /// <summary>
