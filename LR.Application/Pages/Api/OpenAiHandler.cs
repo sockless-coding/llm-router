@@ -501,7 +501,7 @@ public class OpenAiHandler : IProtocolHandler
             request.StreamOptions.IncludeUsage = true;
         }
 
-        SanitizeAssistantMessages(request.Messages);
+        SanitizeMessages(request.Messages);
 
         var payload = JsonSerializer.Serialize(request, BackendJsonOpts);
         _logger.LogDebug("RouteRequest payload for {Model}: {Payload}", request.Model, payload);
@@ -516,27 +516,42 @@ public class OpenAiHandler : IProtocolHandler
     }
 
     /// <summary>
-    /// Guards against forwarding an assistant message that has neither usable content nor
-    /// tool_calls to the backend — llama.cpp rejects those outright ("Assistant message must
-    /// contain either 'content' or 'tool_calls'!"). Request messages are forwarded to the
-    /// backend essentially as-is, so a client replaying a stored conversation that picked up a
-    /// malformed turn (e.g. from a prior router bug, or from any other source) would otherwise
-    /// 400 on every subsequent request until that turn ages out of its history. Rather than
-    /// reject the whole request, give the message explicit empty content so it's clearly a
-    /// no-op turn instead of a validation failure.
+    /// Guards against forwarding messages that llama.cpp's chat-completions endpoint rejects
+    /// outright. Request messages are forwarded to the backend essentially as-is, so a client
+    /// replaying a stored conversation that picked up a malformed turn (e.g. from a prior router
+    /// bug, or from any other source) would otherwise 400 on every subsequent request until that
+    /// turn ages out of its history. Rather than reject the whole request, patch each message
+    /// into a shape the backend accepts:
+    /// <list type="bullet">
+    /// <item>Assistant messages need either non-empty content or tool_calls ("Assistant message
+    /// must contain either 'content' or 'tool_calls'!") — an assistant turn with neither gets
+    /// explicit empty content so it reads as a no-op turn.</item>
+    /// <item>Every non-assistant message (system, user, tool, ...) must carry a 'content' field
+    /// ("All non-assistant messages must contain 'content'"). A null/omitted content — which is
+    /// how the serializer emits <see cref="ChatMessage.Content"/> when it's null — is replaced
+    /// with an empty string.</item>
+    /// </list>
     /// </summary>
-    private static void SanitizeAssistantMessages(List<ChatMessage> messages)
+    private static void SanitizeMessages(List<ChatMessage> messages)
     {
         foreach (var message in messages)
         {
-            if (message.Role != "assistant") continue;
-
             bool hasContent = message.Content is { Text.Length: > 0 } or { Parts.Count: > 0 };
-            bool hasToolCalls = message.ToolCalls is { Count: > 0 };
-            if (hasContent || hasToolCalls) continue;
 
-            message.Content = ChatMessageContent.FromText(string.Empty);
-            message.ToolCalls = null;
+            if (message.Role == "assistant")
+            {
+                bool hasToolCalls = message.ToolCalls is { Count: > 0 };
+                if (hasContent || hasToolCalls) continue;
+
+                message.Content = ChatMessageContent.FromText(string.Empty);
+                message.ToolCalls = null;
+                continue;
+            }
+
+            // Non-assistant: llama.cpp requires a present 'content' field. An empty-string
+            // content object still serializes as "content":"", which satisfies it; a null
+            // Content is dropped entirely by the null-ignoring serializer and triggers the 400.
+            message.Content ??= ChatMessageContent.FromText(string.Empty);
         }
     }
 
