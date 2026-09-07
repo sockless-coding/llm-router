@@ -177,19 +177,42 @@ public partial class ComputeDeviceService : IComputeDeviceService
         if (!hwIdMatch.Success)
             return null;
 
-        using var classKey = Registry.LocalMachine.OpenSubKey(DisplayClassRegistryKey);
-        if (classKey is null)
-            return null;
-
-        foreach (var subKeyName in classKey.GetSubKeyNames())
+        // Reading the display class key is best-effort: on some machines individual driver
+        // subkeys carry ACLs that deny the current (non-elevated) user read access, which
+        // surfaces as SecurityException/UnauthorizedAccessException. A missing VRAM figure
+        // must never take down the Devices page, so swallow those and report null.
+        try
         {
-            using var subKey = classKey.OpenSubKey(subKeyName);
-            var matchingDeviceId = subKey?.GetValue("MatchingDeviceId") as string;
-            if (matchingDeviceId is null || !matchingDeviceId.Contains(hwIdMatch.Value, StringComparison.OrdinalIgnoreCase))
-                continue;
+            using var classKey = Registry.LocalMachine.OpenSubKey(DisplayClassRegistryKey);
+            if (classKey is null)
+                return null;
 
-            if (subKey!.GetValue("HardwareInformation.qwMemorySize") is long vram && vram > 0)
-                return vram;
+            foreach (var subKeyName in classKey.GetSubKeyNames())
+            {
+                RegistryKey? subKey = null;
+                try
+                {
+                    subKey = classKey.OpenSubKey(subKeyName);
+                    var matchingDeviceId = subKey?.GetValue("MatchingDeviceId") as string;
+                    if (matchingDeviceId is null || !matchingDeviceId.Contains(hwIdMatch.Value, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (subKey!.GetValue("HardwareInformation.qwMemorySize") is long vram && vram > 0)
+                        return vram;
+                }
+                catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or System.IO.IOException)
+                {
+                    // This particular driver subkey is unreadable — skip it and keep looking.
+                }
+                finally
+                {
+                    subKey?.Dispose();
+                }
+            }
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or System.IO.IOException)
+        {
+            return null;
         }
 
         return null;
