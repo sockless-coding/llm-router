@@ -176,6 +176,9 @@ builder.WebHost.ConfigureKestrel(options =>
 // Request queue (singleton - holds the Channel)
 builder.Services.AddSingleton<IRequestQueueService, RequestQueueService>();
 
+// Per-server parallel-request limiter (singleton — in-flight counts are shared across scopes)
+builder.Services.AddSingleton<IServerConcurrencyLimiter, ServerConcurrencyLimiter>();
+
 // Protocol handlers (scoped — need DbContext access via preset manager)
 builder.Services.AddScoped<LR.Application.Pages.Api.OpenAiHandler>();
 builder.Services.AddScoped<LR.Application.Pages.Api.ClaudeHandler>();

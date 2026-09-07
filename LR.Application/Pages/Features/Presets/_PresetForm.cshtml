@@ -628,6 +628,7 @@
                     <div>
                         <label asp-for="ViewModel.Parallel" class="block text-sm font-medium text-text-secondary mb-1"></label>
                         <input asp-for="ViewModel.Parallel" type="number" placeholder="auto" class="@inpCls" />
+                        <p class="text-xs text-text-secondary mt-1">Server slots (<code>-np</code>). The router also uses this as the max number of requests it sends to this server at once — leave blank ("auto") to use the Default Parallel Slots setting (4).</p>
                     </div>
                 </div>
                 <div class="grid grid-cols-4 gap-4">

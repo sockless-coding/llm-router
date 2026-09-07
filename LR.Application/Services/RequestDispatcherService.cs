@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
+using LR.Core.Services;
 
 namespace LR.Application.Services;
 
@@ -14,12 +15,21 @@ public class RequestDispatcherService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IRequestQueueService _queue;
+    private readonly IServerConcurrencyLimiter _limiter;
+    private readonly GatewaySettings _settings;
     private readonly ILogger<RequestDispatcherService> _logger;
 
-    public RequestDispatcherService(IServiceScopeFactory scopeFactory, IRequestQueueService queue, ILogger<RequestDispatcherService> logger)
+    public RequestDispatcherService(
+        IServiceScopeFactory scopeFactory,
+        IRequestQueueService queue,
+        IServerConcurrencyLimiter limiter,
+        GatewaySettings settings,
+        ILogger<RequestDispatcherService> logger)
     {
         _scopeFactory = scopeFactory;
         _queue = queue;
+        _limiter = limiter;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -39,6 +49,7 @@ public class RequestDispatcherService : BackgroundService
 
                 using var scope = _scopeFactory.CreateScope();
                 var serverManager = scope.ServiceProvider.GetRequiredService<IServerManager>();
+                var presetManager = scope.ServiceProvider.GetRequiredService<IPresetManager>();
 
                 // Get all running healthy servers
                 var instances = await serverManager.GetAllInstancesAsync();
@@ -52,10 +63,33 @@ public class RequestDispatcherService : BackgroundService
                     // model it asked for (or, for requests with no resolvable model, any server).
                     // Otherwise a request for model B could be silently answered by a server
                     // currently running model A.
-                    if (_queue.TryDequeueMatching(server.ActivePresetId, out var item))
+
+                    if (server.Engine != ServerEngine.LlamaCpp)
                     {
-                        _ = ProcessRequestOnServer(server, item.Request, serverManager,
-                            item.Tcs, stoppingToken);
+                        // Non-llama engines manage their own parallelism — pass through unbounded
+                        // (one dequeue per tick, as before).
+                        if (_queue.TryDequeueMatching(server.ActivePresetId, out var item))
+                        {
+                            _ = ProcessRequestOnServer(server, item.Request, serverManager,
+                                item.Tcs, ServerConcurrencyLimiter.NoopLease, stoppingToken);
+                        }
+                        continue;
+                    }
+
+                    // Drain as many queued requests as the server has free parallel-request slots.
+                    int capacity = ResolveLlamaCapacity(server, serverManager, presetManager);
+                    while (_limiter.TryAcquire(server.Id, capacity) is { } lease)
+                    {
+                        if (_queue.TryDequeueMatching(server.ActivePresetId, out var item))
+                        {
+                            _ = ProcessRequestOnServer(server, item.Request, serverManager,
+                                item.Tcs, lease, stoppingToken);
+                        }
+                        else
+                        {
+                            lease.Dispose();
+                            break;
+                        }
                     }
                 }
             }
@@ -70,14 +104,32 @@ public class RequestDispatcherService : BackgroundService
     }
 
     /// <summary>
-    /// Process a single request on the given server.
-    /// Marks server busy, sends request via provider, records stats, marks server free.
+    /// Resolves how many requests may be in flight against a llama.cpp server at once: the
+    /// server's own reported slot count if known, else the active preset's Parallel (when
+    /// positive), else the configured default.
+    /// </summary>
+    private int ResolveLlamaCapacity(ServerInstance server, IServerManager serverManager, IPresetManager presetManager)
+    {
+        if ((serverManager.GetProvider(server.Id) as IServerCapacityProvider)?.MaxConcurrentRequests is int reported && reported > 0)
+            return reported;
+
+        var preset = server.ActivePresetId is Guid pid ? presetManager.GetById(pid) : null;
+        if (preset?.Parallel is int p && p > 0)
+            return p;
+
+        return _settings.DefaultParallelSlots;
+    }
+
+    /// <summary>
+    /// Process a single request on the given server, then release its parallel-request slot.
+    /// Sends the request via the provider and records stats.
     /// </summary>
     private async Task ProcessRequestOnServer(
         ServerInstance server,
         RouteRequest request,
         IServerManager serverManager,
         TaskCompletionSource<RouteResponse> tcs,
+        IDisposable slotLease,
         CancellationToken cancellationToken)
     {
         try
@@ -119,6 +171,11 @@ public class RequestDispatcherService : BackgroundService
         catch (Exception ex)
         {
             tcs.TrySetException(ex);
+        }
+        finally
+        {
+            // Free the slot so the dispatcher (or a direct route) can reuse it.
+            slotLease.Dispose();
         }
     }
 

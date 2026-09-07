@@ -159,7 +159,11 @@ public class ResponsesHandler
             backendCts.CancelAfter(TimeSpan.FromSeconds(_gatewaySettings.BackendTimeoutSeconds));
         var backendToken = backendCts.Token;
 
-        var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        // The decision holds a reserved parallel-request slot on the chosen server; `using`
+        // releases it when this method returns (after the response is built or the streaming
+        // handler completes). A null decision means every candidate is busy/starting — queue below.
+        using var decision = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        var server = decision?.Server;
 
         if (server is not null && request.Stream)
         {
@@ -250,7 +254,8 @@ public class ResponsesHandler
             var statisticsService = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
             var presetManager = scope.ServiceProvider.GetRequiredService<IPresetManager>();
 
-            var server = await routingEngine.RouteAsync(routeRequest, cts.Token);
+            using var decision = await routingEngine.RouteAsync(routeRequest, cts.Token);
+            var server = decision?.Server;
             RouteResponse? routeResponse;
             if (server is not null)
             {

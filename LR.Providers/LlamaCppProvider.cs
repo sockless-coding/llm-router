@@ -15,7 +15,7 @@ namespace LR.Providers;
 /// Thin orchestrator for llama.cpp-based backend providers.
 /// Delegates to specialized components: ArgBuilder, ProcessManager, ResponseParser, TimingCoordinator.
 /// </summary>
-public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposable
+public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCapacityProvider, IDisposable
 {
     public ServerEngine Engine => ServerEngine.LlamaCpp;
 
@@ -24,6 +24,16 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
 
     /// <inheritdoc />
     public int? ServerPid => _processManager.ServerPid;
+
+    /// <summary>
+    /// Slot count reported by the running llama.cpp server via <c>/props</c> (<c>total_slots</c>,
+    /// which equals the resolved <c>-np</c>). 0 until the first successful health check reads it;
+    /// reset on stop/restart so a restart with a different <c>-np</c> is re-read.
+    /// </summary>
+    private volatile int _reportedSlotCount;
+
+    /// <inheritdoc />
+    public int? MaxConcurrentRequests => _reportedSlotCount > 0 ? _reportedSlotCount : null;
 
     /// <summary>
     /// Path to the folder containing the llama.cpp server executable (e.g., "llama-server").
@@ -174,6 +184,9 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         if (!File.Exists(ServerExecutablePath))
             throw new FileNotFoundException($"Server executable not found at: {ServerExecutablePath}");
 
+        // Forget any slot count from a previous run — this start may use a different -np.
+        _reportedSlotCount = 0;
+
         // Update port if provided
         if (port.HasValue)
         {
@@ -228,6 +241,8 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         _logger.LogInformation("Stopping server at {ServerUrl}", ServerUrl);
         await LogProviderMessage(ServerLogLevel.Info, "Server stop initiated.");
 
+        _reportedSlotCount = 0;
+
         await _processManager.StopAllProcessesAsync(cancellationToken);
     }
 
@@ -241,11 +256,48 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
             // the shared client's timeout, which would affect subsequent requests.
             using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
             var response = await httpClient.GetAsync($"{ServerUrl}/health", cancellationToken);
-            return response.IsSuccessStatusCode;
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            // Now that the server is up, learn its real slot count once (equals the resolved
+            // -np). The router uses this to cap how many requests it sends here concurrently.
+            if (_reportedSlotCount == 0)
+                await TryRefreshSlotCountAsync(httpClient, cancellationToken);
+
+            return true;
         }
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort read of <c>total_slots</c> from llama.cpp's <c>/props</c> endpoint. Any
+    /// failure is swallowed — the server is already known healthy and the router falls back to
+    /// the preset / configured default until this succeeds on a later health check.
+    /// </summary>
+    private async Task TryRefreshSlotCountAsync(HttpClient httpClient, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await httpClient.GetAsync($"{ServerUrl}/props", cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                return;
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            if (doc.RootElement.TryGetProperty("total_slots", out var slots) &&
+                slots.TryGetInt32(out var count) &&
+                count > 0)
+            {
+                _reportedSlotCount = count;
+                await LogProviderMessage(ServerLogLevel.Info, $"Server reports {count} parallel slot(s).");
+            }
+        }
+        catch
+        {
+            // Ignore — will retry on the next health check.
         }
     }
 

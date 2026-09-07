@@ -275,8 +275,12 @@ public class OllamaHandler : IProtocolHandler
             backendCts.CancelAfter(TimeSpan.FromSeconds(_gatewaySettings.BackendTimeoutSeconds));
         }
 
-        // Use the HTTP context token for routing (fast DB query — safe to cancel on client disconnect)
-        var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        // Use the HTTP context token for routing (fast DB query — safe to cancel on client disconnect).
+        // The decision holds a reserved parallel-request slot on the chosen server; `using`
+        // releases it when this method returns. A null decision means every candidate is
+        // busy/starting — we queue below.
+        using var decision = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        var server = decision?.Server;
 
         // Backend token — cancels on client disconnect or the backend timeout, whichever is first
         var backendToken = backendCts.Token;
@@ -442,8 +446,10 @@ public class OllamaHandler : IProtocolHandler
         // Convert generate request to chat-style internal request
         var routeRequest = BuildRouteRequestFromGenerate(request);
 
-        // Try to find a server immediately
-        var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        // Try to find a server immediately. The decision holds a reserved parallel-request slot;
+        // `using` releases it when this method returns.
+        using var decision = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        var server = decision?.Server;
         if (server != null)
         {
             var provider = _serverManager.GetProvider(server.Id);

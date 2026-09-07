@@ -9,9 +9,12 @@ public interface IRoutingEngine
 {
     /// <summary>
     /// Routes an incoming request to a target server instance based on configured rules.
-    /// Returns null if no suitable server is found.
+    /// Returns a <see cref="RouteDecision"/> (server + reserved concurrency slot) when a server
+    /// is available, or null if none is — either because nothing suitable is running, or because
+    /// every candidate is already at its parallel-request capacity. The caller must dispose the
+    /// returned decision once the request finishes; a null result means "queue the request".
     /// </summary>
-    Task<ServerInstance?> RouteAsync(RouteRequest request, CancellationToken cancellationToken = default);
+    Task<RouteDecision?> RouteAsync(RouteRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Adds a routing rule. Rules are evaluated by priority (lowest first).

@@ -115,8 +115,12 @@ public class ClaudeHandler : IProtocolHandler
             backendCts.CancelAfter(TimeSpan.FromSeconds(_gatewaySettings.BackendTimeoutSeconds));
         }
 
-        // Use the HTTP context token for routing (fast DB query — safe to cancel on client disconnect)
-        var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        // Use the HTTP context token for routing (fast DB query — safe to cancel on client disconnect).
+        // The decision holds a reserved parallel-request slot on the chosen server; `using`
+        // releases it when this method returns (after the response is built or the streaming
+        // loop completes). A null decision means every candidate is busy/starting — we queue below.
+        using var decision = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        var server = decision?.Server;
 
         // Backend token — cancels on client disconnect or the backend timeout, whichever is first
         var backendToken = backendCts.Token;

@@ -36,6 +36,14 @@ public class GatewaySettings
     /// </summary>
     public int QueueTimeoutSeconds { get; set; } = 300;
 
+    /// <summary>
+    /// How many requests the router will send to a single llama.cpp server concurrently when
+    /// the server's real slot count is not yet known and its preset does not set
+    /// <see cref="ModelPreset.Parallel"/> to a positive value. Mirrors llama.cpp's automatic
+    /// <c>-np</c>. Additional requests wait in the queue. Default: 4.
+    /// </summary>
+    public int DefaultParallelSlots { get; set; } = 4;
+
     // ── Request logging settings ─────────────────────────────────────
 
     /// <summary>

@@ -165,7 +165,12 @@ public class OpenAiHandler : IProtocolHandler
         // when needed; if it returns null here, that (re)start is running in the background and
         // we queue the request below — same as the Ollama and Claude handlers — instead of
         // failing the request outright.
-        var server = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        // The decision holds a reserved parallel-request slot on the chosen server; `using`
+        // releases it when this method returns — after the non-streaming response is built or
+        // the streaming loop below completes. A null decision means every candidate server is
+        // busy (or still starting), so we queue further down.
+        using var decision = await _routingEngine.RouteAsync(routeRequest, cancellationToken);
+        var server = decision?.Server;
 
         // Backend token — cancels on client disconnect or the backend timeout, whichever is first
         var backendToken = backendCts?.Token ?? CancellationToken.None;

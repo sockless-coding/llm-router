@@ -34,6 +34,9 @@ public class IndexModel : PageModel
     public int QueueTimeoutSeconds { get; set; } = 300;
 
     [BindProperty]
+    public int DefaultParallelSlots { get; set; } = 4;
+
+    [BindProperty]
     public bool RequireApiKey { get; set; }
 
     [BindProperty]
@@ -61,6 +64,7 @@ public class IndexModel : PageModel
         RequestLogRetentionDays = s.RequestLogRetentionDays;
         MaxQueueSize = s.MaxQueueSize;
         QueueTimeoutSeconds = s.QueueTimeoutSeconds;
+        DefaultParallelSlots = s.DefaultParallelSlots;
         RequireApiKey = s.RequireApiKey;
         RoutingPort = s.RoutingPort;
         AdminPort = s.Port;
@@ -109,6 +113,7 @@ public class IndexModel : PageModel
                         gatewayDict["RequestLogRetentionDays"] = RequestLogRetentionDays;
                         gatewayDict["MaxQueueSize"] = MaxQueueSize;
                         gatewayDict["QueueTimeoutSeconds"] = QueueTimeoutSeconds;
+                        gatewayDict["DefaultParallelSlots"] = DefaultParallelSlots;
                         gatewayDict["RequireApiKey"] = RequireApiKey;
                         gatewayDict["RoutingPort"] = RoutingPort;
                         config["Gateway"] = gatewayDict;
@@ -132,6 +137,7 @@ public class IndexModel : PageModel
         RequestLogRetentionDays = s.RequestLogRetentionDays;
         MaxQueueSize = s.MaxQueueSize;
         QueueTimeoutSeconds = s.QueueTimeoutSeconds;
+        DefaultParallelSlots = s.DefaultParallelSlots;
         RequireApiKey = s.RequireApiKey;
         RoutingPort = s.RoutingPort;
         AdminPort = s.Port;

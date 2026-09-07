@@ -15,15 +15,23 @@ public class RoutingEngine : IRoutingEngine
 {
     private readonly LRDbContext _context;
     private readonly IServerManager _serverManager;
+    private readonly IServerConcurrencyLimiter _concurrencyLimiter;
+    private readonly GatewaySettings _settings;
     private int _roundRobinIndex;
 
-    public RoutingEngine(LRDbContext context, IServerManager serverManager)
+    public RoutingEngine(
+        LRDbContext context,
+        IServerManager serverManager,
+        IServerConcurrencyLimiter concurrencyLimiter,
+        GatewaySettings settings)
     {
         _context = context;
         _serverManager = serverManager;
+        _concurrencyLimiter = concurrencyLimiter;
+        _settings = settings;
     }
 
-    public async Task<ServerInstance?> RouteAsync(RouteRequest request, CancellationToken cancellationToken = default)
+    public async Task<RouteDecision?> RouteAsync(RouteRequest request, CancellationToken cancellationToken = default)
     {
         // Resolve which preset (i.e. which model) this request actually wants, up front.
         // Every path below uses this so we always route to — and (re)start if necessary —
@@ -45,7 +53,11 @@ public class RoutingEngine : IRoutingEngine
 
             var ready = await EnsureInstanceServesPresetAsync(instance, targetPreset, cancellationToken);
             if (ready is not null)
-                return ready;
+            {
+                var decision = TryReserve(ready, targetPreset);
+                if (decision is not null)
+                    return decision;
+            }
         }
 
         // 2. Known model — route straight to (and start/restart as needed) the server instance
@@ -58,7 +70,11 @@ public class RoutingEngine : IRoutingEngine
             {
                 var ready = await EnsureInstanceServesPresetAsync(instance, targetPreset, cancellationToken);
                 if (ready is not null)
-                    return ready;
+                {
+                    var decision = TryReserve(ready, targetPreset);
+                    if (decision is not null)
+                        return decision;
+                }
             }
         }
 
@@ -73,9 +89,20 @@ public class RoutingEngine : IRoutingEngine
 
         if (healthyInstances.Count > 0)
         {
-            var instance = healthyInstances[_roundRobinIndex % healthyInstances.Count];
-            _roundRobinIndex++;
-            return instance;
+            // Walk the healthy set in round-robin order and take the first instance that still
+            // has a free parallel-request slot. If every one is at capacity, fall through and
+            // let the caller queue.
+            for (int i = 0; i < healthyInstances.Count; i++)
+            {
+                var instance = healthyInstances[(_roundRobinIndex + i) % healthyInstances.Count];
+                var preset = targetPreset ?? await GetActivePresetAsync(instance, cancellationToken);
+                var decision = TryReserve(instance, preset);
+                if (decision is not null)
+                {
+                    _roundRobinIndex += i + 1;
+                    return decision;
+                }
+            }
         }
 
         // 4. Still nothing, and we don't even know which model was requested — try starting
@@ -94,7 +121,12 @@ public class RoutingEngine : IRoutingEngine
                 {
                     var startedInstance = await GetInstanceAsync(instance.Id, cancellationToken);
                     if (startedInstance?.Status == ServerStatus.Running && startedInstance.IsHealthy)
-                        return startedInstance;
+                    {
+                        var preset = await GetActivePresetAsync(startedInstance, cancellationToken);
+                        var decision = TryReserve(startedInstance, preset);
+                        if (decision is not null)
+                            return decision;
+                    }
                 }
             }
         }
@@ -217,6 +249,37 @@ public class RoutingEngine : IRoutingEngine
     public IReadOnlyList<RoutingRule> GetRules()
     {
         return _context.RoutingRules.OrderBy(r => r.Priority).ToList().AsReadOnly();
+    }
+
+    /// <summary>
+    /// Reserves one parallel-request slot on <paramref name="instance"/>, returning a
+    /// <see cref="RouteDecision"/> the caller disposes when the request finishes, or null if the
+    /// instance is already at its capacity (caller should queue). Only llama.cpp instances are
+    /// gated — other engines manage their own parallelism and always get a no-op lease.
+    ///
+    /// Capacity is taken from the live server (llama.cpp's reported <c>total_slots</c>) when
+    /// known, else the preset's <see cref="ModelPreset.Parallel"/> when positive, else
+    /// <see cref="GatewaySettings.DefaultParallelSlots"/>.
+    /// </summary>
+    private RouteDecision? TryReserve(ServerInstance instance, ModelPreset? preset)
+    {
+        if (instance.Engine != ServerEngine.LlamaCpp)
+            return new RouteDecision { Server = instance, Lease = ServerConcurrencyLimiter.NoopLease };
+
+        int capacity =
+            (_serverManager.GetProvider(instance.Id) as IServerCapacityProvider)?.MaxConcurrentRequests
+            ?? (preset?.Parallel is int p && p > 0 ? p : _settings.DefaultParallelSlots);
+
+        var lease = _concurrencyLimiter.TryAcquire(instance.Id, capacity);
+        return lease is null ? null : new RouteDecision { Server = instance, Lease = lease };
+    }
+
+    private async Task<ModelPreset?> GetActivePresetAsync(ServerInstance instance, CancellationToken cancellationToken)
+    {
+        if (!instance.ActivePresetId.HasValue)
+            return null;
+
+        return await _context.ModelPresets.FindAsync([instance.ActivePresetId.Value], cancellationToken);
     }
 
     private bool Matches(RoutingRule rule, RouteRequest request)
