@@ -67,7 +67,7 @@ public class OllamaHandler : IProtocolHandler
             // clients that only call /api/tags (e.g. Visual Studio's Copilot Ollama
             // provider) see the same capabilities as /api/show.
             var capabilities = new List<string> { "completion" };
-            if (architecture.Contains("mllama") || architecture.Contains("clip"))
+            if (SupportsVision(p, architecture))
                 capabilities.Add("vision");
             if (SupportsTools(p.GgufChatTemplate))
                 capabilities.Add("tools");
@@ -99,8 +99,12 @@ public class OllamaHandler : IProtocolHandler
                     quantization_level = p.GgufQuantizationLevel,
                     // Ollama nests context/embedding length inside "details", not as a
                     // top-level sibling of "capabilities" — clients like VS Code's Copilot
-                    // Ollama provider read context length from here.
-                    context_length = p.GgufContextLength,
+                    // Ollama provider read context length from here. Prefer the preset's
+                    // configured context size (what the server actually runs with) and only
+                    // fall back to the model's native GGUF context length when unset.
+                    context_length = (p.ContextSize.HasValue && p.ContextSize.Value > 0)
+                        ? p.ContextSize.Value
+                        : p.GgufContextLength,
                     embedding_length = p.GgufEmbeddingLength
                 },
                 capabilities
@@ -166,9 +170,22 @@ public class OllamaHandler : IProtocolHandler
 
         var template = gguf?.ChatTemplate ?? preset.GgufChatTemplate;
 
+        // Clients such as Visual Studio's Copilot Ollama provider read the effective context
+        // window from model_info's "{arch}.context_length" key. That key holds the model's
+        // native maximum from the GGUF header (e.g. 262144), which misrepresents what the
+        // server actually runs with — override it with the preset's configured context size.
+        var modelInfo = gguf?.AllKvPairs;
+        if (modelInfo is not null && preset.ContextSize.HasValue && preset.ContextSize.Value > 0)
+        {
+            modelInfo = new Dictionary<string, object>(modelInfo)
+            {
+                [$"{architecture}.context_length"] = preset.ContextSize.Value
+            };
+        }
+
         // Infer capabilities from architecture and chat template
         var capabilities = new List<string> { "completion" };
-        if (architecture.Contains("mllama") || architecture.Contains("clip"))
+        if (SupportsVision(preset, architecture))
             capabilities.Add("vision");
         if (SupportsTools(template))
             capabilities.Add("tools");
@@ -191,7 +208,7 @@ public class OllamaHandler : IProtocolHandler
             },
             Template = template,
             Capabilities = capabilities.ToArray(),
-            ModelInfo = gguf?.AllKvPairs
+            ModelInfo = modelInfo
         };
     }
 
@@ -209,6 +226,18 @@ public class OllamaHandler : IProtocolHandler
     /// </summary>
     private static bool SupportsTools(string? chatTemplate) =>
         !string.IsNullOrEmpty(chatTemplate) && chatTemplate.Contains("tools", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A preset supports image input when it has a multimodal projector wired up — an explicit
+    /// mmproj path/URL (mirrors <c>OpenAiHandler</c>'s vision flag), or an mmproj-bearing
+    /// architecture such as mllama/clip. Newer two-file vision models (Qwen3-VL, Gemma 3, …)
+    /// keep a text-only architecture name and are only recognisable by the configured projector.
+    /// </summary>
+    private static bool SupportsVision(ModelPreset preset, string architecture) =>
+        !string.IsNullOrEmpty(preset.Mmproj)
+        || !string.IsNullOrEmpty(preset.MmprojUrl)
+        || architecture.Contains("mllama", StringComparison.OrdinalIgnoreCase)
+        || architecture.Contains("clip", StringComparison.OrdinalIgnoreCase);
 
     public async Task<IResult> HandleChatCompletionAsync(HttpRequest httpRequest, HttpResponse httpResponse, CancellationToken cancellationToken)
     {
