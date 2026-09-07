@@ -495,6 +495,10 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
         int reasoningContentChunkCount = 0;
         bool completed = false;
         var accumulatedToolCalls = new Dictionary<int, ChatToolCall>();
+        // Tool-call indexes whose opening delta (the one carrying id/type/name) has already been
+        // forwarded to the client. Until a call's name is known we buffer its fragments instead
+        // of streaming them — see the tool_calls handling below.
+        var toolCallOpenerEmitted = new HashSet<int>();
 
         while (!completed)
         {
@@ -572,6 +576,16 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                         // aren't actually part of a tool call — skip those so we don't yield a
                         // non-null-but-empty ToolCallDeltas that downstream code (and clients
                         // accumulating history) could mistake for "this message has tool_calls".
+                        //
+                        // We also can't forward a call's fragments until its function name is
+                        // known: under speculative/MTP decoding llama.cpp's OpenAI stream
+                        // intermittently emits a call whose arguments come through but whose name
+                        // never does. A client that stored that would replay an un-dispatchable
+                        // tool call ("the tool \"\" does not exist") on every subsequent turn. So
+                        // buffer each call's fragments into `entry` until the name arrives, then
+                        // emit one opening delta carrying the id/type/name plus everything
+                        // accumulated so far; stream the rest normally after that. If the name
+                        // never arrives, nothing is emitted and FinalizeToolCalls drops the call.
                         if (delta.TryGetProperty("tool_calls", out JsonElement toolCallsDelta) && toolCallsDelta.ValueKind == JsonValueKind.Array && toolCallsDelta.GetArrayLength() > 0)
                         {
                             toolCallDeltas = new List<ChatToolCall>();
@@ -583,6 +597,8 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                                     accumulatedToolCalls[index] = entry = new ChatToolCall { Function = new ChatToolCallFunction() };
                                 }
 
+                                string frameName = string.Empty;
+                                string frameArgs = string.Empty;
                                 if (tc.TryGetProperty("id", out JsonElement idEl) && idEl.GetString() is { } id)
                                     entry.Id = id;
                                 if (tc.TryGetProperty("type", out JsonElement typeEl) && typeEl.GetString() is { } type)
@@ -590,23 +606,55 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IDisposab
                                 if (tc.TryGetProperty("function", out JsonElement fnEl))
                                 {
                                     if (fnEl.TryGetProperty("name", out JsonElement nameEl) && nameEl.GetString() is { } name)
+                                    {
                                         entry.Function.Name += name;
+                                        frameName = name;
+                                    }
                                     if (fnEl.TryGetProperty("arguments", out JsonElement argEl) && argEl.GetString() is { } args)
+                                    {
                                         entry.Function.Arguments += args;
+                                        frameArgs = args;
+                                    }
                                 }
 
-                                toolCallDeltas.Add(new ChatToolCall
+                                // Name not yet known — keep buffering, emit nothing for this call.
+                                if (string.IsNullOrWhiteSpace(entry.Function.Name))
+                                    continue;
+
+                                if (toolCallOpenerEmitted.Add(index))
                                 {
-                                    Index = index,
-                                    Id = entry.Id,
-                                    Type = entry.Type,
-                                    Function = new ChatToolCallFunction
+                                    // First forwardable frame for this call: send the full state
+                                    // captured so far (covers any frames we buffered while the
+                                    // name was still missing).
+                                    toolCallDeltas.Add(new ChatToolCall
                                     {
-                                        Name = tc.TryGetProperty("function", out JsonElement fnDeltaEl) && fnDeltaEl.TryGetProperty("name", out JsonElement nameDeltaEl) ? nameDeltaEl.GetString() ?? string.Empty : string.Empty,
-                                        Arguments = tc.TryGetProperty("function", out JsonElement fnArgEl) && fnArgEl.TryGetProperty("arguments", out JsonElement argDeltaEl) ? argDeltaEl.GetString() ?? string.Empty : string.Empty
-                                    }
-                                });
+                                        Index = index,
+                                        Id = entry.Id,
+                                        Type = entry.Type,
+                                        Function = new ChatToolCallFunction
+                                        {
+                                            Name = entry.Function.Name,
+                                            Arguments = entry.Function.Arguments
+                                        }
+                                    });
+                                }
+                                else
+                                {
+                                    // Opener already sent — forward just this frame's fragment.
+                                    toolCallDeltas.Add(new ChatToolCall
+                                    {
+                                        Index = index,
+                                        Id = entry.Id,
+                                        Type = entry.Type,
+                                        Function = new ChatToolCallFunction { Name = frameName, Arguments = frameArgs }
+                                    });
+                                }
                             }
+
+                            // Every call in this frame is still nameless (buffered) — treat it as
+                            // "no tool-call delta here" rather than yielding an empty array.
+                            if (toolCallDeltas.Count == 0)
+                                toolCallDeltas = null;
                         }
                     }
 

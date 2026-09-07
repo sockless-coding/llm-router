@@ -188,6 +188,15 @@ public class OpenAiHandler : IProtocolHandler
                 var completionId = $"chatcmpl-{Guid.NewGuid():N}";
                     var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
+                    // Tool-call indexes whose opening delta (id + type + name) has already been
+                    // sent to the client. OpenAI's wire format carries id/type/name only on the
+                    // first delta of each call; every later delta carries just the arguments
+                    // fragment. Restating the name (even as "") on later deltas makes clients that
+                    // assign rather than append function.name overwrite the real name with "" —
+                    // which is exactly how a working tool call turns into an un-dispatchable one
+                    // with the arguments intact but the name blank.
+                    var toolCallOpenerSent = new HashSet<int>();
+
                     // Log the response ID for future OpenAI response_id correlation
                     if (logId != Guid.Empty) { try { await _requestLogger.LogResponseIdAsync(logId, completionId); } catch { } }
 
@@ -220,6 +229,15 @@ public class OpenAiHandler : IProtocolHandler
                         {
                             // Final chunk with finish_reason, usage, and timings
                             var timing = BuildTimings(chunk.Response);
+
+                            // llama.cpp reports finish_reason "tool_calls" even when the only
+                            // tool call it produced was dropped for having no name (a
+                            // speculative/MTP-decoding glitch — see the provider's stream loop).
+                            // Report "stop" in that case so the client doesn't wait on a tool
+                            // call that never arrived.
+                            var finishReason = chunk.Response.FinishReason ?? "stop";
+                            if (finishReason == "tool_calls" && chunk.Response.ToolCalls is not { Count: > 0 })
+                                finishReason = "stop";
                             var finalChunkText = $"data: {JsonSerializer.Serialize(new ChatCompletionChunk
                             {
                                 Id = completionId,
@@ -240,7 +258,7 @@ public class OpenAiHandler : IProtocolHandler
                                         // OpenAI/llama.cpp send an empty delta on the terminating
                                         // frame for exactly this reason.
                                         Delta = new DeltaMessage(),
-                                        FinishReason = chunk.Response.FinishReason ?? "stop"
+                                        FinishReason = finishReason
                                     }
                                 },
                                 Usage = new Usage
@@ -282,7 +300,43 @@ public class OpenAiHandler : IProtocolHandler
                                 catch { /* Logging failure shouldn't block the response */ }
                             }
                         }
-                        else if (!string.IsNullOrEmpty(chunk.TextDelta) || !string.IsNullOrEmpty(chunk.ReasoningContentDelta) || chunk.ToolCallDeltas is not null)
+                        else if (chunk.ToolCallDeltas is not null)
+                        {
+                            // Emit tool-call deltas in true OpenAI wire shape: id/type/name only
+                            // on the first delta per index, arguments-only on every delta after.
+                            var toolCallsOut = new List<object>(chunk.ToolCallDeltas.Count);
+                            foreach (var tc in chunk.ToolCallDeltas)
+                            {
+                                int idx = tc.Index ?? 0;
+
+                                // Carry "name" only when this delta actually has a fragment of it —
+                                // never as an empty string, which clients that assign (rather than
+                                // append) function.name would use to wipe the real name.
+                                object function = string.IsNullOrEmpty(tc.Function.Name)
+                                    ? new { arguments = tc.Function.Arguments }
+                                    : new { name = tc.Function.Name, arguments = tc.Function.Arguments };
+
+                                if (toolCallOpenerSent.Add(idx))
+                                    toolCallsOut.Add(new { index = idx, id = tc.Id, type = "function", function });
+                                else
+                                    toolCallsOut.Add(new { index = idx, function });
+                            }
+
+                            var frame = new
+                            {
+                                id = completionId,
+                                @object = "chat.completion.chunk",
+                                created,
+                                model = request.Model,
+                                choices = new[]
+                                {
+                                    new { index = 0, delta = new { tool_calls = toolCallsOut }, finish_reason = (string?)null }
+                                }
+                            };
+                            var dataText = $"data: {JsonSerializer.Serialize(frame)}\r\n\r\n";
+                            await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(dataText), cancellationToken);
+                        }
+                        else if (!string.IsNullOrEmpty(chunk.TextDelta) || !string.IsNullOrEmpty(chunk.ReasoningContentDelta))
                         {
                             var dataText = $"data: {JsonSerializer.Serialize(new ChatCompletionChunk
                             {
@@ -297,8 +351,7 @@ public class OpenAiHandler : IProtocolHandler
                                         Delta = new DeltaMessage
                                         {
                                             Content = !string.IsNullOrEmpty(chunk.TextDelta) ? ChatMessageContent.FromText(chunk.TextDelta) : null,
-                                            ReasoningContent = chunk.ReasoningContentDelta,
-                                            ToolCalls = chunk.ToolCallDeltas
+                                            ReasoningContent = chunk.ReasoningContentDelta
                                         }
                                     }
                                 }
