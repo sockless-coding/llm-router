@@ -176,7 +176,40 @@ public class ResponsesHandler
 
         if (server is not null)
         {
-            var routeResponse = await ProcessOnServerAsync(server, routeRequest, preset, logId, backendToken);
+            RouteResponse routeResponse;
+            try
+            {
+                routeResponse = await ProcessOnServerAsync(server, routeRequest, preset, logId, backendToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+                _logger.LogWarning(ex, "Non-streaming response failed for model {Model} on server {Server}", request.Model, server.Name);
+                if (store)
+                {
+                    // No row exists yet for this synchronous request (unlike the background path,
+                    // which persists a "queued" row up front) — add the failed row directly rather
+                    // than trying to update one that isn't there.
+                    try
+                    {
+                        var failedRow = BuildStoredResponseRow(responseId, createdAt, request, "failed");
+                        failedRow.ErrorMessage = clientMessage;
+                        _db.StoredResponses.Add(failedRow);
+                        await _db.SaveChangesAsync(CancellationToken.None);
+                    }
+                    catch { }
+                }
+                if (logId != Guid.Empty) { try { await _requestLogger.LogErrorAsync(logId, clientMessage); } catch { } }
+
+                var failedResponse = BuildResponseObject(responseId, createdAt, request, "failed", new List<ResponseOutputItem>(), null);
+                failedResponse.Error = new ResponseError
+                {
+                    Code = BackendErrorClassifier.IsContextExceeded(ex) ? "context_length_exceeded" : "server_error",
+                    Message = clientMessage
+                };
+                return Results.Json(failedResponse, statusCode: BackendErrorClassifier.IsContextExceeded(ex) ? 400 : 502);
+            }
+
             var outputItems = BuildOutputItems(routeResponse);
             if (store)
             {
@@ -411,9 +444,31 @@ public class ResponsesHandler
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            if (store) { try { await UpdateStatusIfNotTerminalAsync(_db, responseId, "failed", ex.Message, CancellationToken.None); } catch { } }
+            // The stream already started with a 200 status and SSE headers, so a mid-stream
+            // backend failure (e.g. llama.cpp's context-exceeded error) can't become a proper
+            // HTTP error response — surface it as a "response.failed" event instead of letting
+            // the exception propagate and just sever the connection.
+            var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+            _logger.LogWarning(ex, "Streaming response {ResponseId} failed", responseId);
+
+            if (store) { try { await UpdateStatusIfNotTerminalAsync(_db, responseId, "failed", clientMessage, CancellationToken.None); } catch { } }
             _registry.Remove(responseId);
-            throw;
+
+            try
+            {
+                var failedResponse = BuildResponseObject(responseId, createdAt, request, "failed", new List<ResponseOutputItem>(), null);
+                failedResponse.Error = new ResponseError
+                {
+                    Code = BackendErrorClassifier.IsContextExceeded(ex) ? "context_length_exceeded" : "server_error",
+                    Message = clientMessage
+                };
+                await WriteEventAsync(bodyWriter, new ResponseStreamEvent { Type = "response.failed", SequenceNumber = seq++, Response = failedResponse }, clientToken);
+            }
+            catch (OperationCanceledException) { }
+
+            if (logId != Guid.Empty) { try { await _requestLogger.LogErrorAsync(logId, clientMessage); } catch { } }
+
+            return Results.Empty;
         }
 
         // Best-effort from here on — the client may already be gone (that's the same disconnect

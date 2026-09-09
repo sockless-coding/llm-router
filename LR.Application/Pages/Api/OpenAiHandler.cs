@@ -230,6 +230,8 @@ public class OpenAiHandler : IProtocolHandler
                     await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(firstChunk), cancellationToken);
                     await bodyWriter.FlushAsync(cancellationToken);
 
+                    try
+                    {
                     // Note: no early "if backendToken.IsCancellationRequested break" guard here —
                     // once cancelled (client disconnect or backend timeout), the provider stops
                     // reading from llama.cpp and yields exactly one more chunk: a synthetic final
@@ -373,6 +375,40 @@ public class OpenAiHandler : IProtocolHandler
 
                         await bodyWriter.FlushAsync(cancellationToken);
                     }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // The stream already started with a 200 status and SSE headers, so a
+                        // mid-stream backend failure (e.g. llama.cpp's context-exceeded error)
+                        // can't become a proper HTTP error response — the best we can do is tell
+                        // the client what happened via an in-band error frame instead of letting
+                        // this propagate to Kestrel's unhandled-exception handler, which just
+                        // severs the connection and logs a scary stack trace for what is often a
+                        // routine, user-actionable condition.
+                        var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+                        _logger.LogWarning(ex, "Streaming chat completion failed for model {Model} on server {Server}", request.Model, server.Name);
+
+                        try
+                        {
+                            var errorFrame = $"data: {JsonSerializer.Serialize(new
+                            {
+                                error = new
+                                {
+                                    message = clientMessage,
+                                    type = "invalid_request_error",
+                                    code = BackendErrorClassifier.IsContextExceeded(ex) ? "context_length_exceeded" : null
+                                }
+                            })}\r\n\r\n";
+                            await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(errorFrame), cancellationToken);
+                            await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes("data: [DONE]\r\n\r\n"), cancellationToken);
+                            await bodyWriter.FlushAsync(cancellationToken);
+                        }
+                        catch (OperationCanceledException) { }
+
+                        if (logId != Guid.Empty) { try { await _requestLogger.LogErrorAsync(logId, clientMessage); } catch { } }
+
+                        return Results.Empty;
+                    }
 
                     // Signal end of stream (best-effort — the client may already be gone)
                     try
@@ -385,8 +421,27 @@ public class OpenAiHandler : IProtocolHandler
                 return Results.Empty;
             }
 
-            var result = await ProcessOnServer(server, request, routeRequest, logId, backendToken);
-            return Microsoft.AspNetCore.Http.Results.Json(result);
+            try
+            {
+                var result = await ProcessOnServer(server, request, routeRequest, logId, backendToken);
+                return Microsoft.AspNetCore.Http.Results.Json(result);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+                _logger.LogWarning(ex, "Non-streaming chat completion failed for model {Model} on server {Server}", request.Model, server.Name);
+                if (logId != Guid.Empty) { try { await _requestLogger.LogErrorAsync(logId, clientMessage); } catch { } }
+
+                return Microsoft.AspNetCore.Http.Results.Json(new
+                {
+                    error = new
+                    {
+                        message = clientMessage,
+                        type = "invalid_request_error",
+                        code = BackendErrorClassifier.IsContextExceeded(ex) ? "context_length_exceeded" : null
+                    }
+                }, statusCode: BackendErrorClassifier.IsContextExceeded(ex) ? 400 : 502);
+            }
         }
 
         // Queue the request — use backend token so a client disconnect doesn't abort the queue wait

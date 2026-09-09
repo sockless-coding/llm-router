@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Models.OpenAI;
+using LR.Core.Services;
 using LR.Core.Wrapper;
 
 namespace LR.Providers;
@@ -402,8 +403,13 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
             {
-                _logger.LogError(ex, "Request failed to {ServerUrl}", ServerUrl);
-                await LogProviderMessage(ServerLogLevel.Error,
+                // A context-exceeded response from llama.cpp is a routine, user-actionable
+                // condition (the request just doesn't fit the model's context window), not a
+                // provider malfunction — log it at Warning so it doesn't read like an outage.
+                bool contextExceeded = BackendErrorClassifier.IsContextExceeded(ex);
+                var logLevel = contextExceeded ? LogLevel.Warning : LogLevel.Error;
+                _logger.Log(logLevel, ex, "Request failed to {ServerUrl}", ServerUrl);
+                await LogProviderMessage(contextExceeded ? ServerLogLevel.Warning : ServerLogLevel.Error,
                     $"Request failed: {ex.Message}");
 
                 throw;
@@ -548,8 +554,16 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
             catch (Exception ex) when (ex is not OperationCanceledException && ServerUrl != null)
             {
                 lastException = ex;
-                _logger.LogError(ex, "Streaming request failed to {ServerUrl}", ServerUrl);
-                await LogProviderMessage(ServerLogLevel.Error,
+
+                // A context-exceeded response from llama.cpp is a routine, user-actionable
+                // condition (the request just doesn't fit the model's context window), not a
+                // provider malfunction — log it at Warning so it doesn't read like an outage,
+                // and callers (the API handlers) are responsible for turning it into a clean
+                // client-facing error rather than an unhandled exception.
+                bool contextExceeded = BackendErrorClassifier.IsContextExceeded(ex);
+                var logLevel = contextExceeded ? LogLevel.Warning : LogLevel.Error;
+                _logger.Log(logLevel, ex, "Streaming request failed to {ServerUrl}", ServerUrl);
+                await LogProviderMessage(contextExceeded ? ServerLogLevel.Warning : ServerLogLevel.Error,
                     $"Streaming request failed: {ex.Message}");
 
                 throw new InvalidOperationException($"Failed to send streaming request to {ServerUrl}: {ex.Message}", ex);

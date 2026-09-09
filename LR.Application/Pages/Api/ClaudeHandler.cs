@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Models.Claude;
+using LR.Core.Services;
 
 namespace LR.Application.Pages.Api;
 
@@ -329,20 +330,61 @@ public class ClaudeHandler : IProtocolHandler
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        _logger.LogError(ex, "Claude streaming response failed for model {Model} on server {Server}", request.Model, server.Name);
+                        // The stream already started with a 200 status and SSE headers, so a
+                        // mid-stream backend failure (e.g. llama.cpp's context-exceeded error)
+                        // can't become a proper HTTP error response — send Anthropic's own
+                        // stream-error event shape instead of letting this propagate and just
+                        // sever the connection.
+                        var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+                        _logger.LogWarning(ex, "Claude streaming response failed for model {Model} on server {Server}", request.Model, server.Name);
                         if (logId != Guid.Empty)
                         {
-                            try { await _requestLogger.LogErrorAsync(logId, ex.Message); }
+                            try { await _requestLogger.LogErrorAsync(logId, clientMessage); }
                             catch { /* Logging failure shouldn't block the response */ }
                         }
-                        throw;
+
+                        try
+                        {
+                            await httpResponse.WriteAsync($"event: error\ndata: {JsonSerializer.Serialize(new
+                            {
+                                type = "error",
+                                error = new
+                                {
+                                    type = BackendErrorClassifier.IsContextExceeded(ex) ? "invalid_request_error" : "api_error",
+                                    message = clientMessage
+                                }
+                            })}\r\n\r\n", cancellationToken);
+                            await httpResponse.Body.FlushAsync(cancellationToken);
+                        }
+                        catch (OperationCanceledException) { }
+
+                        return Results.Empty;
                     }
 
                 return Results.Empty;
             }
 
-            var result = await ProcessOnServer(server, request, routeRequest, logId, backendToken);
-            return Microsoft.AspNetCore.Http.Results.Json(result);
+            try
+            {
+                var result = await ProcessOnServer(server, request, routeRequest, logId, backendToken);
+                return Microsoft.AspNetCore.Http.Results.Json(result);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+                _logger.LogWarning(ex, "Non-streaming Claude message failed for model {Model} on server {Server}", request.Model, server.Name);
+                if (logId != Guid.Empty) { try { await _requestLogger.LogErrorAsync(logId, clientMessage); } catch { } }
+
+                return Microsoft.AspNetCore.Http.Results.Json(new
+                {
+                    type = "error",
+                    error = new
+                    {
+                        type = BackendErrorClassifier.IsContextExceeded(ex) ? "invalid_request_error" : "api_error",
+                        message = clientMessage
+                    }
+                }, statusCode: BackendErrorClassifier.IsContextExceeded(ex) ? 400 : 502);
+            }
         }
 
         // Queue the request — use backend token so a client disconnect doesn't abort the queue wait

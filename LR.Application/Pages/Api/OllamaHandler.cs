@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
@@ -28,6 +29,7 @@ public class OllamaHandler : IProtocolHandler
     private readonly IApiRequestLogger _requestLogger;
     private readonly GatewaySettings _gatewaySettings;
     private readonly IApiKeyRequestContext _apiKeyContext;
+    private readonly ILogger<OllamaHandler> _logger;
 
     public ApiProtocol Protocol => ApiProtocol.Ollama;
     public string PathPrefix => "/api";
@@ -42,7 +44,8 @@ public class OllamaHandler : IProtocolHandler
         IChatTemplateVariableExtractor templateVariableExtractor,
         IApiRequestLogger requestLogger,
         GatewaySettings gatewaySettings,
-        IApiKeyRequestContext apiKeyContext)
+        IApiKeyRequestContext apiKeyContext,
+        ILogger<OllamaHandler> logger)
     {
         _serverManager = serverManager;
         _presetManager = presetManager;
@@ -54,6 +57,7 @@ public class OllamaHandler : IProtocolHandler
         _requestLogger = requestLogger;
         _gatewaySettings = gatewaySettings;
         _apiKeyContext = apiKeyContext;
+        _logger = logger;
     }
 
     public async Task<object> HandleListModelsAsync()
@@ -299,6 +303,8 @@ public class OllamaHandler : IProtocolHandler
                 if (provider is null)
                     return Microsoft.AspNetCore.Http.Results.Problem($"No backend provider registered for instance {server.Name}", statusCode: 503);
 
+                try
+                {
                 // Note: no early "if cancellationToken.IsCancellationRequested break" guard here —
                 // once cancelled (client disconnect), the provider stops reading from llama.cpp
                 // and yields exactly one more chunk: a synthetic final chunk carrying whatever
@@ -356,12 +362,42 @@ public class OllamaHandler : IProtocolHandler
 
                     await httpResponse.Body.FlushAsync(cancellationToken);
                 }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // The stream already started with a 200 status and NDJSON headers, so a
+                    // mid-stream backend failure (e.g. llama.cpp's context-exceeded error) can't
+                    // become a proper HTTP error response — emit Ollama's own error-line
+                    // convention instead of letting this propagate and just sever the connection.
+                    var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+                    _logger.LogWarning(ex, "Ollama streaming chat failed for model {Model} on server {Server}", request.Model, server.Name);
+                    if (logId != Guid.Empty) { try { await _requestLogger.LogErrorAsync(logId, clientMessage); } catch { } }
+
+                    try
+                    {
+                        await httpResponse.WriteAsync(JsonSerializer.Serialize(new { error = clientMessage }) + "\n", cancellationToken);
+                        await httpResponse.Body.FlushAsync(cancellationToken);
+                    }
+                    catch (OperationCanceledException) { }
+                }
 
                 return Results.Empty;
             }
 
-            var result = await ProcessOnServer(server, request, routeRequest, logId, backendToken);
-            return Microsoft.AspNetCore.Http.Results.Json(result);
+            try
+            {
+                var result = await ProcessOnServer(server, request, routeRequest, logId, backendToken);
+                return Microsoft.AspNetCore.Http.Results.Json(result);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+                _logger.LogWarning(ex, "Non-streaming Ollama chat failed for model {Model} on server {Server}", request.Model, server.Name);
+                if (logId != Guid.Empty) { try { await _requestLogger.LogErrorAsync(logId, clientMessage); } catch { } }
+
+                return Microsoft.AspNetCore.Http.Results.Json(new { error = clientMessage },
+                    statusCode: BackendErrorClassifier.IsContextExceeded(ex) ? 400 : 502);
+            }
         }
 
         // Queue the request — use backend token so a client disconnect doesn't abort the queue wait
@@ -464,6 +500,8 @@ public class OllamaHandler : IProtocolHandler
                 // Disable Kestrel response buffering so writes go directly to the socket
                 httpResponse.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
 
+                try
+                {
                 await foreach (var chunk in provider.SendStreamRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken))
                 {
                     if (cancellationToken.IsCancellationRequested) break;
@@ -507,13 +545,41 @@ public class OllamaHandler : IProtocolHandler
 
                     await httpResponse.Body.FlushAsync(cancellationToken);
                 }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // The stream already started with a 200 status and NDJSON headers, so a
+                    // mid-stream backend failure (e.g. llama.cpp's context-exceeded error) can't
+                    // become a proper HTTP error response — emit Ollama's own error-line
+                    // convention instead of letting this propagate and just sever the connection.
+                    var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+                    _logger.LogWarning(ex, "Ollama streaming generate failed for model {Model} on server {Server}", request.Model, server.Name);
+
+                    try
+                    {
+                        await httpResponse.WriteAsync(JsonSerializer.Serialize(new { error = clientMessage }) + "\n", cancellationToken);
+                        await httpResponse.Body.FlushAsync(cancellationToken);
+                    }
+                    catch (OperationCanceledException) { }
+                }
 
                 return Results.Empty;
             }
 
             // Non-streaming: process on server and return full response
 
-            var result = await provider.SendRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken);
+            RouteResponse? result;
+            try
+            {
+                result = await provider.SendRequestAsync(routeRequest.Payload, routeRequest.Protocol, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                var clientMessage = BackendErrorClassifier.ToClientMessage(ex);
+                _logger.LogWarning(ex, "Non-streaming Ollama generate failed for model {Model} on server {Server}", request.Model, server.Name);
+                return Microsoft.AspNetCore.Http.Results.Json(new { error = clientMessage },
+                    statusCode: BackendErrorClassifier.IsContextExceeded(ex) ? 400 : 502);
+            }
             if (result == null)
                 return Microsoft.AspNetCore.Http.Results.Problem("Backend returned no response", statusCode: 502);
 
