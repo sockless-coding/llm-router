@@ -193,9 +193,6 @@ builder.Services.AddHostedService<LR.Application.Services.ServerLoadBroadcastSer
 // Retention cleanup for request logs (runs hourly)
 builder.Services.AddHostedService<RetentionCleanupService>();
 
-// Retention cleanup for request logs (runs hourly)
-builder.Services.AddHostedService<RetentionCleanupService>();
-
 var app = builder.Build();
 
 // Ensure database is created and migrations are applied on startup

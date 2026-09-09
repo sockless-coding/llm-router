@@ -163,13 +163,9 @@ public class LRDbContext : DbContext
         {
             entity.ToTable("ModelStatistics");
 
-            // DateTimeOffset → TEXT converter for SQLite compatibility
-            entity.Property(s => s.Timestamp).HasConversion(
-                v => v.UtcDateTime.ToString("O"),
-                v => DateTimeOffset.Parse(v));
-
-
-            // DateTimeOffset → TEXT converter for SQLite compatibility
+            // DateTimeOffset → round-trip UTC TEXT ("O" format). The fixed-width, always-UTC
+            // representation sorts lexicographically in the same order as chronologically, so
+            // SQLite can seek/order on it and EF translates `Timestamp >= from` etc. to SQL.
             entity.Property(s => s.Timestamp).HasConversion(
                 v => v.UtcDateTime.ToString("O"),
                 v => DateTimeOffset.Parse(v));
@@ -204,6 +200,15 @@ public class LRDbContext : DbContext
         modelBuilder.Entity<Models.ApiRequestLog>(entity =>
         {
             entity.ToTable("ApiRequestLogs");
+
+            // DateTimeOffset → round-trip UTC TEXT ("O" format), matching ModelStatistics.
+            // Without this the SQLite provider stores DateTimeOffset in a format it can't
+            // compare or order in SQL, forcing every "recent logs" read to pull the whole
+            // table into memory. The "O" format sorts lexicographically = chronologically,
+            // so `ORDER BY Timestamp DESC LIMIT n` uses IX_ApiRequestLogs_Timestamp.
+            entity.Property(l => l.Timestamp).HasConversion(
+                v => v.UtcDateTime.ToString("O"),
+                v => DateTimeOffset.Parse(v));
 
             // Optional FK to ServerInstance — logs survive server deletion
             entity.HasOne(l => l.ServerInstance)

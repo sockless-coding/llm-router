@@ -3,6 +3,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+using Microsoft.EntityFrameworkCore;
+
+using LR.Core.Data;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 
@@ -54,6 +57,14 @@ public class RetentionCleanupService : BackgroundService
                 if (deleted > 0)
                 {
                     _log.LogInformation("Retention cleanup: deleted {Deleted} logs older than {Cutoff}", deleted, cutoff);
+
+                    // Request-log payloads run to ~1 MB each, so a purge frees a lot of pages.
+                    // SQLite keeps them on the free list (the file never shrinks on its own) and
+                    // leaves them interleaved with live rows, which slows every subsequent scan.
+                    // VACUUM compacts the file; it must run outside a transaction.
+                    var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
+                    await context.Database.ExecuteSqlRawAsync("VACUUM;", stoppingToken);
+                    _log.LogInformation("Retention cleanup: compacted database (VACUUM)");
                 }
             }
             catch (Exception ex)

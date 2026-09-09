@@ -155,56 +155,36 @@ public class ApiRequestLogger : IApiRequestLogger
         if (protocolFilter.HasValue)
             query = query.Where(l => l.Protocol == protocolFilter.Value);
 
-        // The time-window filter and ordering run client-side because the SQLite EF
-        // provider can't translate DateTimeOffset comparisons. To keep that affordable we
-        // first project away the payload chain — those TEXT columns run to ~1 MB each and
-        // the list view never shows them — and pull only the columns the table renders.
-        var rows = await query
-            .Select(l => new
+        if (from.HasValue)
+            query = query.Where(l => l.Timestamp >= from.Value);
+
+        // Timestamp is stored as round-trip UTC TEXT (see LRDbContext), so the filter,
+        // ordering and Take all translate to SQL and ride IX_ApiRequestLogs_Timestamp —
+        // only `count` rows are materialised. The payload chain (TEXT columns up to 1 MB
+        // each) is projected away so SQLite never has to walk their overflow pages.
+        long totalCount = await query.LongCountAsync();
+
+        var logs = await query
+            .OrderByDescending(l => l.Timestamp)
+            .Take(count)
+            .Select(l => new ApiRequestLog
             {
-                l.Id,
-                l.Timestamp,
-                l.Protocol,
-                l.EndpointPath,
-                l.ModelName,
-                ServerName = l.ServerInstance != null ? l.ServerInstance.Name : null,
-                l.TotalLatencyMs,
-                l.FirstTokenLatencyMs,
-                l.PromptTokensProcessed,
-                l.GeneratedTokenCount,
-                l.StatusCode,
-                l.IsStreaming,
-                l.WasQueued,
-                l.ErrorMessage,
+                Id = l.Id,
+                Timestamp = l.Timestamp,
+                Protocol = l.Protocol,
+                EndpointPath = l.EndpointPath,
+                ModelName = l.ModelName,
+                ServerInstance = l.ServerInstance == null ? null : new ServerInstance { Name = l.ServerInstance.Name },
+                TotalLatencyMs = l.TotalLatencyMs,
+                FirstTokenLatencyMs = l.FirstTokenLatencyMs,
+                PromptTokensProcessed = l.PromptTokensProcessed,
+                GeneratedTokenCount = l.GeneratedTokenCount,
+                StatusCode = l.StatusCode,
+                IsStreaming = l.IsStreaming,
+                WasQueued = l.WasQueued,
+                ErrorMessage = l.ErrorMessage,
             })
             .ToListAsync();
-
-        var window = from.HasValue
-            ? rows.Where(r => r.Timestamp >= from.Value).ToList()
-            : rows;
-
-        long totalCount = window.Count;
-        var logs = window
-            .OrderByDescending(r => r.Timestamp)
-            .Take(count)
-            .Select(r => new ApiRequestLog
-            {
-                Id = r.Id,
-                Timestamp = r.Timestamp,
-                Protocol = r.Protocol,
-                EndpointPath = r.EndpointPath,
-                ModelName = r.ModelName,
-                ServerInstance = r.ServerName is null ? null : new ServerInstance { Name = r.ServerName },
-                TotalLatencyMs = r.TotalLatencyMs,
-                FirstTokenLatencyMs = r.FirstTokenLatencyMs,
-                PromptTokensProcessed = r.PromptTokensProcessed,
-                GeneratedTokenCount = r.GeneratedTokenCount,
-                StatusCode = r.StatusCode,
-                IsStreaming = r.IsStreaming,
-                WasQueued = r.WasQueued,
-                ErrorMessage = r.ErrorMessage,
-            })
-            .ToList();
 
         return (logs, totalCount);
     }
@@ -218,46 +198,41 @@ public class ApiRequestLogger : IApiRequestLogger
     /// <inheritdoc />
     public async Task<long> DeleteOlderThanAsync(DateTimeOffset cutoff)
     {
-        // SQLite EF provider can't translate DateTimeOffset comparisons in SQL, so the
-        // cutoff filter runs client-side — but scan only (Id, Timestamp) rather than
-        // pulling every row's payload columns just to decide what to delete.
-        var stamps = await _context.ApiRequestLogs
-            .AsNoTracking()
-            .Select(l => new { l.Id, l.Timestamp })
-            .ToListAsync();
-        var idsToDelete = stamps.Where(l => l.Timestamp < cutoff).Select(l => l.Id).ToList();
+        // Timestamp is round-trip UTC TEXT (see LRDbContext), so the cutoff comparison
+        // translates to a single indexed DELETE.
+        int deleted = await _context.ApiRequestLogs
+            .Where(l => l.Timestamp < cutoff)
+            .ExecuteDeleteAsync();
 
-        if (idsToDelete.Count == 0) return 0;
-
-        // Guid IN (...) translates fine; chunk so the parameter list never gets huge.
-        foreach (var chunk in idsToDelete.Chunk(500))
-            await _context.ApiRequestLogs.Where(l => chunk.Contains(l.Id)).ExecuteDeleteAsync();
-
-        _logger.LogInformation("Deleted {Count} request logs older than {Cutoff}", idsToDelete.Count, cutoff);
-        return idsToDelete.Count;
+        if (deleted > 0)
+            _logger.LogInformation("Deleted {Count} request logs older than {Cutoff}", deleted, cutoff);
+        return deleted;
     }
 
     /// <inheritdoc />
     public async Task<(long TotalToday, long OpenAIToday, long ClaudeToday, long OllamaToday, double AvgLatencyMs)> GetSummaryStatsAsync()
     {
-        var startOfDay = DateTimeOffset.UtcNow.Date;
+        var startOfDay = new DateTimeOffset(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
 
-        // Client-side filter for DateTimeOffset — SQLite can't translate it — but project
-        // to just the three fields the cards need rather than loading whole entities
-        // (payload columns included) for the entire table.
-        var allLogs = await _context.ApiRequestLogs
+        // Timestamp is round-trip UTC TEXT (see LRDbContext), so the day-window filter
+        // rides IX_ApiRequestLogs_Timestamp and only today's rows are aggregated — grouped
+        // by protocol in a single round trip.
+        var today = _context.ApiRequestLogs
             .AsNoTracking()
-            .Select(l => new { l.Timestamp, l.Protocol, l.TotalLatencyMs })
+            .Where(l => l.Timestamp >= startOfDay);
+
+        var byProtocol = await today
+            .GroupBy(l => l.Protocol)
+            .Select(g => new { Protocol = g.Key, Count = g.Count() })
             .ToListAsync();
-        var todayLogs = allLogs.Where(l => l.Timestamp >= startOfDay).ToList();
 
-        long totalToday = (long)todayLogs.Count;
-        long openaiToday = todayLogs.Count(l => l.Protocol == ApiProtocol.OpenAI);
-        long claudeToday = todayLogs.Count(l => l.Protocol == ApiProtocol.Claude);
-        long ollamaToday = todayLogs.Count(l => l.Protocol == ApiProtocol.Ollama);
-        double avgLatencyMs = todayLogs.Average(l => (double?)l.TotalLatencyMs) ?? 0;
+        long CountFor(ApiProtocol p) => byProtocol.FirstOrDefault(x => x.Protocol == p)?.Count ?? 0;
 
-        return (totalToday, openaiToday, claudeToday, ollamaToday, avgLatencyMs);
+        long totalToday = byProtocol.Sum(x => (long)x.Count);
+        // Nullable selector → AverageAsync yields null (not a throw) when nothing matched.
+        double avgLatencyMs = await today.AverageAsync(l => (double?)l.TotalLatencyMs) ?? 0;
+
+        return (totalToday, CountFor(ApiProtocol.OpenAI), CountFor(ApiProtocol.Claude), CountFor(ApiProtocol.Ollama), avgLatencyMs);
     }
 
     /// <summary>
