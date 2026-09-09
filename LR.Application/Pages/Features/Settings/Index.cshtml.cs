@@ -37,6 +37,12 @@ public class IndexModel : PageModel
     public int DefaultParallelSlots { get; set; } = 4;
 
     [BindProperty]
+    public bool ContextAwareQueuing { get; set; }
+
+    [BindProperty]
+    public int ContextUsageQueueThresholdPercent { get; set; } = 90;
+
+    [BindProperty]
     public bool RequireApiKey { get; set; }
 
     [BindProperty]
@@ -65,6 +71,8 @@ public class IndexModel : PageModel
         MaxQueueSize = s.MaxQueueSize;
         QueueTimeoutSeconds = s.QueueTimeoutSeconds;
         DefaultParallelSlots = s.DefaultParallelSlots;
+        ContextAwareQueuing = s.ContextAwareQueuing;
+        ContextUsageQueueThresholdPercent = s.ContextUsageQueueThresholdPercent;
         RequireApiKey = s.RequireApiKey;
         RoutingPort = s.RoutingPort;
         AdminPort = s.Port;
@@ -114,6 +122,8 @@ public class IndexModel : PageModel
                         gatewayDict["MaxQueueSize"] = MaxQueueSize;
                         gatewayDict["QueueTimeoutSeconds"] = QueueTimeoutSeconds;
                         gatewayDict["DefaultParallelSlots"] = DefaultParallelSlots;
+                        gatewayDict["ContextAwareQueuing"] = ContextAwareQueuing;
+                        gatewayDict["ContextUsageQueueThresholdPercent"] = ContextUsageQueueThresholdPercent;
                         gatewayDict["RequireApiKey"] = RequireApiKey;
                         gatewayDict["RoutingPort"] = RoutingPort;
                         config["Gateway"] = gatewayDict;
@@ -138,6 +148,8 @@ public class IndexModel : PageModel
         MaxQueueSize = s.MaxQueueSize;
         QueueTimeoutSeconds = s.QueueTimeoutSeconds;
         DefaultParallelSlots = s.DefaultParallelSlots;
+        ContextAwareQueuing = s.ContextAwareQueuing;
+        ContextUsageQueueThresholdPercent = s.ContextUsageQueueThresholdPercent;
         RequireApiKey = s.RequireApiKey;
         RoutingPort = s.RoutingPort;
         AdminPort = s.Port;

@@ -81,6 +81,23 @@ else
                     <div id="rt-slots-bar" class="h-full bg-neon-cyan transition-all duration-300" style="width: @(Model.MaxSlots > 0 ? (int)Math.Round(100.0 * Math.Min(Model.InFlight, Model.MaxSlots) / Model.MaxSlots) : 0)%"></div>
                 </div>
             </div>
+            @{
+                var ctxPct = Model.RuntimeUsage?.BusiestSlotUsageRatio is double r
+                    ? Math.Clamp((int)Math.Round(r * 100.0), 0, 100)
+                    : -1;
+                var ctxDetail = Model.RuntimeUsage is { UsedTokens: int ut, ContextLimit: int cl } && cl > 0
+                    ? $"{ut:N0} / {cl:N0} tokens across {Model.RuntimeUsage.TotalSlots ?? 0} slot(s)"
+                    : null;
+            }
+            <div>
+                <span class="text-xs text-text-secondary uppercase tracking-wider">Context used</span>
+                <p class="mt-1 flex items-baseline gap-1.5">
+                    <span id="rt-ctx" class="text-sm text-text-primary font-medium" title="@ctxDetail">@(ctxPct >= 0 ? $"{ctxPct}% (busiest slot)" : "—")</span>
+                </p>
+                <div class="mt-1.5 h-1.5 rounded-full bg-gray-700/40 overflow-hidden">
+                    <div id="rt-ctx-bar" class="h-full @(ctxPct >= 90 ? "bg-neon-red" : "bg-neon-cyan") transition-all duration-300" style="width: @(ctxPct >= 0 ? ctxPct : 0)%"></div>
+                </div>
+            </div>
             <div>
                 <span class="text-xs text-text-secondary uppercase tracking-wider">Context / slot</span>
                 <p class="text-sm text-text-primary mt-1">@(Model.ServerProps?.ContextSizePerSlot?.ToString("N0") ?? "—")</p>
@@ -176,6 +193,8 @@ else
 
     const slotsEl = document.getElementById('rt-slots');
     const barEl = document.getElementById('rt-slots-bar');
+    const ctxEl = document.getElementById('rt-ctx');
+    const ctxBarEl = document.getElementById('rt-ctx-bar');
 
     function apply(rows) {
         const row = Array.isArray(rows) ? rows.find(r => r.id === serverId) : null;
@@ -192,6 +211,19 @@ else
         } else {
             slotsEl.textContent = '—';
             barEl.style.width = '0%';
+        }
+
+        // Live context (KV-cache) usage — kvUsagePct is -1 when unknown.
+        if (ctxEl && ctxBarEl) {
+            if (row.kvUsagePct >= 0) {
+                ctxEl.textContent = row.kvUsagePct + '% (busiest slot)';
+                ctxBarEl.style.width = row.kvUsagePct + '%';
+                ctxBarEl.classList.toggle('bg-neon-red', row.kvUsagePct >= 90);
+                ctxBarEl.classList.toggle('bg-neon-cyan', row.kvUsagePct < 90);
+            } else {
+                ctxEl.textContent = '—';
+                ctxBarEl.style.width = '0%';
+            }
         }
     }
 

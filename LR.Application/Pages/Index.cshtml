@@ -187,6 +187,20 @@
                 </div>
             </div>
 
+            <!-- Live context (KV-cache) usage from llama.cpp /metrics; kept current over SignalR -->
+            @{
+                var hasCtx = Model.ServerContextUsage.TryGetValue(server.Id, out var ctx);
+            }
+            <div id="ctx-wrap-@server.Id" class="mb-4 text-sm @(hasCtx ? "" : "hidden")">
+                <div class="flex items-center justify-between">
+                    <p class="text-text-secondary text-xs">Context used</p>
+                    <p id="ctx-text-@server.Id" class="text-text-primary font-medium text-xs">@(hasCtx ? $"{ctx.Percent}%" : "—")</p>
+                </div>
+                <div class="mt-1.5 h-1.5 rounded-full bg-gray-700/40 overflow-hidden">
+                    <div id="ctx-bar-@server.Id" class="h-full @(hasCtx && ctx.Percent >= 90 ? "bg-neon-red" : "bg-neon-cyan") transition-all duration-300" style="width: @(hasCtx ? ctx.Percent : 0)%"></div>
+                </div>
+            </div>
+
             @if (server.RestartCount > 0)
             {
                 <div class="mb-3 text-xs text-yellow-500">Restarted @server.RestartCount/@server.MaxRestarts times</div>
@@ -408,6 +422,25 @@
                 }
             } else {
                 wrap.classList.add('hidden');
+            }
+
+            // Live context (KV-cache) usage — kvUsagePct is -1 when unknown.
+            const ctxWrap = document.getElementById('ctx-wrap-' + row.id);
+            if (ctxWrap) {
+                if (row.kvUsagePct >= 0 && row.status === 'Running') {
+                    ctxWrap.classList.remove('hidden');
+                    const ctxText = document.getElementById('ctx-text-' + row.id);
+                    const ctxBar = document.getElementById('ctx-bar-' + row.id);
+                    if (ctxText) ctxText.textContent = row.kvUsagePct + '%';
+                    if (ctxBar) {
+                        ctxBar.style.width = row.kvUsagePct + '%';
+                        const high = row.kvUsagePct >= 90;
+                        ctxBar.classList.toggle('bg-neon-red', high);
+                        ctxBar.classList.toggle('bg-neon-cyan', !high);
+                    }
+                } else {
+                    ctxWrap.classList.add('hidden');
+                }
             }
         }
     }

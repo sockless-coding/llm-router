@@ -44,6 +44,22 @@ public class GatewaySettings
     /// </summary>
     public int DefaultParallelSlots { get; set; } = 4;
 
+    /// <summary>
+    /// When enabled, the router holds a new request in the queue — even if a parallel slot is
+    /// free — while the target llama.cpp server's KV-cache usage is at or above
+    /// <see cref="ContextUsageQueueThresholdPercent"/> and it already has at least one request
+    /// in flight. This lets in-flight work finish and free context before more is admitted.
+    /// Off by default (unchanged behaviour). Requires the server's <c>/metrics</c> endpoint,
+    /// which the router always enables.
+    /// </summary>
+    public bool ContextAwareQueuing { get; set; } = false;
+
+    /// <summary>
+    /// KV-cache usage percentage (0–100) at or above which <see cref="ContextAwareQueuing"/>
+    /// holds new requests. Default: 90.
+    /// </summary>
+    public int ContextUsageQueueThresholdPercent { get; set; } = 90;
+
     // ── Request logging settings ─────────────────────────────────────
 
     /// <summary>

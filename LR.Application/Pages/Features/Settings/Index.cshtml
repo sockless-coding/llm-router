@@ -133,7 +133,7 @@ class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3
             </div>
 
             <!-- Default Parallel Slots -->
-            <div class="flex items-center justify-between py-3">
+            <div class="flex items-center justify-between py-3 border-b border-gray-700/20">
                 <div id="defaultParallelSlotsLabel">
                     <p class="text-sm text-text-primary font-medium">Default Parallel Slots</p>
                     <p class="text-xs text-text-secondary mt-0.5">Concurrent requests sent to one llama.cpp server when its slot count is unknown and the preset doesn't set Parallel. Mirrors llama.cpp's automatic <code>-np</code>.</p>
@@ -141,6 +141,37 @@ class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3
                 <input type="number" name="DefaultParallelSlots" min="1" value="@Model.DefaultParallelSlots"
 class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-2 w-24 text-sm text-center" aria-labelledby="defaultParallelSlotsLabel"
                            asp-for="DefaultParallelSlots" />
+            </div>
+
+            <!-- Context-Aware Queuing -->
+            <div class="flex items-center justify-between py-3 border-b border-gray-700/20">
+                <div id="contextAwareQueuingLabel">
+                    <p class="text-sm text-text-primary font-medium">Context-Aware Queuing</p>
+                    <p class="text-xs text-text-secondary mt-0.5">Hold a new request in the queue — even with a free slot — while the target llama.cpp server's context (KV cache) is near full and it already has a request in flight, letting that work finish and free context first.</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" name="ContextAwareQueuing" value="true" checked="@(Model.ContextAwareQueuing ? "checked" : null)"
+class="sr-only peer" aria-labelledby="contextAwareQueuingLabel"
+                               asp-for="ContextAwareQueuing" />
+                    <!-- Always send false when unchecked -->
+                    <input type="hidden" name="ContextAwareQueuing" value="false" />
+                    <div class="w-11 h-6 bg-gray-700 rounded-full peer-checked:bg-neon-cyan/40 peer-focus:ring-2 peer-focus:ring-neon-cyan/30 transition-colors"></div>
+                    <span class="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-md transform peer-checked:translate-x-5 transition-transform"></span>
+                </label>
+            </div>
+
+            <!-- Context Usage Queue Threshold -->
+            <div class="flex items-center justify-between py-3">
+                <div id="contextUsageThresholdLabel">
+                    <p class="text-sm text-text-primary font-medium">Context Usage Queue Threshold</p>
+                    <p class="text-xs text-text-secondary mt-0.5">KV-cache usage percentage at or above which Context-Aware Queuing holds new requests.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="number" name="ContextUsageQueueThresholdPercent" min="1" max="100" value="@Model.ContextUsageQueueThresholdPercent"
+class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-2 w-24 text-sm text-center" aria-labelledby="contextUsageThresholdLabel"
+                               asp-for="ContextUsageQueueThresholdPercent" />
+                    <span class="text-xs text-text-secondary" aria-hidden="true">%</span>
+                </div>
             </div>
         </div>
 

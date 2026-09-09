@@ -26,6 +26,9 @@ public class ServerDetailModel : PageModel
     /// <summary>Live runtime facts read from the running llama.cpp server's /props, if available.</summary>
     public Core.Models.LlamaServerProps? ServerProps { get; set; }
 
+    /// <summary>Live KV-cache usage read from the running llama.cpp server's /metrics, if available.</summary>
+    public Core.Models.LlamaRuntimeUsage? RuntimeUsage { get; set; }
+
     /// <summary>Requests the router currently has in flight to this server.</summary>
     public int InFlight { get; set; }
 
@@ -67,7 +70,10 @@ public class ServerDetailModel : PageModel
             }
 
             if (provider is IServerCapacityProvider capacity)
+            {
                 ServerProps = capacity.ServerProps;
+                RuntimeUsage = capacity.RuntimeUsage;
+            }
 
             InFlight = _concurrencyLimiter.InFlight(Server.Id);
 

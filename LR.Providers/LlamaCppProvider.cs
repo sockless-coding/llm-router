@@ -33,11 +33,21 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     /// </summary>
     private volatile LlamaServerProps? _serverProps;
 
+    /// <summary>
+    /// Latest snapshot of the running server's Prometheus <c>/metrics</c> (KV-cache usage,
+    /// in-flight/deferred request counts). Null until <see cref="RefreshRuntimeUsageAsync"/>
+    /// first succeeds; reset on stop/restart.
+    /// </summary>
+    private volatile LlamaRuntimeUsage? _runtimeUsage;
+
     /// <inheritdoc />
     public int? MaxConcurrentRequests => _serverProps?.TotalSlots is int n && n > 0 ? n : null;
 
     /// <inheritdoc />
     public LlamaServerProps? ServerProps => _serverProps;
+
+    /// <inheritdoc />
+    public LlamaRuntimeUsage? RuntimeUsage => _runtimeUsage;
 
     /// <summary>
     /// Path to the folder containing the llama.cpp server executable (e.g., "llama-server").
@@ -188,8 +198,9 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
         if (!File.Exists(ServerExecutablePath))
             throw new FileNotFoundException($"Server executable not found at: {ServerExecutablePath}");
 
-        // Forget the previous run's /props — this start may use a different config.
+        // Forget the previous run's /props and /metrics — this start may use a different config.
         _serverProps = null;
+        _runtimeUsage = null;
 
         // Update port if provided
         if (port.HasValue)
@@ -246,6 +257,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
         await LogProviderMessage(ServerLogLevel.Info, "Server stop initiated.");
 
         _serverProps = null;
+        _runtimeUsage = null;
 
         await _processManager.StopAllProcessesAsync(cancellationToken);
     }
@@ -332,6 +344,38 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
         catch
         {
             // Ignore — will retry on the next health check.
+        }
+    }
+
+    /// <summary>
+    /// Best-effort read of llama.cpp's <c>/slots</c> endpoint. Populates <see cref="RuntimeUsage"/>
+    /// with per-slot context (KV-cache) occupancy — <c>n_ctx</c> and the tokens each slot is
+    /// currently holding (cached prompt + generated so far). llama.cpp's Prometheus
+    /// <c>/metrics</c> no longer exposes a KV-cache gauge, and <c>/slots</c> is on by default and
+    /// carries the raw numbers, so this is where the figure comes from. Any failure is swallowed
+    /// and the previous snapshot is left in place.
+    /// </summary>
+    public async Task RefreshRuntimeUsageAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(ServerUrl))
+            return;
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(2));
+
+            using var response = await _httpClient.GetAsync($"{ServerUrl}/slots", cts.Token);
+            if (!response.IsSuccessStatusCode)
+                return;
+
+            string body = await response.Content.ReadAsStringAsync(cts.Token);
+            if (LlamaSlotsSnapshot.FromJson(body) is { } usage)
+                _runtimeUsage = usage;
+        }
+        catch
+        {
+            // Ignore — will retry on the next tick; the previous snapshot stays in place.
         }
     }
 

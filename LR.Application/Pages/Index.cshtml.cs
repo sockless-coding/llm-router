@@ -33,6 +33,13 @@ public class DashboardModel : PageModel
     /// </summary>
     public Dictionary<Guid, (int InFlight, int MaxSlots)> ServerSlots { get; set; } = new();
 
+    /// <summary>
+    /// Initial live context (KV-cache) usage per server id: (percent 0–100, token count).
+    /// Only populated for running llama.cpp servers whose <c>/metrics</c> has been read; the UI
+    /// then keeps it current over SignalR (<c>ReceiveServerLoad</c>).
+    /// </summary>
+    public Dictionary<Guid, (int Percent, int Tokens)> ServerContextUsage { get; set; } = new();
+
     // 24h activity summary for the stat tiles
     public long TotalRequests24h { get; set; }
     public long TotalTokens24h { get; set; }
@@ -76,9 +83,13 @@ public class DashboardModel : PageModel
 
         foreach (var s in Servers.Where(s => s.Engine == ServerEngine.LlamaCpp && s.Status == ServerStatus.Running))
         {
+            var provider = _serverManager.GetProvider(s.Id);
             var preset = s.ActivePresetId is Guid pid && activePresets.TryGetValue(pid, out var p) ? p : null;
-            var maxSlots = LlamaSlotCapacity.Resolve(_serverManager.GetProvider(s.Id), preset, _settings.DefaultParallelSlots);
+            var maxSlots = LlamaSlotCapacity.Resolve(provider, preset, _settings.DefaultParallelSlots);
             ServerSlots[s.Id] = (_concurrencyLimiter.InFlight(s.Id), maxSlots);
+
+            if ((provider as IServerCapacityProvider)?.RuntimeUsage is { BusiestSlotUsageRatio: double ratio } usage)
+                ServerContextUsage[s.Id] = (Math.Clamp((int)Math.Round(ratio * 100.0), 0, 100), usage.UsedTokens ?? 0);
         }
 
         var from = DateTimeOffset.UtcNow.AddDays(-1);

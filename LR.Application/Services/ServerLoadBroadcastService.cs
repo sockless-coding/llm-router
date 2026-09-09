@@ -75,17 +75,33 @@ public class ServerLoadBroadcastService : BackgroundService
             inFlight.TryGetValue(s.Id, out var busy);
 
             int maxSlots = 0;
+            int kvUsagePct = -1;
+            int kvTokens = 0;
             if (s.Engine == ServerEngine.LlamaCpp && s.Status == ServerStatus.Running)
             {
+                var provider = serverManager.GetProvider(s.Id);
                 var preset = s.ActivePresetId is Guid pid ? presetManager.GetById(pid) : null;
-                maxSlots = LlamaSlotCapacity.Resolve(serverManager.GetProvider(s.Id), preset, _settings.DefaultParallelSlots);
+                maxSlots = LlamaSlotCapacity.Resolve(provider, preset, _settings.DefaultParallelSlots);
+
+                // Refresh and read the server's live context (KV-cache) usage from /slots (best-effort).
+                if (provider is IServerCapacityProvider capacity)
+                {
+                    await capacity.RefreshRuntimeUsageAsync(CancellationToken.None);
+                    if (capacity.RuntimeUsage is { } usage)
+                    {
+                        if (usage.BusiestSlotUsageRatio is double ratio)
+                            kvUsagePct = Math.Clamp((int)Math.Round(ratio * 100.0), 0, 100);
+                        kvTokens = usage.UsedTokens ?? 0;
+                    }
+                }
             }
 
-            list.Add(new ServerLoadDto(s.Id, s.Status.ToString(), s.IsHealthy, s.Engine.ToString(), busy, maxSlots));
+            list.Add(new ServerLoadDto(s.Id, s.Status.ToString(), s.IsHealthy, s.Engine.ToString(), busy, maxSlots, kvUsagePct, kvTokens));
         }
 
         return list;
     }
 
-    private readonly record struct ServerLoadDto(Guid id, string status, bool healthy, string engine, int inFlight, int maxSlots);
+    private readonly record struct ServerLoadDto(
+        Guid id, string status, bool healthy, string engine, int inFlight, int maxSlots, int kvUsagePct, int kvTokens);
 }

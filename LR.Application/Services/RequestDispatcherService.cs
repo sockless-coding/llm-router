@@ -76,6 +76,12 @@ public class RequestDispatcherService : BackgroundService
                         continue;
                     }
 
+                    // Context-aware queuing: while the server's KV cache is (almost) full and it
+                    // has work in flight, leave its queued requests where they are for now.
+                    if (LlamaSlotCapacity.ShouldHoldForContext(
+                            serverManager.GetProvider(server.Id), _settings, _limiter.InFlight(server.Id)))
+                        continue;
+
                     // Drain as many queued requests as the server has free parallel-request slots.
                     int capacity = ResolveLlamaCapacity(server, serverManager, presetManager);
                     while (_limiter.TryAcquire(server.Id, capacity) is { } lease)

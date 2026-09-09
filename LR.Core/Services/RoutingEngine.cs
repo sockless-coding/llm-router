@@ -266,8 +266,14 @@ public class RoutingEngine : IRoutingEngine
         if (instance.Engine != ServerEngine.LlamaCpp)
             return new RouteDecision { Server = instance, Lease = ServerConcurrencyLimiter.NoopLease };
 
-        int capacity = LlamaSlotCapacity.Resolve(
-            _serverManager.GetProvider(instance.Id), preset, _settings.DefaultParallelSlots);
+        var provider = _serverManager.GetProvider(instance.Id);
+
+        // Context-aware queuing: hold the request (return null → caller queues) while the
+        // server's KV cache is (almost) full and it already has work in flight.
+        if (LlamaSlotCapacity.ShouldHoldForContext(provider, _settings, _concurrencyLimiter.InFlight(instance.Id)))
+            return null;
+
+        int capacity = LlamaSlotCapacity.Resolve(provider, preset, _settings.DefaultParallelSlots);
 
         var lease = _concurrencyLimiter.TryAcquire(instance.Id, capacity);
         return lease is null ? null : new RouteDecision { Server = instance, Lease = lease };

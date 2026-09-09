@@ -22,4 +22,18 @@ public interface IServerCapacityProvider
     /// has not been read yet (server still starting) or the engine has no such endpoint.
     /// </summary>
     LlamaServerProps? ServerProps { get; }
+
+    /// <summary>
+    /// The last snapshot of live context (KV-cache) occupancy read from the running server's
+    /// <c>/slots</c> endpoint, or null if it has not been read yet or the engine exposes no such
+    /// endpoint. Updated by <see cref="RefreshRuntimeUsageAsync"/>.
+    /// </summary>
+    LlamaRuntimeUsage? RuntimeUsage { get; }
+
+    /// <summary>
+    /// Best-effort refresh of <see cref="RuntimeUsage"/> from the running server. Any failure is
+    /// swallowed and the previous snapshot is left in place. Called on a short cadence by the
+    /// live server-load broadcast.
+    /// </summary>
+    Task RefreshRuntimeUsageAsync(CancellationToken cancellationToken = default);
 }
