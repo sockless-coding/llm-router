@@ -62,7 +62,7 @@ else
                 <p class="text-sm text-text-primary mt-1">@Model.Server.LastErrorMessage</p>
                 @if (Model.Server.LastErrorTime.HasValue)
                 {
-                    <p class="text-xs text-text-secondary mt-1">@Model.Server.LastErrorTime.Value.ToString("yyyy-MM-dd HH:mm:ss") UTC</p>
+                    <p class="text-xs text-text-secondary mt-1">@Html.Timestamp(Model.Server.LastErrorTime.Value, "datetime")</p>
                 }
             </div>
         }
@@ -175,7 +175,7 @@ else
                             <span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold @levelBg">@levelLabel</span>
                             <div class="min-w-0 flex-1">
                                 <p class="text-sm text-text-primary break-all">@log.Message.Replace("\n", "<br/>")</p>
-                                <p class="text-xs text-text-secondary mt-1">@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss") UTC</p>
+                                <p class="text-xs text-text-secondary mt-1">@Html.Timestamp(log.Timestamp, "datetime")</p>
                             </div>
                         </div>
                     </div>

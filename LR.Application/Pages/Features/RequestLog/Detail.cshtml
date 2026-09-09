@@ -78,7 +78,7 @@
         <!-- Metadata row -->
         <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
             <div><span class="text-text-secondary">Model:</span> <span class="text-text-primary font-mono">@log.ModelName</span></div>
-            <div><span class="text-text-secondary">Time:</span> <span class="text-text-primary">@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")</span></div>
+            <div><span class="text-text-secondary">Time:</span> <span class="text-text-primary">@Html.Timestamp(log.Timestamp, "datetime-ms")</span></div>
             <div><span class="text-text-secondary">Type:</span> <span class="text-text-primary">@(log.IsStreaming ? "⚡ Streaming" : "Static") @if (log.WasQueued) { <span>| 📥 Queued</span> }</span></div>
             @{
                 if (log.FirstTokenLatencyMs.HasValue)

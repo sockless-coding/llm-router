@@ -36,7 +36,7 @@
                     <span class="text-xs text-text-secondary ml-2 font-mono">@release.TagName</span>
                     @if (release.PublishedAt is not null)
                     {
-                        <span class="text-xs text-text-secondary ml-2">@release.PublishedAt.Value.ToString("yyyy-MM-dd")</span>
+                        <span class="text-xs text-text-secondary ml-2">@Html.Timestamp(release.PublishedAt.Value, "date-full")</span>
                     }
                 </div>
             </div>

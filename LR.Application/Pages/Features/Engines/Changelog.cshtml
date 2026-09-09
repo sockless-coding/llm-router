@@ -67,7 +67,7 @@ else
                         <span class="text-text-primary">@c.Summary</span>
                         <div class="text-xs text-text-secondary mt-0.5">
                             @c.Author
-                            @if (c.Date is not null) { <span> · @c.Date.Value.ToString("yyyy-MM-dd")</span> }
+                            @if (c.Date is not null) { <span> · @Html.Timestamp(c.Date.Value, "date-full")</span> }
                             @if (c.PullRequestUrl is not null)
                             {
                                 <a href="@c.PullRequestUrl" target="_blank" rel="noopener" class="text-neon-magenta hover:underline ml-1">#@c.PullRequestNumber</a>

@@ -103,8 +103,8 @@ class="px-3 py-2 rounded-lg text-xs font-medium transition-colors @activeClass">
 
                         <tr class="border-b border-gray-700/20 hover:bg-neon-cyan/5 transition-colors" data-log-id="@log.Id">
                             <td class="px-4 py-3 text-text-secondary whitespace-nowrap">
-                                @log.Timestamp.ToString("HH:mm:ss")
-                                <span class="text-xs opacity-60">@log.Timestamp.ToString("MM-dd")</span>
+                                @Html.Timestamp(log.Timestamp, "time")
+                                <span class="text-xs opacity-60">@Html.Timestamp(log.Timestamp, "date")</span>
                             </td>
                             <td class="px-4 py-3">
                                 <span class="font-medium @protocolColor">@log.ProtocolBadge</span>

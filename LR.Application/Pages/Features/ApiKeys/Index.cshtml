@@ -57,7 +57,7 @@
                             <td class="px-4 py-3 text-text-secondary">
                                 @(key.AllowAllModels ? "All models" : $"{key.AllowedPresets.Count} model(s)")
                             </td>
-                            <td class="px-4 py-3 text-text-secondary">@(key.LastUsedAt?.ToLocalTime().ToString("g") ?? "Never")</td>
+                            <td class="px-4 py-3 text-text-secondary">@if (key.LastUsedAt is { } lastUsed) { @Html.Timestamp(lastUsed, "datetime") } else { <text>Never</text> }</td>
                             <td class="px-4 py-3">
                                 <button type="button" onclick="toggleKey('@key.Id')"
                                         class="text-xs px-2.5 py-1 rounded-full border font-medium transition-all

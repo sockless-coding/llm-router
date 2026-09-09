@@ -139,6 +139,15 @@
                     <option value="neon">Neon</option>
                 </select>
 
+                <label for="timestampZoneSelect" class="sr-only">Timestamp display</label>
+                <select id="timestampZoneSelect" class="w-full text-sm rounded-lg px-3 py-2 border transition-all"
+                        style="background-color: var(--bg-card); color: var(--text-primary); border-color: color-mix(in srgb, var(--neon-cyan) 20%, transparent)"
+                        title="Time zone for displayed timestamps"
+                        onchange="setTimestampZone(this.value)">
+                    <option value="local">Local time</option>
+                    <option value="utc">UTC</option>
+                </select>
+
                 <button id="themeToggle" type="button" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:text-neon-magenta transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-inherit"
                         style="color: var(--text-secondary)"
                         aria-pressed="true"
@@ -228,6 +237,90 @@
         }
 
         syncThemeControls();
+    </script>
+
+    <script>
+        // Timestamp zone display — every stored timestamp is rendered server-side as a
+        // <time datetime="…Z"> element holding the UTC value; here we rewrite the visible
+        // text into the viewer's chosen zone. The choice lives in localStorage (per browser,
+        // like the theme), defaulting to the viewer's local time.
+        (function () {
+            var KEY = 'timestampZone';
+
+            function currentZone() {
+                try { return localStorage.getItem(KEY) === 'utc' ? 'utc' : 'local'; }
+                catch (e) { return 'local'; }
+            }
+
+            function pad(n, width) {
+                var s = String(n);
+                while (s.length < width) s = '0' + s;
+                return s;
+            }
+
+            function fields(d, zone) {
+                return zone === 'utc'
+                    ? { y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, da: d.getUTCDate(), h: d.getUTCHours(), mi: d.getUTCMinutes(), s: d.getUTCSeconds(), ms: d.getUTCMilliseconds() }
+                    : { y: d.getFullYear(), mo: d.getMonth() + 1, da: d.getDate(), h: d.getHours(), mi: d.getMinutes(), s: d.getSeconds(), ms: d.getMilliseconds() };
+            }
+
+            function format(iso, fmt, zone) {
+                var d = new Date(iso);
+                if (isNaN(d.getTime())) return null;
+                var t = fields(d, zone);
+                var date = t.y + '-' + pad(t.mo, 2) + '-' + pad(t.da, 2);
+                var time = pad(t.h, 2) + ':' + pad(t.mi, 2) + ':' + pad(t.s, 2);
+                switch (fmt) {
+                    case 'time': return time;
+                    case 'date': return pad(t.mo, 2) + '-' + pad(t.da, 2);
+                    case 'date-full': return date;
+                    case 'datetime-ms': return date + ' ' + time + '.' + pad(t.ms, 3);
+                    default: return date + ' ' + time;
+                }
+            }
+
+            function applyTo(root) {
+                var zone = currentZone();
+                var nodes = (root || document).querySelectorAll('time[data-ts-format]');
+                nodes.forEach(function (el) {
+                    var iso = el.getAttribute('datetime');
+                    if (!iso) return;
+                    var text = format(iso, el.getAttribute('data-ts-format'), zone);
+                    if (text === null) return;
+                    if (el.getAttribute('data-ts-suffix') === 'true') {
+                        text += zone === 'utc' ? ' UTC' : ' local';
+                    }
+                    el.textContent = text;
+                    el.title = 'UTC:   ' + format(iso, 'datetime-ms', 'utc') +
+                               '\nLocal: ' + format(iso, 'datetime-ms', 'local');
+                });
+            }
+
+            function syncControl() {
+                var sel = document.getElementById('timestampZoneSelect');
+                if (sel) sel.value = currentZone();
+            }
+
+            window.formatTimestamps = applyTo;
+
+            window.setTimestampZone = function (zone) {
+                try { localStorage.setItem(KEY, zone === 'utc' ? 'utc' : 'local'); } catch (e) { /* ignore */ }
+                applyTo(document);
+                syncControl();
+            };
+
+            // hx-boost swaps <body> contents (re-running this script) but keeps the <body>
+            // element, so bind the post-swap hook once and guard against stacking it.
+            if (!window.__timestampAfterSettleBound) {
+                window.__timestampAfterSettleBound = true;
+                document.body.addEventListener('htmx:afterSettle', function (e) {
+                    applyTo((e.detail && e.detail.target) || document);
+                });
+            }
+
+            applyTo(document);
+            syncControl();
+        })();
     </script>
 </body>
 </html>
