@@ -1,0 +1,85 @@
+@using LR.Core.Models
+@using LR.Core.Services
+@using LR.Application.Pages.Features.Models
+@model LR.Application.Pages.Features.Models.ModelRowViewModel
+@{
+    var lm = Model.Model;
+    var kind = ModelKindClassifier.Classify(lm);
+}
+<tr class="border-b border-gray-700/30 hover:bg-gray-800/20@(Model.Indented ? " bg-cyber-bg-dark/40" : "")"
+    data-group-member="@Model.GroupDomId"
+    hidden="@Model.HiddenByDefault">
+    <td class="px-4 py-3@(Model.Indented ? " pl-10" : "")">
+        <a href="/Features/Models/Details?id=@lm.Id" class="text-text-primary font-medium hover:text-neon-magenta transition-colors">@ModelDisplayFormat.Truncate(lm.Name, 48)</a>
+        @if (lm.Status == ModelStatus.Missing)
+        {
+            <p class="text-xs text-neon-red mt-0.5">File missing on disk</p>
+        }
+    </td>
+    <td class="px-4 py-3">
+        @if (lm.Source == ModelSource.HuggingFace)
+        {
+            <span class="text-xs px-2 py-0.5 rounded bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/20">Hugging Face</span>
+        }
+        else
+        {
+            <span class="text-xs px-2 py-0.5 rounded bg-gray-700/30 text-text-secondary border border-gray-600/20">Local</span>
+        }
+    </td>
+    <td class="px-4 py-3 text-text-primary">
+        @if (kind == ModelFileKind.Primary)
+        {
+            @(lm.QuantizationLevel ?? "—")
+        }
+        else
+        {
+            <span class="text-xs px-2 py-0.5 rounded border bg-purple-500/10 text-purple-300 border-purple-500/20">@ModelKindClassifier.Label(kind)</span>
+        }
+    </td>
+    <td class="px-4 py-3 text-text-primary">@(lm.ParameterSize ?? "—")</td>
+    <td class="px-4 py-3 text-right text-text-primary">@(lm.ContextLength?.ToString() ?? "—")</td>
+    <td class="px-4 py-3 text-right text-text-primary">@ModelDisplayFormat.FormatSize(lm.FileSizeBytes)</td>
+    <td class="px-4 py-3 text-center">
+        @if (lm.Status == ModelStatus.Ready)
+        {
+            <span class="text-xs px-2 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20">Ready</span>
+        }
+        else if (lm.Status == ModelStatus.Downloading)
+        {
+            <span class="text-xs px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 download-status" data-model-id="@lm.Id">Downloading…</span>
+        }
+        else if (lm.Status == ModelStatus.Error)
+        {
+            <span class="text-xs px-2 py-0.5 rounded bg-red-500/10 text-neon-red border border-red-500/20" title="@lm.StatusMessage">Error</span>
+        }
+        else
+        {
+            <span class="text-xs px-2 py-0.5 rounded bg-gray-700/30 text-text-secondary border border-gray-600/20">Missing</span>
+        }
+    </td>
+    <td class="px-4 py-3 text-center text-text-primary">@Model.UsageCount</td>
+    <td class="px-4 py-3 text-right whitespace-nowrap">
+        @if (lm.Source == ModelSource.HuggingFace && !string.IsNullOrEmpty(lm.HfRepoId))
+        {
+            <a href="https://huggingface.co/@lm.HfRepoId" target="_blank" rel="noopener noreferrer" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium" title="Open this model's page on Hugging Face">Model Card</a>
+        }
+        @if (!Model.Indented)
+        {
+            if (lm.Source == ModelSource.HuggingFace && !string.IsNullOrEmpty(lm.HfRepoId))
+            {
+                <a href="/Features/Models/HuggingFace?repoId=@Uri.EscapeDataString(lm.HfRepoId)" class="text-xs px-2 py-1 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium" title="Download another quant of this model from Hugging Face">+ Version</a>
+            }
+            var folder = System.IO.Path.GetDirectoryName(lm.FilePath);
+            if (!string.IsNullOrEmpty(folder))
+            {
+                <a href="/Features/Models/Create?folder=@Uri.EscapeDataString(folder)" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium" title="Import another .gguf file found in this model's folder">+ File</a>
+            }
+        }
+        <button type="button" onclick="refreshModel('@lm.Id')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Refresh</button>
+        @if (lm.Source == ModelSource.HuggingFace)
+        {
+            <button type="button" onclick="checkUpdate('@lm.Id', @Model.UsageCount)" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check Update</button>
+        }
+        <button type="button" onclick="deleteModel('@lm.Id', '@lm.Name', @Model.UsageCount)" class="text-xs px-2 py-1 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Delete</button>
+    </td>
+</tr>

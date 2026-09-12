@@ -13,6 +13,7 @@ public class ModelsIndexModel : PageModel
     private readonly IModelLibrarySettingsService _settings;
 
     public IReadOnlyList<LocalModel> Models { get; set; } = new List<LocalModel>();
+    public IReadOnlyList<ModelGroupViewModel> ModelGroups { get; set; } = new List<ModelGroupViewModel>();
     public Dictionary<Guid, int> PresetUsageCounts { get; set; } = new();
 
     [BindProperty]
@@ -57,6 +58,7 @@ public class ModelsIndexModel : PageModel
     private async Task LoadModelsAsync()
     {
         Models = await _modelLibrary.GetAllAsync();
+        ModelGroups = ModelGroupViewModel.Build(Models);
 
         var allPresets = await _presetManager.GetAllPresetsAsync();
         PresetUsageCounts = allPresets

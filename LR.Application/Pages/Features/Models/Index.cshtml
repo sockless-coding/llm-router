@@ -1,19 +1,19 @@
 @page
 @using LR.Core.Models
+@using LR.Core.Services
+@using LR.Application.Pages.Features.Models
 @model LR.Application.Pages.Features.Models.ModelsIndexModel
 @{
     ViewData["Title"] = "Models";
 }
 
 @functions {
-    string Truncate(string? s, int max)
-        => s is not null && s.Length > max ? s[..(max - 3)] + "..." : (s ?? "");
-
-    string FormatSize(long? bytes)
+    ModelStatus GroupStatus(IEnumerable<LocalModel> members)
     {
-        if (bytes is null) return "—";
-        double gb = bytes.Value / 1024.0 / 1024.0 / 1024.0;
-        return gb >= 1 ? $"{gb:F1} GB" : $"{bytes.Value / 1024.0 / 1024.0:F0} MB";
+        if (members.Any(m => m.Status == ModelStatus.Downloading)) return ModelStatus.Downloading;
+        if (members.Any(m => m.Status == ModelStatus.Error)) return ModelStatus.Error;
+        if (members.Any(m => m.Status == ModelStatus.Missing)) return ModelStatus.Missing;
+        return ModelStatus.Ready;
     }
 }
 
@@ -91,59 +91,90 @@ else
                 </tr>
             </thead>
             <tbody>
-                @foreach (var lm in Model.Models)
+                @{ var groupIndex = 0; }
+                @foreach (var group in Model.ModelGroups)
                 {
-                    var usageCount = Model.PresetUsageCounts.GetValueOrDefault(lm.Id, 0);
-                    <tr class="border-b border-gray-700/30 hover:bg-gray-800/20">
-                        <td class="px-4 py-3">
-                            <a href="/Features/Models/Details?id=@lm.Id" class="text-text-primary font-medium hover:text-neon-magenta transition-colors">@Truncate(lm.Name, 48)</a>
-                            @if (lm.Status == ModelStatus.Missing)
-                            {
-                                <p class="text-xs text-neon-red mt-0.5">File missing on disk</p>
-                            }
-                        </td>
-                        <td class="px-4 py-3">
-                            @if (lm.Source == ModelSource.HuggingFace)
-                            {
-                                <span class="text-xs px-2 py-0.5 rounded bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/20">Hugging Face</span>
-                            }
-                            else
-                            {
-                                <span class="text-xs px-2 py-0.5 rounded bg-gray-700/30 text-text-secondary border border-gray-600/20">Local</span>
-                            }
-                        </td>
-                        <td class="px-4 py-3 text-text-primary">@(lm.QuantizationLevel ?? "—")</td>
-                        <td class="px-4 py-3 text-text-primary">@(lm.ParameterSize ?? "—")</td>
-                        <td class="px-4 py-3 text-right text-text-primary">@(lm.ContextLength?.ToString() ?? "—")</td>
-                        <td class="px-4 py-3 text-right text-text-primary">@FormatSize(lm.FileSizeBytes)</td>
-                        <td class="px-4 py-3 text-center">
-                            @if (lm.Status == ModelStatus.Ready)
-                            {
-                                <span class="text-xs px-2 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20">Ready</span>
-                            }
-                            else if (lm.Status == ModelStatus.Downloading)
-                            {
-                                <span class="text-xs px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 download-status" data-model-id="@lm.Id">Downloading…</span>
-                            }
-                            else if (lm.Status == ModelStatus.Error)
-                            {
-                                <span class="text-xs px-2 py-0.5 rounded bg-red-500/10 text-neon-red border border-red-500/20" title="@lm.StatusMessage">Error</span>
-                            }
-                            else
-                            {
-                                <span class="text-xs px-2 py-0.5 rounded bg-gray-700/30 text-text-secondary border border-gray-600/20">Missing</span>
-                            }
-                        </td>
-                        <td class="px-4 py-3 text-center text-text-primary">@usageCount</td>
-                        <td class="px-4 py-3 text-right whitespace-nowrap">
-                            <button type="button" onclick="refreshModel('@lm.Id')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Refresh</button>
-                            @if (lm.Source == ModelSource.HuggingFace)
-                            {
-                                <button type="button" onclick="checkUpdate('@lm.Id', @usageCount)" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check Update</button>
-                            }
-                            <button type="button" onclick="deleteModel('@lm.Id', '@lm.Name', @usageCount)" class="text-xs px-2 py-1 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Delete</button>
-                        </td>
-                    </tr>
+                    groupIndex++;
+                    var groupDomId = $"grp-{groupIndex}";
+
+                    if (group.IsGrouped)
+                    {
+                        var status = GroupStatus(group.AllModels);
+                        var quantLabel = group.PrimaryModels.Count == 1 ? "1 quant" : $"{group.PrimaryModels.Count} quants";
+                        if (group.AuxiliaryModels.Count > 0)
+                        {
+                            quantLabel += $" + {group.AuxiliaryModels.Count} extra";
+                        }
+                        var usageTotal = group.AllModels.Sum(m => Model.PresetUsageCounts.GetValueOrDefault(m.Id, 0));
+                        var groupRepoId = group.AllModels.FirstOrDefault(m => !string.IsNullOrEmpty(m.HfRepoId))?.HfRepoId;
+                        var groupFolder = System.IO.Path.GetDirectoryName(group.AllModels.First().FilePath);
+
+                        <tr class="border-b border-gray-700/30 bg-gray-800/30 hover:bg-gray-800/40 cursor-pointer select-none" onclick="toggleModelGroup('@groupDomId')">
+                            <td class="px-4 py-3" colspan="2">
+                                <span class="inline-flex items-center gap-2">
+                                    <svg class="w-4 h-4 transition-transform" data-group-chevron="@groupDomId" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                                    <span class="text-text-primary font-medium">@ModelDisplayFormat.Truncate(group.DisplayName, 48)</span>
+                                    @if (!string.IsNullOrEmpty(group.Architecture))
+                                    {
+                                        <span class="text-xs text-text-secondary">(@group.Architecture)</span>
+                                    }
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 text-text-secondary">@quantLabel</td>
+                            <td class="px-4 py-3 text-text-primary">@(group.ParameterSize ?? "—")</td>
+                            <td class="px-4 py-3 text-right text-text-secondary">—</td>
+                            <td class="px-4 py-3 text-right text-text-primary">@ModelDisplayFormat.FormatSize(group.TotalSizeBytes)</td>
+                            <td class="px-4 py-3 text-center">
+                                @if (status == ModelStatus.Ready)
+                                {
+                                    <span class="text-xs px-2 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20">Ready</span>
+                                }
+                                else if (status == ModelStatus.Downloading)
+                                {
+                                    <span class="text-xs px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">Downloading…</span>
+                                }
+                                else if (status == ModelStatus.Error)
+                                {
+                                    <span class="text-xs px-2 py-0.5 rounded bg-red-500/10 text-neon-red border border-red-500/20">Error</span>
+                                }
+                                else
+                                {
+                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-700/30 text-text-secondary border border-gray-600/20">Missing</span>
+                                }
+                            </td>
+                            <td class="px-4 py-3 text-center text-text-primary">@usageTotal</td>
+                            <td class="px-4 py-3 text-right whitespace-nowrap">
+                                @if (!string.IsNullOrEmpty(groupRepoId))
+                                {
+                                    <a href="https://huggingface.co/@groupRepoId" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium" title="Open this model's page on Hugging Face">Model Card</a>
+                                    <a href="/Features/Models/HuggingFace?repoId=@Uri.EscapeDataString(groupRepoId)" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium" title="Download another quant of this model from Hugging Face">+ Version</a>
+                                }
+                                @if (!string.IsNullOrEmpty(groupFolder))
+                                {
+                                    <a href="/Features/Models/Create?folder=@Uri.EscapeDataString(groupFolder)" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium" title="Import another .gguf file found in this model's folder">+ File</a>
+                                }
+                            </td>
+                        </tr>
+
+                        foreach (var lm in group.PrimaryModels.Concat(group.AuxiliaryModels))
+                        {
+                            <partial name="_ModelRow" model="@(new ModelRowViewModel {
+                                Model = lm,
+                                UsageCount = Model.PresetUsageCounts.GetValueOrDefault(lm.Id, 0),
+                                Indented = true,
+                                HiddenByDefault = true,
+                                GroupDomId = groupDomId,
+                            })" />
+                        }
+                    }
+                    else
+                    {
+                        var lm = group.PrimaryModels[0];
+                        <partial name="_ModelRow" model="@(new ModelRowViewModel {
+                            Model = lm,
+                            UsageCount = Model.PresetUsageCounts.GetValueOrDefault(lm.Id, 0),
+                        })" />
+                    }
                 }
             </tbody>
         </table>
@@ -165,6 +196,12 @@ else
                 const resp = await fetch('/Features/Models/Actions', { method: 'POST', body: formData });
                 return resp.json();
             }
+
+            window.toggleModelGroup = function(groupDomId) {
+                document.querySelectorAll(`tr[data-group-member="${groupDomId}"]`).forEach(tr => { tr.hidden = !tr.hidden; });
+                const chevron = document.querySelector(`[data-group-chevron="${groupDomId}"]`);
+                if (chevron) chevron.classList.toggle('rotate-90');
+            };
 
             window.refreshModel = async function(modelId) {
                 const result = await postAction({ Command: 'Refresh', ModelId: modelId });

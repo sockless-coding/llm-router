@@ -29,7 +29,16 @@
             <div><dt class="text-text-secondary">File Size</dt><dd class="text-text-primary">@FormatSize(Model.LocalModel.FileSizeBytes)</dd></div>
             @if (Model.LocalModel.Source == ModelSource.HuggingFace)
             {
-                <div><dt class="text-text-secondary">Repo</dt><dd class="text-text-primary">@Model.LocalModel.HfRepoId / @Model.LocalModel.HfFilename</dd></div>
+                <div>
+                    <dt class="text-text-secondary">Repo</dt>
+                    <dd class="text-text-primary">
+                        @Model.LocalModel.HfRepoId / @Model.LocalModel.HfFilename
+                        @if (!string.IsNullOrEmpty(Model.LocalModel.HfRepoId))
+                        {
+                            <a href="https://huggingface.co/@Model.LocalModel.HfRepoId" target="_blank" rel="noopener noreferrer" class="ml-2 text-xs text-neon-cyan hover:underline">View on Hugging Face</a>
+                        }
+                    </dd>
+                </div>
                 <div><dt class="text-text-secondary">Revision</dt><dd class="text-text-primary break-all">@Model.LocalModel.HfRevision</dd></div>
             }
         </dl>

@@ -16,6 +16,15 @@ public class ModelsCreateModel : PageModel
     [BindProperty]
     public string? Name { get; set; }
 
+    /// <summary>
+    /// Optional folder to scan instead of the library root — set via "?folder=" when arriving
+    /// from the Models list's "+ File" link for a specific model, so candidates are scoped to
+    /// that model's own folder (e.g. to pick up a sibling mmproj file or another quant someone
+    /// dropped in there) instead of the whole library.
+    /// </summary>
+    [BindProperty(SupportsGet = true)]
+    public string? Folder { get; set; }
+
     public IReadOnlyList<string> ScannedCandidates { get; set; } = Array.Empty<string>();
     public string? ErrorMessage { get; set; }
 
@@ -27,9 +36,12 @@ public class ModelsCreateModel : PageModel
 
     public async Task OnGetAsync()
     {
-        var root = (await _settings.GetAsync()).RootFolder;
-        if (!string.IsNullOrWhiteSpace(root))
-            ScannedCandidates = await _modelLibrary.ScanFolderAsync(root);
+        var folder = Folder;
+        if (string.IsNullOrWhiteSpace(folder))
+            folder = (await _settings.GetAsync()).RootFolder;
+
+        if (!string.IsNullOrWhiteSpace(folder))
+            ScannedCandidates = await _modelLibrary.ScanFolderAsync(folder);
     }
 
     public async Task<IActionResult> OnPostAsync()

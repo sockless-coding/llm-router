@@ -14,8 +14,16 @@ public class ModelsHuggingFaceModel : PageModel
         _hfClient = hfClient;
     }
 
-    public void OnGet()
+    /// <summary>
+    /// Set from the "?repoId=" query string when arriving from the Models list's "+ Version"
+    /// link for a model already registered from this repo — lets the page skip straight to that
+    /// repo's file list instead of making the user re-search for it.
+    /// </summary>
+    public string? PrefillRepoId { get; set; }
+
+    public void OnGet(string? repoId)
     {
+        PrefillRepoId = repoId;
     }
 
     public async Task<IActionResult> OnGetSearchAsync(string q, CancellationToken ct)

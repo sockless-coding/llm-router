@@ -5,6 +5,7 @@
 }
 
 <form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+<div id="page-data" hidden data-prefill-repo-id="@Model.PrefillRepoId"></div>
 
 <div class="flex items-center justify-between mb-6">
     <p class="text-text-secondary">Search the Hugging Face hub for GGUF models and download them into your library.</p>
@@ -15,7 +16,7 @@
 
 <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 mb-6">
     <div class="flex gap-3">
-        <input id="searchQuery" type="text" placeholder="e.g. llama-3, qwen2.5, mistral..."
+        <input id="searchQuery" type="text" placeholder="e.g. llama-3, qwen2.5, mistral..." value="@Model.PrefillRepoId"
                class="flex-1 px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all" />
         <button id="searchBtn" type="button" class="px-6 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium text-sm">
             Search
@@ -46,6 +47,38 @@
             return gb >= 1 ? gb.toFixed(2) + ' GB' : (bytes / 1024 / 1024).toFixed(0) + ' MB';
         }
 
+        function buildRepoCard(repoId, statsText) {
+            const card = document.createElement('div');
+            card.className = 'bg-cyber-card rounded-xl p-4 border border-gray-700/30';
+            card.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-text-primary font-medium repo-name"></p>
+                        <p class="text-xs text-text-secondary mt-0.5 repo-stats"></p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" class="details-btn text-xs px-3 py-1.5 rounded-md bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium">
+                            Details
+                        </button>
+                        <button type="button" class="load-files-btn text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium">
+                            Show Files
+                        </button>
+                    </div>
+                </div>
+                <div class="details-container mt-3 space-y-1 hidden text-sm"></div>
+                <div class="files-container mt-3 space-y-1 hidden"></div>
+            `;
+            // Set untrusted values via text/dataset properties (not string-interpolated HTML/attributes)
+            // to avoid a markup/attribute-breakout injection from a malicious repo id.
+            card.querySelector('.repo-name').textContent = repoId;
+            card.querySelector('.repo-stats').textContent = statsText ?? '';
+            card.querySelector('.load-files-btn').dataset.repoId = repoId;
+            card.querySelector('.details-btn').dataset.repoId = repoId;
+            card.querySelector('.load-files-btn').addEventListener('click', function () { loadFiles(this); });
+            card.querySelector('.details-btn').addEventListener('click', function () { loadDetails(this); });
+            return card;
+        }
+
         async function runSearch() {
             const q = document.getElementById('searchQuery').value.trim();
             const resultsEl = document.getElementById('results');
@@ -62,40 +95,8 @@
 
             resultsEl.innerHTML = '';
             for (const repo of repos) {
-                const card = document.createElement('div');
-                card.className = 'bg-cyber-card rounded-xl p-4 border border-gray-700/30';
-                card.innerHTML = `
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-text-primary font-medium repo-name"></p>
-                            <p class="text-xs text-text-secondary mt-0.5">${repo.downloads ?? 0} downloads · ${repo.likes ?? 0} likes</p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button type="button" class="details-btn text-xs px-3 py-1.5 rounded-md bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all font-medium">
-                                Details
-                            </button>
-                            <button type="button" class="load-files-btn text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium">
-                                Show Files
-                            </button>
-                        </div>
-                    </div>
-                    <div class="details-container mt-3 space-y-1 hidden text-sm"></div>
-                    <div class="files-container mt-3 space-y-1 hidden"></div>
-                `;
-                // Set untrusted values via text/dataset properties (not string-interpolated HTML/attributes)
-                // to avoid a markup/attribute-breakout injection from a malicious repo id.
-                card.querySelector('.repo-name').textContent = repo.id;
-                card.querySelector('.load-files-btn').dataset.repoId = repo.id;
-                card.querySelector('.details-btn').dataset.repoId = repo.id;
-                resultsEl.appendChild(card);
+                resultsEl.appendChild(buildRepoCard(repo.id, `${repo.downloads ?? 0} downloads · ${repo.likes ?? 0} likes`));
             }
-
-            resultsEl.querySelectorAll('.load-files-btn').forEach(btn => {
-                btn.addEventListener('click', () => loadFiles(btn));
-            });
-            resultsEl.querySelectorAll('.details-btn').forEach(btn => {
-                btn.addEventListener('click', () => loadDetails(btn));
-            });
         }
 
         async function loadFiles(btn) {
@@ -201,6 +202,17 @@
         document.getElementById('searchQuery').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') runSearch();
         });
+
+        // Arrived from the Models list's "+ Version" link for a specific repo — skip the search
+        // step and go straight to that repo's file list.
+        const prefillRepoId = document.getElementById('page-data')?.dataset.prefillRepoId || '';
+        if (prefillRepoId) {
+            const resultsEl = document.getElementById('results');
+            resultsEl.innerHTML = '';
+            const card = buildRepoCard(prefillRepoId, '');
+            resultsEl.appendChild(card);
+            loadFiles(card.querySelector('.load-files-btn'));
+        }
         })();
     </script>
 }
