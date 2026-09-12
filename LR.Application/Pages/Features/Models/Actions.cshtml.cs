@@ -54,6 +54,7 @@ public class ModelsActionsModel : PageModel
             "delete" => await HandleDeleteAsync(),
             "download" => await HandleDownloadAsync(),
             "checkupdate" => await HandleCheckUpdateAsync(),
+            "update" => await HandleUpdateAsync(),
             _ => BadRequest(new { success = false, message = $"Unknown command: {Command}" })
         };
     }
@@ -115,6 +116,19 @@ public class ModelsActionsModel : PageModel
 
         bool updateAvailable = !string.IsNullOrEmpty(detail.Sha) && detail.Sha != model.HfRevision;
         return JsonResult(new { success = true, updateAvailable, latestRevision = detail.Sha });
+    }
+
+    private async Task<IActionResult> HandleUpdateAsync()
+    {
+        try
+        {
+            var modelId = await _downloadService.StartUpdateAsync(ModelId);
+            return JsonResult(new { success = true, modelId, message = "Update started." });
+        }
+        catch (Exception ex)
+        {
+            return JsonResult(new { success = false, message = ex.Message });
+        }
     }
 
     private IActionResult JsonResult(object data)

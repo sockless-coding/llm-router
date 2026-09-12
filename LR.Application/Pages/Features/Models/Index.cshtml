@@ -139,7 +139,7 @@ else
                             <button type="button" onclick="refreshModel('@lm.Id')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Refresh</button>
                             @if (lm.Source == ModelSource.HuggingFace)
                             {
-                                <button type="button" onclick="checkUpdate('@lm.Id')" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check Update</button>
+                                <button type="button" onclick="checkUpdate('@lm.Id', @usageCount)" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check Update</button>
                             }
                             <button type="button" onclick="deleteModel('@lm.Id', '@lm.Name', @usageCount)" class="text-xs px-2 py-1 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Delete</button>
                         </td>
@@ -182,10 +182,19 @@ else
                 else alert(result.message || 'Delete failed.');
             };
 
-            window.checkUpdate = async function(modelId) {
+            window.checkUpdate = async function(modelId, usageCount) {
                 const result = await postAction({ Command: 'CheckUpdate', ModelId: modelId });
                 if (!result.success) { alert(result.message || 'Could not check for updates.'); return; }
-                alert(result.updateAvailable ? `Update available (revision ${result.latestRevision}).` : 'Already up to date.');
+                if (!result.updateAvailable) { alert('Already up to date.'); return; }
+
+                let msg = `Update available (revision ${result.latestRevision}). This replaces the file on disk`;
+                msg += usageCount > 0 ? ` used by ${usageCount} preset(s) — stop any server using it first.` : '.';
+                msg += ' Download it now?';
+                if (!confirm(msg)) return;
+
+                const updateResult = await postAction({ Command: 'Update', ModelId: modelId });
+                if (updateResult.success) location.reload();
+                else alert(updateResult.message || 'Could not start update.');
             };
 
             // Live progress for any model currently downloading. Connection is stored on

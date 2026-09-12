@@ -80,6 +80,42 @@ public class ModelDownloadService
         return modelId;
     }
 
+    /// <summary>
+    /// Re-downloads a Hugging Face model's file to its existing <see cref="LocalModel.FilePath"/>,
+    /// fetching the repo's current default-branch revision. Updates the same <see cref="LocalModel"/>
+    /// row in place (same Id and path) rather than creating a new one, so presets that reference it
+    /// keep working without re-pointing.
+    /// </summary>
+    public async Task<Guid> StartUpdateAsync(Guid modelId)
+    {
+        string repoId, filename, destinationPath;
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
+            var model = await context.LocalModels.FindAsync(modelId)
+                ?? throw new InvalidOperationException("Model not found.");
+            if (model.Source != ModelSource.HuggingFace || string.IsNullOrEmpty(model.HfRepoId) || string.IsNullOrEmpty(model.HfFilename))
+                throw new InvalidOperationException("Not a Hugging Face model.");
+            if (model.Status == ModelStatus.Downloading)
+                throw new InvalidOperationException("Already downloading.");
+
+            repoId = model.HfRepoId;
+            filename = model.HfFilename;
+            destinationPath = model.FilePath;
+
+            model.Status = ModelStatus.Downloading;
+            model.StatusMessage = null;
+            await context.SaveChangesAsync();
+        }
+
+        var cts = new CancellationTokenSource();
+        _activeDownloads[modelId] = cts;
+
+        _ = Task.Run(() => RunDownloadAsync(modelId, repoId, filename, "main", destinationPath, cts.Token));
+
+        return modelId;
+    }
+
     public bool CancelDownload(Guid modelId)
     {
         if (!_activeDownloads.TryGetValue(modelId, out var cts))

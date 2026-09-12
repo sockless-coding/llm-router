@@ -408,9 +408,17 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
                 _timingCoordinator.EnqueuePending(DateTimeOffset.UtcNow, routeResponse);
                 _logger.LogInformation("[Stats] Enqueued non-streaming request.");
 
+                // This method reads the entire response body as one JSON document, so the
+                // backend must not switch to SSE framing ("data: {...}\n\n") — force "stream"
+                // off even if the original client payload (e.g. one that sat in the queue
+                // after being built for a streaming request) still has it set to true.
+                var requestBody = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload)
+                    ?? new Dictionary<string, JsonElement>();
+                requestBody["stream"] = JsonSerializer.SerializeToElement(false);
+
                 var response = await _httpClient.PostAsJsonAsync(
                     $"{ServerUrl}{endpoint}",
-                    JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload),
+                    requestBody,
                     cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
