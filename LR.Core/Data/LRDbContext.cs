@@ -126,6 +126,19 @@ public class LRDbContext : DbContext
                 .WithMany(m => m.Presets)
                 .HasForeignKey(p => p.ModelId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            // Same pattern for the draft model (speculative decoding) and multimodal projector
+            // links — each just caches the linked model's file path, so losing the link on
+            // deletion leaves the preset's own SpecDraftModel/Mmproj path working.
+            entity.HasOne(p => p.SpecDraftModelRef)
+                .WithMany()
+                .HasForeignKey(p => p.SpecDraftModelId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(p => p.MmprojModelRef)
+                .WithMany()
+                .HasForeignKey(p => p.MmprojId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // LocalModel configurations

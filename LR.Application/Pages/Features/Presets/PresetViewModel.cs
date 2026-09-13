@@ -102,7 +102,10 @@ public class PresetViewModel
     public float? DynatempExp { get; set; }
 
     // Advanced: Speculative Decoding
+    public Guid? SpecDraftModelId { get; set; }
     public string? SpecDraftModel { get; set; }
+    public string? SpecDraftHfRepo { get; set; }
+    public string? SpecDraftDevice { get; set; }
     public int? SpecDraftNMax { get; set; }
     public int? SpecDraftNMin { get; set; }
     public float? SpecDraftPMin { get; set; }
@@ -135,6 +138,7 @@ public class PresetViewModel
     public bool? ReasoningPreserve { get; set; }
 
     // Advanced: Multimodal
+    public Guid? MmprojId { get; set; }
     public string? Mmproj { get; set; }
     public string? MmprojUrl { get; set; }
     public bool? MmprojAuto { get; set; }
@@ -143,6 +147,9 @@ public class PresetViewModel
     public int? ImageMinTokens { get; set; }
     public int? ImageMaxTokens { get; set; }
     public int? MtmdBatchMaxTokens { get; set; }
+    public float? VideoFps { get; set; }
+    public int? VideoTimestampInterval { get; set; }
+    public string? VideoFfmpegDir { get; set; }
 
     // Advanced: LoRA
     public string? Lora { get; set; }
@@ -151,6 +158,55 @@ public class PresetViewModel
     public string? ControlVectorScaled { get; set; }
     public int? ControlVectorLayerStart { get; set; }
     public int? ControlVectorLayerEnd { get; set; }
+    public bool? LoraInitWithoutApply { get; set; }
+
+    // Advanced: Server Behavior & Endpoints
+    public string? ModelAlias { get; set; }
+    public string? ModelTags { get; set; }
+    public bool? Embeddings { get; set; }
+    public bool? Reranking { get; set; }
+    public string? Pooling { get; set; }
+    public int? EmbdNormalize { get; set; }
+    public bool? SlotsEndpoint { get; set; }
+    public bool? MetricsEndpoint { get; set; }
+    public bool? PropsEndpoint { get; set; }
+    public bool? WebUi { get; set; }
+    public string? ApiPrefix { get; set; }
+    public int? ThreadsHttp { get; set; }
+    public int? SsePingInterval { get; set; }
+    public bool? ReusePort { get; set; }
+    public string? SlotSavePath { get; set; }
+    public string? MediaPath { get; set; }
+    public bool? SwaFull { get; set; }
+    public bool? CacheIdleSlots { get; set; }
+    public int? KvUnifiedPerSlot { get; set; }
+    public int? CtxCheckpoints { get; set; }
+    public bool? Warmup { get; set; }
+    public bool? SpmInfill { get; set; }
+    public bool? SkipChatParsing { get; set; }
+    public bool? PrefillAssistant { get; set; }
+    public string? Numa { get; set; }
+    public string? RpcServers { get; set; }
+    public string? OverrideKv { get; set; }
+
+    // Advanced: Security & CORS
+    public string? CorsOrigins { get; set; }
+    public string? CorsMethods { get; set; }
+    public string? CorsHeaders { get; set; }
+    public bool? CorsCredentials { get; set; }
+    public string? ApiKeyFile { get; set; }
+    public string? SslKeyFile { get; set; }
+    public string? SslCertFile { get; set; }
+
+    // Advanced: Logging
+    public bool? LogDisable { get; set; }
+    public string? LogFile { get; set; }
+    public int? LogVerbosity { get; set; }
+    public string? LogColors { get; set; }
+    public bool? LogTimestamps { get; set; }
+    public bool? LogPrefix { get; set; }
+    public bool? LogJsonl { get; set; }
+    public string? LogPromptsDir { get; set; }
 
     // Advanced: Chat Template
     public string? ChatTemplate { get; set; }

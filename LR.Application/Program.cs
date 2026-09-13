@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 
@@ -11,6 +12,15 @@ using LR.Core.Services;
 using LR.Providers;
 using LR.Application.Services;
 using LR.Application.Pages.Api;
+
+// Force invariant number/date formatting on every thread this process creates — including
+// Kestrel's request-handling threads — regardless of the host OS's regional settings. Without
+// this, ASP.NET Core's form model binder parses "." decimal fields (Temperature, TopP, MinP,
+// and every other float/double in the app) using CultureInfo.CurrentCulture, which on a machine
+// whose Windows "Region" (not display language) uses a comma decimal separator silently rejects
+// any decimal value typed into those fields with a "not valid" ModelState error.
+CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 
 var builder = WebApplication.CreateBuilder(args);
 

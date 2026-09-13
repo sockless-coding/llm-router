@@ -1,0 +1,131 @@
+@model LR.Application.Pages.Features.Presets.IPresetFormPageModel
+@{
+    var sections = new (string Id, string Label)[]
+    {
+        ("section-identity", "Identity"),
+        ("section-core", "Core Settings"),
+        ("section-sampling", "Sampling"),
+        ("section-generation", "Generation"),
+        ("section-gpu", "GPU / Device"),
+        ("section-memory", "Memory"),
+        ("section-rope", "RoPE Scaling"),
+        ("section-sampling-ext", "Sampling (Extended)"),
+        ("section-speculative", "Speculative Decoding"),
+        ("section-server", "Server"),
+        ("section-reasoning", "Reasoning"),
+        ("section-multimodal", "Multimodal"),
+        ("section-lora", "LoRA & Control Vectors"),
+        ("section-behavior", "Server Behavior & Endpoints"),
+        ("section-security", "Security & CORS"),
+        ("section-logging", "Logging"),
+        ("section-chat-template", "Chat Template"),
+    };
+}
+
+<aside class="hidden xl:block">
+    <div class="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto bg-cyber-card border border-neon-magenta/10 rounded-xl p-3 space-y-3">
+        <nav id="preset-section-nav" class="space-y-0.5 text-sm">
+            @foreach (var (id, label) in sections)
+            {
+                <a href="#@id" data-section="@id"
+                   class="preset-nav-link block px-2 py-1 rounded text-text-secondary hover:text-text-primary hover:bg-neon-magenta/10 transition-colors truncate">@label</a>
+            }
+        </nav>
+
+        <div class="border-t border-gray-600/20 pt-3">
+            <div class="flex items-center justify-between mb-1.5">
+                <h3 class="text-xs font-semibold text-text-secondary uppercase tracking-wide">Command Preview</h3>
+                <button type="button" id="preview-copy-btn" class="text-[10px] text-neon-cyan hover:underline">Copy</button>
+            </div>
+            <pre id="preview-command" class="text-[10px] leading-snug text-text-secondary bg-cyber-bg-dark/60 border border-gray-600/20 rounded-lg p-2 max-h-52 overflow-auto whitespace-pre-wrap break-all font-mono">Fill in the form to preview the launch command.</pre>
+        </div>
+    </div>
+</aside>
+
+<script>
+(function () {
+    const form = document.getElementById('preset-form');
+    const nav = document.getElementById('preset-section-nav');
+    const preview = document.getElementById('preview-command');
+    const copyBtn = document.getElementById('preview-copy-btn');
+    if (!form || !nav) return;
+
+    // --- Scroll spy: highlight the nav link for whichever section is in view ---
+    const links = Array.from(nav.querySelectorAll('.preset-nav-link'));
+    const sectionEls = links
+        .map(a => document.getElementById(a.dataset.section))
+        .filter(Boolean);
+
+    function setActive(id) {
+        links.forEach(a => a.classList.toggle('bg-neon-magenta/10', a.dataset.section === id));
+        links.forEach(a => a.classList.toggle('text-neon-magenta', a.dataset.section === id));
+    }
+
+    if ('IntersectionObserver' in window && sectionEls.length > 0) {
+        const observer = new IntersectionObserver((entries) => {
+            const visible = entries.filter(e => e.isIntersecting);
+            if (visible.length > 0) setActive(visible[0].target.id);
+        }, { rootMargin: '-96px 0px -70% 0px', threshold: 0 });
+        sectionEls.forEach(el => observer.observe(el));
+    }
+
+    links.forEach(a => a.addEventListener('click', (ev) => {
+        const target = document.getElementById(a.dataset.section);
+        if (!target) return;
+        ev.preventDefault();
+        if (target.tagName === 'DETAILS') target.open = true;
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        history.replaceState(null, '', '#' + a.dataset.section);
+    }));
+
+    // --- Live command preview: debounced POST to the page's Preview handler ---
+    if (!preview) return;
+
+    const previewUrl = new URL(window.location.href);
+    previewUrl.searchParams.set('handler', 'Preview');
+
+    let debounceTimer = null;
+    let inFlight = null;
+
+    async function refreshPreview() {
+        try {
+            const body = new URLSearchParams(new FormData(form));
+            const resp = await fetch(previewUrl.toString(), {
+                method: 'POST',
+                body,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            preview.textContent = data.commandLine || '(no command)';
+        } catch (e) {
+            // Network hiccup or mid-navigation — leave the last-good preview showing.
+        }
+    }
+
+    function scheduleRefresh() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            if (inFlight) return;
+            inFlight = refreshPreview().finally(() => { inFlight = null; });
+        }, 400);
+    }
+
+    form.addEventListener('input', scheduleRefresh);
+    form.addEventListener('change', scheduleRefresh);
+    scheduleRefresh();
+
+    if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(preview.textContent || '');
+                const original = copyBtn.textContent;
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = original; }, 1200);
+            } catch (e) {
+                // Clipboard API unavailable (e.g. insecure context) — nothing more we can do.
+            }
+        });
+    }
+})();
+</script>

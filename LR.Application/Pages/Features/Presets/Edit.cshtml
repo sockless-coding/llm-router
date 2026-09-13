@@ -5,8 +5,8 @@
     ViewData["Title"] = "Edit Preset";
 }
 
-<div class="max-w-4xl mx-auto">
-    <form method="post" hx-boost="false" class="space-y-6">
+<div class="max-w-6xl mx-auto xl:grid xl:grid-cols-[1fr_16rem] xl:gap-6 xl:items-start">
+    <form id="preset-form" method="post" hx-boost="false" class="space-y-6">
         @Html.AntiForgeryToken()
 
         @if (!ViewData.ModelState.IsValid)
@@ -39,4 +39,6 @@
             </a>
         </div>
     </form>
+
+    <partial name="_PresetFormNav" model="Model" />
 </div>

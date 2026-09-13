@@ -1,5 +1,6 @@
 using LR.Core.Interfaces;
 using LR.Core.Models;
+using LR.Core.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
@@ -17,6 +18,7 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
 
     public IReadOnlyList<ServerInstance> Servers { get; set; } = new List<ServerInstance>();
     public IReadOnlyList<LocalModel> Models { get; set; } = new List<LocalModel>();
+    public IReadOnlyList<LocalModel> MmprojCandidates { get; set; } = new List<LocalModel>();
 
     // A new preset has nothing on disk to extract chat-template variables from yet; the
     // kwargs editor falls back to its client-side AJAX fetch once a model is picked.
@@ -34,6 +36,7 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
     {
         Servers = _serverManager.GetAllInstances();
         Models = await _modelLibrary.GetAllAsync();
+        MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
     }
 
     /// <summary>
@@ -51,6 +54,21 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
         return new JsonResult(variables.Select(v => new { name = v.Name, literalValues = v.LiteralValues }));
     }
 
+    /// <summary>
+    /// AJAX endpoint backing the live command-line preview: builds the exact llama.cpp args the
+    /// current (unsaved) form state would launch with, resolving registry-linked model/draft
+    /// model/mmproj picks against the model library the same way <see cref="LR.Core.Services.PresetManager"/>
+    /// would on save. Deliberately skips ModelState validation — a preview should still render
+    /// while required fields are mid-edit.
+    /// </summary>
+    public async Task<IActionResult> OnPostPreviewAsync()
+    {
+        var preset = new ModelPreset();
+        PresetViewModelMapper.ApplyToEntity(ViewModel, preset);
+        await PresetPreview.ResolveLinkedModelsAsync(preset, _modelLibrary);
+        return new JsonResult(PresetPreview.Build(preset));
+    }
+
     public async Task<IActionResult> OnPostAsync()
     {
         if (!ViewModel.ModelId.HasValue && string.IsNullOrWhiteSpace(ViewModel.ModelPath))
@@ -60,6 +78,7 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
         {
             Servers = _serverManager.GetAllInstances();
             Models = await _modelLibrary.GetAllAsync();
+            MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
             return Page();
         }
 

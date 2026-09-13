@@ -8,7 +8,7 @@
 }
 
         <!-- ==================== IDENTITY ==================== -->
-        <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
+        <div id="section-identity" class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4 scroll-mt-24">
             <h2 class="text-lg font-semibold text-text-primary">Identity</h2>
 
             <!-- Server Instance -->
@@ -70,7 +70,7 @@
         </div>
 
         <!-- ==================== CORE SETTINGS (Always Visible) ==================== -->
-        <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
+        <div id="section-core" class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4 scroll-mt-24">
             <h2 class="text-lg font-semibold text-text-primary">Core Settings</h2>
 
             <!-- Context Size & GPU Layers -->
@@ -158,7 +158,7 @@
         </div>
 
         <!-- ==================== SAMPLING (Always Visible) ==================== -->
-        <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
+        <div id="section-sampling" class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4 scroll-mt-24">
             <h2 class="text-lg font-semibold text-text-primary">Sampling</h2>
 
             <!-- Temperature & Top-K -->
@@ -211,7 +211,7 @@
         </div>
 
         <!-- ==================== ADVANCED: Generation ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-generation" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Generation
@@ -263,7 +263,7 @@
         </details>
 
         <!-- ==================== ADVANCED: GPU/Device ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-gpu" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: GPU / Device
@@ -352,7 +352,7 @@
         </details>
 
         <!-- ==================== ADVANCED: Memory ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-memory" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Memory
@@ -380,7 +380,7 @@
         </details>
 
         <!-- ==================== ADVANCED: RoPE Scaling ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-rope" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: RoPE Scaling
@@ -437,7 +437,7 @@
         </details>
 
         <!-- ==================== ADVANCED: Sampling (Extended) ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-sampling-ext" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Sampling (Extended)
@@ -548,15 +548,45 @@
         </details>
 
         <!-- ==================== ADVANCED: Speculative Decoding ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-speculative" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Speculative Decoding
             </summary>
             <div class="px-6 pb-6 space-y-4">
                 <div>
-                    <label asp-for="ViewModel.SpecDraftModel" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                    <input asp-for="ViewModel.SpecDraftModel" placeholder="/path/to/draft.gguf" class="@inpCls" />
+                    <label asp-for="ViewModel.SpecDraftModelId" class="block text-sm font-medium text-text-secondary mb-1">Draft Model</label>
+                    <select asp-for="ViewModel.SpecDraftModelId" id="spec-draft-model-select" class="@selCls">
+                        <option value="">— none —</option>
+                        @foreach (var m in Model.Models)
+                        {
+                            <option value="@m.Id" selected="@(Model.ViewModel.SpecDraftModelId == m.Id)">@m.Name</option>
+                        }
+                    </select>
+                    <p class="text-xs text-text-secondary mt-1">
+                        A smaller model of the same family used to speculatively draft tokens for the main model to verify.
+                        Don't see it? <a href="/Features/Models/Create" class="text-neon-cyan hover:underline">Import it into the library</a>,
+                        or enter a path manually below.
+                    </p>
+                </div>
+                <details class="group" open="@(!Model.ViewModel.SpecDraftModelId.HasValue && !string.IsNullOrWhiteSpace(Model.ViewModel.SpecDraftModel))">
+                    <summary class="cursor-pointer text-sm text-text-secondary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                        <svg class="w-4 h-4 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                        Advanced: override draft model path manually
+                    </summary>
+                    <div class="pt-3">
+                        <input asp-for="ViewModel.SpecDraftModel" placeholder="/path/to/draft.gguf (overrides the model selected above)" class="@inpCls" />
+                    </div>
+                </details>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.SpecDraftHfRepo" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.SpecDraftHfRepo" placeholder="user/repo:quant (alternative to a local draft model)" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.SpecDraftDevice" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.SpecDraftDevice" placeholder="cuda0,cuda1" class="@inpCls" />
+                    </div>
                 </div>
                 <div class="grid grid-cols-4 gap-4">
                     <div>
@@ -610,7 +640,7 @@
         </details>
 
         <!-- ==================== ADVANCED: Server ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-server" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Server
@@ -693,7 +723,7 @@
         </details>
 
         <!-- ==================== ADVANCED: Reasoning ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-reasoning" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Reasoning
@@ -754,22 +784,42 @@
         </details>
 
         <!-- ==================== ADVANCED: Multimodal ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-multimodal" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Multimodal
             </summary>
             <div class="px-6 pb-6 space-y-4">
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label asp-for="ViewModel.Mmproj" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                        <input asp-for="ViewModel.Mmproj" placeholder="/path/to/mmproj.gguf" class="@inpCls" />
-                    </div>
-                    <div>
-                        <label asp-for="ViewModel.MmprojUrl" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                        <input asp-for="ViewModel.MmprojUrl" placeholder="https://.../mmproj.gguf" class="@inpCls" />
-                    </div>
+                <div>
+                    <label asp-for="ViewModel.MmprojId" class="block text-sm font-medium text-text-secondary mb-1">Multimodal Projector</label>
+                    <select asp-for="ViewModel.MmprojId" id="mmproj-select" class="@selCls">
+                        <option value="">— none / auto-detect —</option>
+                        @foreach (var m in Model.MmprojCandidates)
+                        {
+                            <option value="@m.Id" selected="@(Model.ViewModel.MmprojId == m.Id)">@m.Name</option>
+                        }
+                    </select>
+                    <p class="text-xs text-text-secondary mt-1">
+                        Only needed for vision models split into a text model + projector. Leave unset to auto-use a
+                        sibling projector file detected next to the main model, if any.
+                        Don't see it? <a href="/Features/Models/Create" class="text-neon-cyan hover:underline">Import it into the library</a>,
+                        or enter a path/URL manually below.
+                    </p>
                 </div>
+                <details class="group" open="@(!Model.ViewModel.MmprojId.HasValue && (!string.IsNullOrWhiteSpace(Model.ViewModel.Mmproj) || !string.IsNullOrWhiteSpace(Model.ViewModel.MmprojUrl)))">
+                    <summary class="cursor-pointer text-sm text-text-secondary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                        <svg class="w-4 h-4 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                        Advanced: override projector path/URL manually
+                    </summary>
+                    <div class="pt-3 grid grid-cols-2 gap-4">
+                        <div>
+                            <input asp-for="ViewModel.Mmproj" placeholder="/path/to/mmproj.gguf (overrides the model selected above)" class="@inpCls" />
+                        </div>
+                        <div>
+                            <input asp-for="ViewModel.MmprojUrl" placeholder="https://.../mmproj.gguf" class="@inpCls" />
+                        </div>
+                    </div>
+                </details>
                 <div class="grid grid-cols-4 gap-4">
                     <div>
                         <label asp-for="ViewModel.ImageMinTokens" class="block text-sm font-medium text-text-secondary mb-1"></label>
@@ -806,11 +856,26 @@
                         </select>
                     </div>
                 </div>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">Video</h3>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.VideoFps" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.VideoFps" type="number" step="any" placeholder="1.0" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.VideoTimestampInterval" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.VideoTimestampInterval" type="number" placeholder="ms between sampled frames" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.VideoFfmpegDir" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.VideoFfmpegDir" placeholder="/path/to/ffmpeg" class="@inpCls" />
+                    </div>
+                </div>
             </div>
         </details>
 
         <!-- ==================== ADVANCED: LoRA ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-lora" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: LoRA &amp; Control Vectors
@@ -846,11 +911,337 @@
                         <input asp-for="ViewModel.ControlVectorLayerEnd" type="number" placeholder="end layer" class="@inpCls" />
                     </div>
                 </div>
+                <div>
+                    <label asp-for="ViewModel.LoraInitWithoutApply" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                    <select asp-for="ViewModel.LoraInitWithoutApply" class="@selCls">
+                        <option value="">— default (applied at load) —</option>
+                        <option value="True">load without applying (toggle per-request via the API)</option>
+                        <option value="False">applied at load</option>
+                    </select>
+                </div>
+            </div>
+        </details>
+
+        <!-- ==================== ADVANCED: Server Behavior & Endpoints ==================== -->
+        <details id="section-behavior" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                Advanced: Server Behavior &amp; Endpoints
+            </summary>
+            <div class="px-6 pb-6 space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.ModelAlias" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.ModelAlias" placeholder="name exposed via the API" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.ModelTags" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.ModelTags" placeholder="tag1,tag2" class="@inpCls" />
+                    </div>
+                </div>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">Endpoints</h3>
+                <div class="grid grid-cols-4 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.WebUi" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.WebUi" class="@selCls">
+                            <option value="">— default (enabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.SlotsEndpoint" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.SlotsEndpoint" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.MetricsEndpoint" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.MetricsEndpoint" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.PropsEndpoint" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.PropsEndpoint" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                </div>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">Embeddings &amp; Reranking</h3>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.Embeddings" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.Embeddings" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled (embeddings-only mode)</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.Reranking" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.Reranking" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.Pooling" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.Pooling" class="@selCls">
+                            <option value="">— default —</option>
+                            <option value="none">none</option>
+                            <option value="mean">mean</option>
+                            <option value="cls">cls</option>
+                            <option value="last">last</option>
+                            <option value="rank">rank</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label asp-for="ViewModel.EmbdNormalize" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                    <input asp-for="ViewModel.EmbdNormalize" type="number" placeholder="2 (Euclidean/L2)" class="@inpCls" />
+                </div>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">HTTP</h3>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.ApiPrefix" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.ApiPrefix" placeholder="/v1" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.ThreadsHttp" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.ThreadsHttp" type="number" placeholder="auto" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.SsePingInterval" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.SsePingInterval" type="number" placeholder="0 (off)" class="@inpCls" />
+                    </div>
+                </div>
+                <div>
+                    <label asp-for="ViewModel.ReusePort" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                    <select asp-for="ViewModel.ReusePort" class="@selCls">
+                        <option value="">— default (disabled) —</option>
+                        <option value="True">enabled</option>
+                        <option value="False">disabled</option>
+                    </select>
+                </div>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">Cache &amp; Slots</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.SlotSavePath" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.SlotSavePath" placeholder="/path/to/slot-cache" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.MediaPath" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.MediaPath" placeholder="/path/to/media" class="@inpCls" />
+                    </div>
+                </div>
+                <div class="grid grid-cols-4 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.SwaFull" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.SwaFull" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.CacheIdleSlots" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.CacheIdleSlots" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.KvUnifiedPerSlot" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.KvUnifiedPerSlot" type="number" placeholder="from ctx" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.CtxCheckpoints" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.CtxCheckpoints" type="number" placeholder="8" class="@inpCls" />
+                    </div>
+                </div>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">Chat Behavior</h3>
+                <div class="grid grid-cols-4 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.Warmup" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.Warmup" class="@selCls">
+                            <option value="">— default (enabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.SpmInfill" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.SpmInfill" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.SkipChatParsing" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.SkipChatParsing" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.PrefillAssistant" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.PrefillAssistant" class="@selCls">
+                            <option value="">— default (enabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                </div>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">Multi-Device / Escape Hatches</h3>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.Numa" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.Numa" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="distribute">distribute</option>
+                            <option value="isolate">isolate</option>
+                            <option value="numactl">numactl</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.RpcServers" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.RpcServers" placeholder="host:port,host2:port2" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.OverrideKv" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.OverrideKv" placeholder="tokenizer.ggml.add_bos_token=bool:false" class="@inpCls" />
+                    </div>
+                </div>
+            </div>
+        </details>
+
+        <!-- ==================== ADVANCED: Security & CORS ==================== -->
+        <details id="section-security" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                Advanced: Security &amp; CORS
+            </summary>
+            <div class="px-6 pb-6 space-y-4">
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">CORS</h3>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.CorsOrigins" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.CorsOrigins" placeholder="https://example.com,*" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.CorsMethods" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.CorsMethods" placeholder="GET,POST" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.CorsHeaders" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.CorsHeaders" placeholder="Content-Type,Authorization" class="@inpCls" />
+                    </div>
+                </div>
+                <div>
+                    <label asp-for="ViewModel.CorsCredentials" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                    <select asp-for="ViewModel.CorsCredentials" class="@selCls">
+                        <option value="">— default (disabled) —</option>
+                        <option value="True">enabled</option>
+                        <option value="False">disabled</option>
+                    </select>
+                </div>
+                <h3 class="text-sm font-semibold text-text-secondary mt-2">Authentication &amp; TLS</h3>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.ApiKeyFile" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.ApiKeyFile" placeholder="/path/to/keys.txt" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.SslKeyFile" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.SslKeyFile" placeholder="/path/to/key.pem" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.SslCertFile" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.SslCertFile" placeholder="/path/to/cert.pem" class="@inpCls" />
+                    </div>
+                </div>
+            </div>
+        </details>
+
+        <!-- ==================== ADVANCED: Logging ==================== -->
+        <details id="section-logging" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
+            <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
+                <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                Advanced: Logging
+            </summary>
+            <div class="px-6 pb-6 space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.LogDisable" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.LogDisable" class="@selCls">
+                            <option value="">— default (enabled) —</option>
+                            <option value="True">logging disabled</option>
+                            <option value="False">logging enabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.LogFile" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.LogFile" placeholder="/path/to/server.log" class="@inpCls" />
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.LogVerbosity" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <input asp-for="ViewModel.LogVerbosity" type="number" min="0" max="5" placeholder="0" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.LogColors" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.LogColors" class="@selCls">
+                            <option value="">— default (auto) —</option>
+                            <option value="on">on</option>
+                            <option value="off">off</option>
+                            <option value="auto">auto</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label asp-for="ViewModel.LogTimestamps" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.LogTimestamps" class="@selCls">
+                            <option value="">— default (enabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.LogPrefix" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.LogPrefix" class="@selCls">
+                            <option value="">— default (enabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label asp-for="ViewModel.LogJsonl" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                        <select asp-for="ViewModel.LogJsonl" class="@selCls">
+                            <option value="">— default (disabled) —</option>
+                            <option value="True">enabled</option>
+                            <option value="False">disabled</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label asp-for="ViewModel.LogPromptsDir" class="block text-sm font-medium text-text-secondary mb-1"></label>
+                    <input asp-for="ViewModel.LogPromptsDir" placeholder="/path/to/prompt-logs" class="@inpCls" />
+                </div>
             </div>
         </details>
 
         <!-- ==================== ADVANCED: Chat Template ==================== -->
-        <details class="bg-cyber-card rounded-xl border border-gray-600/20 group">
+        <details id="section-chat-template" class="bg-cyber-card rounded-xl border border-gray-600/20 group scroll-mt-24">
             <summary class="cursor-pointer px-6 py-4 text-lg font-semibold text-text-primary hover:text-neon-magenta transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
                 <svg class="w-5 h-5 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 Advanced: Chat Template

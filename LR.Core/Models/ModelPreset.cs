@@ -385,10 +385,32 @@ public class ModelPreset
     // ==================== ADVANCED: Speculative Decoding ====================
 
     /// <summary>
-    /// Draft model path for speculative decoding (--spec-draft-model).
+    /// Optional link to a registered draft model in the model library. When set, this is kept in
+    /// sync with the linked <see cref="LocalModel.FilePath"/>, mirroring how <see cref="ModelId"/>
+    /// drives <see cref="ModelPath"/>. Null means <see cref="SpecDraftModel"/> was entered manually.
+    /// </summary>
+    public Guid? SpecDraftModelId { get; set; }
+
+    /// <summary>
+    /// Draft model path for speculative decoding (--spec-draft-model). When <see cref="SpecDraftModelId"/>
+    /// is set, this is kept in sync with the linked model's file path — see
+    /// <c>PresetManager.ApplyLinkedDraftModelAsync</c>.
     /// </summary>
     [MaxLength(1024)]
     public string? SpecDraftModel { get; set; }
+
+    /// <summary>
+    /// Draft model via a Hugging Face repo, as an alternative to a local <see cref="SpecDraftModel"/>
+    /// path (--spec-draft-hf / -hfd).
+    /// </summary>
+    [MaxLength(256)]
+    public string? SpecDraftHfRepo { get; set; }
+
+    /// <summary>
+    /// Comma-separated list of devices to run the draft model on (--spec-draft-device).
+    /// </summary>
+    [MaxLength(512)]
+    public string? SpecDraftDevice { get; set; }
 
     /// <summary>
     /// Max draft tokens (--spec-draft-n-max). Default: 3.
@@ -547,7 +569,16 @@ public class ModelPreset
     // ==================== ADVANCED: Multimodal ====================
 
     /// <summary>
-    /// Path to multimodal projector file (-mm).
+    /// Optional link to a registered multimodal projector in the model library. When set, this is
+    /// kept in sync with the linked <see cref="LocalModel.FilePath"/>, mirroring how
+    /// <see cref="ModelId"/> drives <see cref="ModelPath"/>. Null means <see cref="Mmproj"/> was
+    /// either entered manually or auto-filled from the main model's detected sibling projector.
+    /// </summary>
+    public Guid? MmprojId { get; set; }
+
+    /// <summary>
+    /// Path to multimodal projector file (-mm). When <see cref="MmprojId"/> is set, this is kept in
+    /// sync with the linked model's file path — see <c>PresetManager.ApplyLinkedMmprojAsync</c>.
     /// </summary>
     [MaxLength(1024)]
     public string? Mmproj { get; set; }
@@ -592,6 +623,22 @@ public class ModelPreset
     /// </summary>
     public int? MtmdBatchMaxTokens { get; set; }
 
+    /// <summary>
+    /// Video frames sampled per second when encoding video input (--video-fps).
+    /// </summary>
+    public float? VideoFps { get; set; }
+
+    /// <summary>
+    /// Interval in ms between sampled video frame timestamps (--video-timestamp-interval).
+    /// </summary>
+    public int? VideoTimestampInterval { get; set; }
+
+    /// <summary>
+    /// Path to an ffmpeg installation used for video decoding (--video-ffmpeg-dir).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? VideoFfmpegDir { get; set; }
+
     // ==================== ADVANCED: LoRA ====================
 
     /// <summary>
@@ -631,6 +678,251 @@ public class ModelPreset
     /// (--control-vector-layer-range START END). Requires <see cref="ControlVectorLayerStart"/>.
     /// </summary>
     public int? ControlVectorLayerEnd { get; set; }
+
+    /// <summary>
+    /// Load LoRA adapters without applying them, so they can be toggled per-request via the API
+    /// instead of always-on (--lora-init-without-apply).
+    /// </summary>
+    public bool? LoraInitWithoutApply { get; set; }
+
+    // ==================== ADVANCED: Server Behavior & Endpoints ====================
+
+    /// <summary>
+    /// Model name alias exposed via the API (-a, --alias).
+    /// </summary>
+    [MaxLength(256)]
+    public string? ModelAlias { get; set; }
+
+    /// <summary>
+    /// Comma-separated model tags (--tags).
+    /// </summary>
+    [MaxLength(512)]
+    public string? ModelTags { get; set; }
+
+    /// <summary>
+    /// Restrict the server to embeddings-only mode (--embeddings / --no-embeddings).
+    /// </summary>
+    public bool? Embeddings { get; set; }
+
+    /// <summary>
+    /// Enable the rerank endpoint (--reranking / --no-reranking).
+    /// </summary>
+    public bool? Reranking { get; set; }
+
+    /// <summary>
+    /// Pooling type for embeddings (--pooling). none/mean/cls/last/rank.
+    /// </summary>
+    [MaxLength(8)]
+    public string? Pooling { get; set; }
+
+    /// <summary>
+    /// Embeddings normalization method (--embd-normalize).
+    /// </summary>
+    public int? EmbdNormalize { get; set; }
+
+    /// <summary>
+    /// Enable the /slots monitoring endpoint (--slots / --no-slots).
+    /// </summary>
+    public bool? SlotsEndpoint { get; set; }
+
+    /// <summary>
+    /// Enable the Prometheus /metrics endpoint (--metrics / --no-metrics).
+    /// </summary>
+    public bool? MetricsEndpoint { get; set; }
+
+    /// <summary>
+    /// Allow changing global properties via POST /props (--props / --no-props).
+    /// </summary>
+    public bool? PropsEndpoint { get; set; }
+
+    /// <summary>
+    /// Enable the built-in web UI (--webui / --no-webui).
+    /// </summary>
+    public bool? WebUi { get; set; }
+
+    /// <summary>
+    /// Path prefix the server serves its API under (--api-prefix).
+    /// </summary>
+    [MaxLength(128)]
+    public string? ApiPrefix { get; set; }
+
+    /// <summary>
+    /// Number of HTTP worker threads (--threads-http).
+    /// </summary>
+    public int? ThreadsHttp { get; set; }
+
+    /// <summary>
+    /// Server-sent events keep-alive interval in seconds (--sse-ping-interval).
+    /// </summary>
+    public int? SsePingInterval { get; set; }
+
+    /// <summary>
+    /// Allow multiple sockets to bind the same port (--reuse-port).
+    /// </summary>
+    public bool? ReusePort { get; set; }
+
+    /// <summary>
+    /// Directory to persist/restore slot KV caches (--slot-save-path).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? SlotSavePath { get; set; }
+
+    /// <summary>
+    /// Directory containing local media files servable to the model (--media-path).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? MediaPath { get; set; }
+
+    /// <summary>
+    /// Use a full-size sliding-window-attention cache instead of the smaller default (--swa-full).
+    /// </summary>
+    public bool? SwaFull { get; set; }
+
+    /// <summary>
+    /// Persist idle slots' KV cache to disk instead of dropping it (--cache-idle-slots /
+    /// --no-cache-idle-slots).
+    /// </summary>
+    public bool? CacheIdleSlots { get; set; }
+
+    /// <summary>
+    /// Per-slot context size limit when using a unified KV buffer (--kv-unified-per-slot).
+    /// </summary>
+    public int? KvUnifiedPerSlot { get; set; }
+
+    /// <summary>
+    /// Max context checkpoints kept per slot (-ctxcp, --ctx-checkpoints).
+    /// </summary>
+    public int? CtxCheckpoints { get; set; }
+
+    /// <summary>
+    /// Run a warmup pass before accepting requests (--warmup / --no-warmup).
+    /// </summary>
+    public bool? Warmup { get; set; }
+
+    /// <summary>
+    /// Use the suffix/prefix/middle infill token pattern instead of prefix/suffix/middle
+    /// (--spm-infill).
+    /// </summary>
+    public bool? SpmInfill { get; set; }
+
+    /// <summary>
+    /// Force the raw content parser instead of the model-specific chat parser (--skip-chat-parsing
+    /// / --no-skip-chat-parsing).
+    /// </summary>
+    public bool? SkipChatParsing { get; set; }
+
+    /// <summary>
+    /// Prefill the assistant turn from the last message when it has the assistant role
+    /// (--prefill-assistant / --no-prefill-assistant).
+    /// </summary>
+    public bool? PrefillAssistant { get; set; }
+
+    /// <summary>
+    /// NUMA optimization mode (--numa). distribute/isolate/numactl.
+    /// </summary>
+    [MaxLength(16)]
+    public string? Numa { get; set; }
+
+    /// <summary>
+    /// Comma-separated list of RPC backend servers (--rpc).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? RpcServers { get; set; }
+
+    /// <summary>
+    /// Comma-separated model metadata overrides, format KEY=TYPE:VALUE (--override-kv, repeated
+    /// once per entry).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? OverrideKv { get; set; }
+
+    // ==================== ADVANCED: Security & CORS ====================
+
+    /// <summary>
+    /// Allowed CORS origins (--cors-origins).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? CorsOrigins { get; set; }
+
+    /// <summary>
+    /// Allowed CORS methods (--cors-methods).
+    /// </summary>
+    [MaxLength(256)]
+    public string? CorsMethods { get; set; }
+
+    /// <summary>
+    /// Allowed CORS headers (--cors-headers).
+    /// </summary>
+    [MaxLength(256)]
+    public string? CorsHeaders { get; set; }
+
+    /// <summary>
+    /// Allow CORS credentials (--cors-credentials / --no-cors-credentials).
+    /// </summary>
+    public bool? CorsCredentials { get; set; }
+
+    /// <summary>
+    /// Path to a file of API keys, one per line (--api-key-file).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? ApiKeyFile { get; set; }
+
+    /// <summary>
+    /// Path to a PEM SSL private key file, to serve over HTTPS (--ssl-key-file).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? SslKeyFile { get; set; }
+
+    /// <summary>
+    /// Path to a PEM SSL certificate file, to serve over HTTPS (--ssl-cert-file).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? SslCertFile { get; set; }
+
+    // ==================== ADVANCED: Logging ====================
+
+    /// <summary>
+    /// Disable logging entirely (--log-disable).
+    /// </summary>
+    public bool? LogDisable { get; set; }
+
+    /// <summary>
+    /// Path to log to a file instead of stdout (--log-file).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? LogFile { get; set; }
+
+    /// <summary>
+    /// Log verbosity threshold, 0-5 (-lv, --log-verbosity).
+    /// </summary>
+    public int? LogVerbosity { get; set; }
+
+    /// <summary>
+    /// Colored log output (--log-colors). on/off/auto.
+    /// </summary>
+    [MaxLength(4)]
+    public string? LogColors { get; set; }
+
+    /// <summary>
+    /// Include timestamps in log output (--log-timestamps / --no-log-timestamps).
+    /// </summary>
+    public bool? LogTimestamps { get; set; }
+
+    /// <summary>
+    /// Include prefixes in log output (--log-prefix / --no-log-prefix).
+    /// </summary>
+    public bool? LogPrefix { get; set; }
+
+    /// <summary>
+    /// Emit logs as JSONL instead of plain text (--log-jsonl / --no-log-jsonl).
+    /// </summary>
+    public bool? LogJsonl { get; set; }
+
+    /// <summary>
+    /// Directory to log prompts/completions to (--log-prompts-dir).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? LogPromptsDir { get; set; }
 
     // ==================== ADVANCED: Chat Template ====================
 
@@ -715,4 +1007,16 @@ public class ModelPreset
     /// Navigation: the registry model this preset resolves its path/GGUF metadata from, if any.
     /// </summary>
     public LocalModel? Model { get; set; }
+
+    /// <summary>
+    /// Navigation: the registry model this preset resolves <see cref="SpecDraftModel"/> from,
+    /// if linked via <see cref="SpecDraftModelId"/>.
+    /// </summary>
+    public LocalModel? SpecDraftModelRef { get; set; }
+
+    /// <summary>
+    /// Navigation: the registry model this preset resolves <see cref="Mmproj"/> from, if linked
+    /// via <see cref="MmprojId"/>.
+    /// </summary>
+    public LocalModel? MmprojModelRef { get; set; }
 }

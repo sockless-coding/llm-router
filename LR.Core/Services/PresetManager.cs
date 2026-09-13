@@ -48,6 +48,11 @@ public class PresetManager : IPresetManager
         if (preset.ModelId.HasValue)
             await ApplyLinkedModelAsync(preset, preset.ModelId.Value);
 
+        // Same for the draft model / mmproj registry links — resolved after the main model link
+        // so an explicit mmproj pick always wins over the main model's auto-detected sibling.
+        await ApplyLinkedDraftModelAsync(preset);
+        await ApplyLinkedMmprojAsync(preset);
+
         _context.ModelPresets.Add(preset);
         await _context.SaveChangesAsync();
 
@@ -71,6 +76,40 @@ public class PresetManager : IPresetManager
 
         preset.ModelPath = model.FilePath;
         PresetGgufSync.ApplyFromModel(preset, model);
+    }
+
+    /// <summary>
+    /// Resolves <see cref="ModelPreset.SpecDraftModelId"/> against the model registry and copies
+    /// its file path onto <see cref="ModelPreset.SpecDraftModel"/>. No-ops if unset or the model
+    /// can't be found, leaving a manually-entered path untouched.
+    /// </summary>
+    private async Task ApplyLinkedDraftModelAsync(ModelPreset preset)
+    {
+        if (!preset.SpecDraftModelId.HasValue)
+            return;
+
+        var model = await _context.LocalModels.FindAsync(preset.SpecDraftModelId.Value);
+        if (model is null)
+            return;
+
+        preset.SpecDraftModel = model.FilePath;
+    }
+
+    /// <summary>
+    /// Resolves <see cref="ModelPreset.MmprojId"/> against the model registry and copies its file
+    /// path onto <see cref="ModelPreset.Mmproj"/>. No-ops if unset or the model can't be found,
+    /// leaving a manually-entered path (or an auto-detected sibling projector) untouched.
+    /// </summary>
+    private async Task ApplyLinkedMmprojAsync(ModelPreset preset)
+    {
+        if (!preset.MmprojId.HasValue)
+            return;
+
+        var model = await _context.LocalModels.FindAsync(preset.MmprojId.Value);
+        if (model is null)
+            return;
+
+        preset.Mmproj = model.FilePath;
     }
 
     private async Task ReadGgufMetadataAsync(ModelPreset preset, string? modelPath)
@@ -110,131 +149,20 @@ public class PresetManager : IPresetManager
         var oldModelPath = existing.ModelPath;
         var pathChanged = !string.Equals(oldModelPath, updated.ModelPath, StringComparison.Ordinal);
 
-        existing.Name = updated.Name;
-        existing.ModelPath = updated.ModelPath;
-        existing.ModelId = updated.ModelId;
-
-        // Core settings
-        existing.ContextSize = updated.ContextSize;
-        existing.GpuLayers = updated.GpuLayers;
-        existing.CacheTypeK = updated.CacheTypeK;
-        existing.CacheTypeV = updated.CacheTypeV;
-        existing.FlashAttention = updated.FlashAttention;
-        existing.Jinja = updated.Jinja;
-        existing.SpecType = updated.SpecType;
-
-        // Sampling (core)
-        existing.Temperature = updated.Temperature;
-        existing.TopK = updated.TopK;
-        existing.MinP = updated.MinP;
-        existing.TopP = updated.TopP;
-        existing.RepeatPenalty = updated.RepeatPenalty;
-        existing.PresencePenalty = updated.PresencePenalty;
-
-        // Advanced: Generation
-        existing.Threads = updated.Threads;
-        existing.ThreadsBatch = updated.ThreadsBatch;
-        existing.PredictN = updated.PredictN;
-        existing.BatchSize = updated.BatchSize;
-        existing.UbatchSize = updated.UbatchSize;
-        existing.KeepN = updated.KeepN;
-        existing.Seed = updated.Seed;
-        existing.IgnoreEos = updated.IgnoreEos;
-
-        // Advanced: GPU/Device
-        existing.Device = updated.Device;
-        existing.SplitMode = updated.SplitMode;
-        existing.TensorSplit = updated.TensorSplit;
-        existing.MainGpu = updated.MainGpu;
-        existing.Fit = updated.Fit;
-        existing.KvOffload = updated.KvOffload;
-        existing.Repack = updated.Repack;
-
-        // Advanced: Memory
-        existing.LoadMode = updated.LoadMode;
-        existing.CacheRam = updated.CacheRam;
-
-        // Advanced: RoPE Scaling
-        existing.RopeScalingType = updated.RopeScalingType;
-        existing.RopeScale = updated.RopeScale;
-        existing.RopeFreqBase = updated.RopeFreqBase;
-        existing.RopeFreqScale = updated.RopeFreqScale;
-        existing.YarnOrigCtx = updated.YarnOrigCtx;
-        existing.YarnExtFactor = updated.YarnExtFactor;
-        existing.YarnAttnFactor = updated.YarnAttnFactor;
-        existing.YarnBetaSlow = updated.YarnBetaSlow;
-        existing.YarnBetaFast = updated.YarnBetaFast;
-
-        // Advanced: Sampling (Extended)
-        existing.TopNSigma = updated.TopNSigma;
-        existing.XtcProbability = updated.XtcProbability;
-        existing.XtcThreshold = updated.XtcThreshold;
-        existing.TypicalP = updated.TypicalP;
-        existing.RepeatLastN = updated.RepeatLastN;
-        existing.FrequencyPenalty = updated.FrequencyPenalty;
-        existing.DryMultiplier = updated.DryMultiplier;
-        existing.DryBase = updated.DryBase;
-        existing.DryAllowedLength = updated.DryAllowedLength;
-        existing.DryPenaltyLastN = updated.DryPenaltyLastN;
-        existing.Mirostat = updated.Mirostat;
-        existing.MirostatTau = updated.MirostatTau;
-        existing.MirostatEta = updated.MirostatEta;
-        existing.DynatempRange = updated.DynatempRange;
-        existing.DynatempExp = updated.DynatempExp;
-
-        // Advanced: Speculative Decoding
-        existing.SpecDraftModel = updated.SpecDraftModel;
-        existing.SpecDraftNMax = updated.SpecDraftNMax;
-        existing.SpecDraftNMin = updated.SpecDraftNMin;
-        existing.SpecDraftPMin = updated.SpecDraftPMin;
-        existing.SpecDraftTypeK = updated.SpecDraftTypeK;
-        existing.SpecDraftTypeV = updated.SpecDraftTypeV;
-        existing.SpecDraftGpuLayers = updated.SpecDraftGpuLayers;
-        existing.SpecDraftThreads = updated.SpecDraftThreads;
-
-        // Advanced: Server
-        existing.Host = updated.Host;
-        existing.Port = updated.Port;
-        existing.Parallel = updated.Parallel;
-        existing.ContBatching = updated.ContBatching;
-        existing.Timeout = updated.Timeout;
-        existing.ApiKey = updated.ApiKey;
-        existing.CachePrompt = updated.CachePrompt;
-
-        // Advanced: Reasoning
-        existing.Reasoning = updated.Reasoning;
-        existing.ReasoningBudget = updated.ReasoningBudget;
-        existing.ReasoningFormat = updated.ReasoningFormat;
-
-        // Advanced: Multimodal
-        existing.Mmproj = updated.Mmproj;
-        existing.ImageMinTokens = updated.ImageMinTokens;
-        existing.ImageMaxTokens = updated.ImageMaxTokens;
-
-        // Advanced: LoRA
-        existing.Lora = updated.Lora;
-
-        // Advanced: Chat Template
-        existing.ChatTemplate = updated.ChatTemplate;
-        existing.ChatTemplateKwargs = updated.ChatTemplateKwargs;
-
-        // GGUF Metadata (auto-read from file)
-        existing.GgufArchitecture = updated.GgufArchitecture;
-        existing.GgufModelName = updated.GgufModelName;
-        existing.GgufParameterSize = updated.GgufParameterSize;
-        existing.GgufQuantizationLevel = updated.GgufQuantizationLevel;
-        existing.GgufContextLength = updated.GgufContextLength;
-        existing.GgufEmbeddingLength = updated.GgufEmbeddingLength;
-        existing.GgufRopeFreqBase = updated.GgufRopeFreqBase;
-        existing.GgufChatTemplate = updated.GgufChatTemplate;
-
-        // Fallback flags
-        existing.Flags = updated.Flags;
+        // Copies every scalar property (by name) from `updated` onto the tracked `existing`
+        // entity in one shot — this is what keeps the ~130-field list in sync automatically as
+        // properties are added, instead of needing a matching assignment line here for each one
+        // (a previous hand-written version of this method silently missed about a quarter of the
+        // fields added after it was first written). Navigation properties aren't touched.
+        _context.Entry(existing).CurrentValues.SetValues(updated);
 
         // A registry link takes precedence: resolve it to the model's file path + metadata,
         // overwriting whatever ModelPath/Gguf* values were just assigned above.
         if (existing.ModelId.HasValue)
             await ApplyLinkedModelAsync(existing, existing.ModelId.Value);
+
+        await ApplyLinkedDraftModelAsync(existing);
+        await ApplyLinkedMmprojAsync(existing);
 
         await _context.SaveChangesAsync();
 

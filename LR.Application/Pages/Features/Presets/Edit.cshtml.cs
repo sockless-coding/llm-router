@@ -1,5 +1,6 @@
 using LR.Core.Interfaces;
 using LR.Core.Models;
+using LR.Core.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
@@ -17,6 +18,7 @@ public class PresetEditModel : PageModel, IPresetFormPageModel
 
     public IReadOnlyList<ServerInstance> Servers { get; set; } = new List<ServerInstance>();
     public IReadOnlyList<LocalModel> Models { get; set; } = new List<LocalModel>();
+    public IReadOnlyList<LocalModel> MmprojCandidates { get; set; } = new List<LocalModel>();
     public IReadOnlyList<ChatTemplateVariable> DetectedTemplateVariables { get; set; } = Array.Empty<ChatTemplateVariable>();
 
     public PresetEditModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary, IChatTemplateVariableExtractor templateVariableExtractor)
@@ -35,6 +37,7 @@ public class PresetEditModel : PageModel, IPresetFormPageModel
 
         Servers = _serverManager.GetAllInstances();
         Models = await _modelLibrary.GetAllAsync();
+        MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
         PresetViewModelMapper.ToViewModel(preset, ViewModel);
         DetectedTemplateVariables = _templateVariableExtractor.Extract(preset.GgufChatTemplate);
 
@@ -56,6 +59,18 @@ public class PresetEditModel : PageModel, IPresetFormPageModel
         return new JsonResult(variables.Select(v => new { name = v.Name, literalValues = v.LiteralValues }));
     }
 
+    /// <summary>
+    /// AJAX endpoint backing the live command-line preview — see the identical handler on
+    /// <see cref="PresetCreateModel"/> for details.
+    /// </summary>
+    public async Task<IActionResult> OnPostPreviewAsync()
+    {
+        var preset = new ModelPreset();
+        PresetViewModelMapper.ApplyToEntity(ViewModel, preset);
+        await PresetPreview.ResolveLinkedModelsAsync(preset, _modelLibrary);
+        return new JsonResult(PresetPreview.Build(preset));
+    }
+
     public async Task<IActionResult> OnPostAsync([FromQuery] Guid Id)
     {
         if (!ViewModel.ModelId.HasValue && string.IsNullOrWhiteSpace(ViewModel.ModelPath))
@@ -65,6 +80,7 @@ public class PresetEditModel : PageModel, IPresetFormPageModel
         {
             Servers = _serverManager.GetAllInstances();
             Models = await _modelLibrary.GetAllAsync();
+            MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
             return Page();
         }
 

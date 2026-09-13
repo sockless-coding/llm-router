@@ -108,6 +108,8 @@ public class LlamaCppArgBuilder
 
         // --- Advanced: Speculative Decoding ---
         AddArgIfSet(args, "--spec-draft-model", preset.SpecDraftModel);
+        AddArgIfSet(args, "--spec-draft-hf", preset.SpecDraftHfRepo);
+        AddArgIfSet(args, "--spec-draft-device", preset.SpecDraftDevice);
         AddIntArg(args, "--spec-draft-n-max", preset.SpecDraftNMax);
         AddIntArg(args, "--spec-draft-n-min", preset.SpecDraftNMin);
         AddFloatArg(args, "--draft-p-min", preset.SpecDraftPMin);
@@ -155,6 +157,9 @@ public class LlamaCppArgBuilder
         AddIntArg(args, "--image-min-tokens", preset.ImageMinTokens);
         AddIntArg(args, "--image-max-tokens", preset.ImageMaxTokens);
         AddIntArg(args, "--mtmd-batch-max-tokens", preset.MtmdBatchMaxTokens);
+        AddFloatArg(args, "--video-fps", preset.VideoFps);
+        AddIntArg(args, "--video-timestamp-interval", preset.VideoTimestampInterval);
+        AddArgIfSet(args, "--video-ffmpeg-dir", preset.VideoFfmpegDir);
 
         // --- Advanced: LoRA ---
         AddArgIfSet(args, "--lora", preset.Lora);
@@ -167,6 +172,74 @@ public class LlamaCppArgBuilder
             args.Add(preset.ControlVectorLayerStart.Value.ToString(CultureInfo.InvariantCulture));
             args.Add(preset.ControlVectorLayerEnd.Value.ToString(CultureInfo.InvariantCulture));
         }
+        if (preset.LoraInitWithoutApply.HasValue && preset.LoraInitWithoutApply.Value)
+            args.Add("--lora-init-without-apply");
+
+        // --- Advanced: Server Behavior & Endpoints ---
+        AddArgIfSet(args, "--alias", preset.ModelAlias);
+        AddArgIfSet(args, "--tags", preset.ModelTags);
+        if (preset.Embeddings.HasValue)
+            args.Add(preset.Embeddings.Value ? "--embeddings" : "--no-embeddings");
+        if (preset.Reranking.HasValue)
+            args.Add(preset.Reranking.Value ? "--reranking" : "--no-reranking");
+        AddArgIfSet(args, "--pooling", preset.Pooling);
+        AddIntArg(args, "--embd-normalize", preset.EmbdNormalize);
+        if (preset.SlotsEndpoint.HasValue)
+            args.Add(preset.SlotsEndpoint.Value ? "--slots" : "--no-slots");
+        if (preset.MetricsEndpoint.HasValue && preset.MetricsEndpoint.Value)
+            args.Add("--metrics");
+        if (preset.PropsEndpoint.HasValue)
+            args.Add(preset.PropsEndpoint.Value ? "--props" : "--no-props");
+        if (preset.WebUi.HasValue)
+            args.Add(preset.WebUi.Value ? "--webui" : "--no-webui");
+        AddArgIfSet(args, "--api-prefix", preset.ApiPrefix);
+        AddIntArg(args, "--threads-http", preset.ThreadsHttp);
+        AddIntArg(args, "--sse-ping-interval", preset.SsePingInterval);
+        if (preset.ReusePort.HasValue && preset.ReusePort.Value)
+            args.Add("--reuse-port");
+        AddArgIfSet(args, "--slot-save-path", preset.SlotSavePath);
+        AddArgIfSet(args, "--media-path", preset.MediaPath);
+        if (preset.SwaFull.HasValue && preset.SwaFull.Value)
+            args.Add("--swa-full");
+        if (preset.CacheIdleSlots.HasValue)
+            args.Add(preset.CacheIdleSlots.Value ? "--cache-idle-slots" : "--no-cache-idle-slots");
+        AddIntArg(args, "--kv-unified-per-slot", preset.KvUnifiedPerSlot);
+        AddIntArg(args, "--ctx-checkpoints", preset.CtxCheckpoints);
+        if (preset.Warmup.HasValue)
+            args.Add(preset.Warmup.Value ? "--warmup" : "--no-warmup");
+        if (preset.SpmInfill.HasValue && preset.SpmInfill.Value)
+            args.Add("--spm-infill");
+        if (preset.SkipChatParsing.HasValue)
+            args.Add(preset.SkipChatParsing.Value ? "--skip-chat-parsing" : "--no-skip-chat-parsing");
+        if (preset.PrefillAssistant.HasValue)
+            args.Add(preset.PrefillAssistant.Value ? "--prefill-assistant" : "--no-prefill-assistant");
+        AddArgIfSet(args, "--numa", preset.Numa);
+        AddArgIfSet(args, "--rpc", preset.RpcServers);
+        AddRepeatedArg(args, "--override-kv", preset.OverrideKv);
+
+        // --- Advanced: Security & CORS ---
+        AddArgIfSet(args, "--cors-origins", preset.CorsOrigins);
+        AddArgIfSet(args, "--cors-methods", preset.CorsMethods);
+        AddArgIfSet(args, "--cors-headers", preset.CorsHeaders);
+        if (preset.CorsCredentials.HasValue)
+            args.Add(preset.CorsCredentials.Value ? "--cors-credentials" : "--no-cors-credentials");
+        AddArgIfSet(args, "--api-key-file", preset.ApiKeyFile);
+        AddArgIfSet(args, "--ssl-key-file", preset.SslKeyFile);
+        AddArgIfSet(args, "--ssl-cert-file", preset.SslCertFile);
+
+        // --- Advanced: Logging ---
+        if (preset.LogDisable.HasValue && preset.LogDisable.Value)
+            args.Add("--log-disable");
+        AddArgIfSet(args, "--log-file", preset.LogFile);
+        AddIntArg(args, "--log-verbosity", preset.LogVerbosity);
+        AddArgIfSet(args, "--log-colors", preset.LogColors);
+        if (preset.LogTimestamps.HasValue)
+            args.Add(preset.LogTimestamps.Value ? "--log-timestamps" : "--no-log-timestamps");
+        if (preset.LogPrefix.HasValue)
+            args.Add(preset.LogPrefix.Value ? "--log-prefix" : "--no-log-prefix");
+        if (preset.LogJsonl.HasValue)
+            args.Add(preset.LogJsonl.Value ? "--log-jsonl" : "--no-log-jsonl");
+        AddArgIfSet(args, "--log-prompts-dir", preset.LogPromptsDir);
 
         // --- Advanced: Chat Template ---
         AddArgIfSet(args, "--chat-template", preset.ChatTemplate);
