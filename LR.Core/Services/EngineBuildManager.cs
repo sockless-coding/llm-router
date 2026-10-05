@@ -182,6 +182,15 @@ public class EngineBuildManager : IEngineBuildManager
             if (build.Status is EngineBuildStatus.Downloading or EngineBuildStatus.Building or EngineBuildStatus.Pending)
                 continue;
 
+            // Source builds made under an env setup command (oneAPI setvars) used to record its
+            // banner along with the SHA; keep only the trailing commit hash.
+            if (build.CommitSha is { } sha && !IsBareSha(sha))
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(sha, @"\b[0-9a-fA-F]{40}\b", System.Text.RegularExpressions.RegexOptions.RightToLeft);
+                build.CommitSha = m.Success ? m.Value : null;
+                changed = true;
+            }
+
             var serverExists = !string.IsNullOrWhiteSpace(build.InstallPath) &&
                 Directory.Exists(build.InstallPath) &&
                 (File.Exists(Path.Combine(build.InstallPath, "llama-server.exe")) ||
@@ -204,6 +213,8 @@ public class EngineBuildManager : IEngineBuildManager
         if (changed)
             await _context.SaveChangesAsync(ct);
     }
+
+    private static bool IsBareSha(string s) => s.Length is >= 7 and <= 64 && s.All(char.IsAsciiHexDigit);
 
     public async Task<EngineBuildUpdateStatus> GetUpdateStatusAsync(Guid buildId, CancellationToken ct = default)
     {

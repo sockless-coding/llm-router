@@ -56,12 +56,14 @@ public sealed class GitSyncStep : IBuildStep
         catch { /* optional step (ref is a tag/sha, not a branch) */ }
     }
 
+    // Returns git's last non-empty output line: when an env setup command (e.g. oneAPI setvars)
+    // wraps the call, its banner is printed first and must not leak into the captured value.
     private static async Task<string?> CaptureGitAsync(BuildContext ctx, CancellationToken ct, params string[] args)
     {
-        var sb = new System.Text.StringBuilder();
+        string? last = null;
         var result = await ProcessRunner.RunAsync("git", args, ctx.SourceDir, ctx.EnvSetupCommand,
-            line => { sb.AppendLine(line); return Task.CompletedTask; }, ct);
-        return result.ExitCode == 0 ? sb.ToString() : null;
+            line => { if (!string.IsNullOrWhiteSpace(line)) last = line; return Task.CompletedTask; }, ct);
+        return result.ExitCode == 0 ? last : null;
     }
 }
 
