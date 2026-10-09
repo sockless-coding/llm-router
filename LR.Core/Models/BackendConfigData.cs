@@ -6,10 +6,9 @@ namespace LR.Core.Models;
 public class BackendConfigData
 {
     /// <summary>
-    /// Path to the folder containing the llama.cpp server executable (e.g., "llama-server").
-    /// Each GPU backend build (CUDA, Vulkan, SYCL) should be in its own folder.
+    /// Path to the engine's install folder (see <see cref="BackendConfig.InstallFolderPath"/>).
     /// </summary>
-    public string? LlamaCppExecutableFolderPath { get; set; }
+    public string? InstallFolderPath { get; set; }
 
     /// <summary>
     /// Path to a companion application that should run alongside the server.
@@ -24,8 +23,8 @@ public class BackendConfigData
     public string? EnvironmentSetupCommand { get; set; }
 
     /// <summary>
-    /// Optional link to a managed <see cref="LlamaCppBuild"/>. When set, the executable folder is
-    /// resolved from that build and <see cref="LlamaCppExecutableFolderPath"/> is only a fallback.
+    /// Optional link to a managed <see cref="EngineBuild"/>. When set, the executable folder is
+    /// resolved from that build and <see cref="InstallFolderPath"/> is only a fallback.
     /// </summary>
     public Guid? EngineBuildId { get; set; }
 }

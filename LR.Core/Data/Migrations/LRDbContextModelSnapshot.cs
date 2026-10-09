@@ -185,7 +185,7 @@ namespace LR.Core.Migrations
                     b.Property<int?>("GpuBackendType")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("LlamaCppExecutableFolderPath")
+                    b.Property<string>("InstallFolderPath")
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
@@ -202,32 +202,7 @@ namespace LR.Core.Migrations
                     b.ToTable("BackendConfigs", (string)null);
                 });
 
-            modelBuilder.Entity("LR.Core.Models.EngineBuildSettings", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("BuildWorkspaceFolder")
-                        .IsRequired()
-                        .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("GitHubApiToken")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("InstallRootFolder")
-                        .IsRequired()
-                        .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("EngineBuildSettings", (string)null);
-                });
-
-            modelBuilder.Entity("LR.Core.Models.LlamaCppBuild", b =>
+            modelBuilder.Entity("LR.Core.Models.EngineBuild", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -245,6 +220,9 @@ namespace LR.Core.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("Engine")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("InstallPath")
                         .IsRequired()
@@ -291,7 +269,32 @@ namespace LR.Core.Migrations
 
                     b.HasIndex("RecipeId");
 
-                    b.ToTable("LlamaCppBuilds", (string)null);
+                    b.ToTable("EngineBuilds", (string)null);
+                });
+
+            modelBuilder.Entity("LR.Core.Models.EngineBuildSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BuildWorkspaceFolder")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GitHubApiToken")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InstallRootFolder")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("EngineBuildSettings", (string)null);
                 });
 
             modelBuilder.Entity("LR.Core.Models.LlamaCppBuildRecipe", b =>
@@ -1375,7 +1378,7 @@ namespace LR.Core.Migrations
 
             modelBuilder.Entity("LR.Core.Models.BackendConfig", b =>
                 {
-                    b.HasOne("LR.Core.Models.LlamaCppBuild", "EngineBuild")
+                    b.HasOne("LR.Core.Models.EngineBuild", "EngineBuild")
                         .WithMany()
                         .HasForeignKey("EngineBuildId")
                         .OnDelete(DeleteBehavior.SetNull);
@@ -1391,7 +1394,7 @@ namespace LR.Core.Migrations
                     b.Navigation("ServerInstance");
                 });
 
-            modelBuilder.Entity("LR.Core.Models.LlamaCppBuild", b =>
+            modelBuilder.Entity("LR.Core.Models.EngineBuild", b =>
                 {
                     b.HasOne("LR.Core.Models.LlamaCppBuildRecipe", "Recipe")
                         .WithMany()

@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace LR.Core.Models;
 
 /// <summary>
-/// How a <see cref="LlamaCppBuild"/> was obtained.
+/// How a <see cref="EngineBuild"/> was obtained.
 /// </summary>
 public enum EngineBuildSource
 {
@@ -13,6 +13,13 @@ public enum EngineBuildSource
 
     /// <summary>Compiled locally from source via a <see cref="LlamaCppBuildRecipe"/>.</summary>
     SourceCompile = 1,
+
+    /// <summary>
+    /// A git checkout of the engine's own repository, updated in place by pulling and re-running the
+    /// engine's own setup (Strata). Its folder can hold user data (models), so it is never deleted
+    /// by the router.
+    /// </summary>
+    GitCheckout = 2,
 }
 
 /// <summary>
@@ -28,22 +35,32 @@ public enum EngineBuildStatus
 
     /// <summary>The install folder was expected on disk but is no longer there (found during reconciliation).</summary>
     Missing = 5,
+
+    /// <summary>
+    /// The files are there but the engine's own first-time setup hasn't been run yet (e.g. a fresh
+    /// Strata clone without its <c>.venv</c>). Not bindable until it's <see cref="Ready"/>.
+    /// </summary>
+    NeedsSetup = 6,
 }
 
 /// <summary>
-/// A tracked, versioned llama.cpp build on disk — either a downloaded official release or a
-/// locally compiled one. Servers can bind to a build (via <see cref="BackendConfig.EngineBuildId"/>)
-/// so the router knows exactly which llama.cpp version/commit each backend folder holds and can
-/// offer update/changelog information. Modelled on <see cref="LocalModel"/> in the model library.
+/// A tracked, versioned engine install on disk — for llama.cpp a downloaded official release or a
+/// locally compiled build, for Strata a git checkout. Servers can bind to a build (via
+/// <see cref="BackendConfig.EngineBuildId"/>) so the router knows exactly which version/commit each
+/// install folder holds and can offer update/changelog information. Modelled on
+/// <see cref="LocalModel"/> in the model library.
 /// </summary>
-[Table("LlamaCppBuilds")]
-public class LlamaCppBuild
+[Table("EngineBuilds")]
+public class EngineBuild
 {
     [Key]
     public Guid Id { get; set; } = Guid.NewGuid();
 
     [Required, MaxLength(256)]
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>The engine this is an install of. Only servers of the same engine can bind to it.</summary>
+    public ServerEngine Engine { get; set; } = ServerEngine.LlamaCpp;
 
     /// <summary>The GPU compute backend this build targets.</summary>
     public BackendType BackendType { get; set; }
@@ -58,13 +75,13 @@ public class LlamaCppBuild
     public Guid? RecipeId { get; set; }
 
     /// <summary>
-    /// Absolute path to the folder that contains <c>llama-server</c>/<c>llama-server.exe</c>.
-    /// This is what a bound server's <see cref="BackendConfig.LlamaCppExecutableFolderPath"/> resolves to.
+    /// Absolute path to the install folder — for llama.cpp the folder containing
+    /// <c>llama-server</c>/<c>llama-server.exe</c>, for Strata the checkout. This is what a bound server's <see cref="BackendConfig.InstallFolderPath"/> resolves to.
     /// </summary>
     [MaxLength(1024)]
     public string InstallPath { get; set; } = string.Empty;
 
-    /// <summary>llama.cpp release/build tag (<c>b####</c>) when known.</summary>
+    /// <summary>Version when known: llama.cpp's release/build tag (<c>b####</c>), Strata's <c>v&lt;version&gt;</c>.</summary>
     [MaxLength(64)]
     public string? VersionTag { get; set; }
 

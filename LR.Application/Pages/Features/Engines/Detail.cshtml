@@ -12,18 +12,27 @@
 <div class="flex flex-col h-full min-h-0">
 
 <div class="flex items-center gap-3 mb-6 shrink-0">
-    <a href="/Features/Engines/Index" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
+    <a href="/Features/Engines/Index?engine=@b.Engine" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
     <span class="text-text-secondary">/</span>
     <p class="text-text-primary text-sm font-medium">@b.Name</p>
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 shrink-0">
     <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-2 text-sm">
+        <div class="flex justify-between"><span class="text-text-secondary">Engine</span><span class="text-text-primary">@(Model.EngineName ?? b.Engine.ToString())</span></div>
         <div class="flex justify-between"><span class="text-text-secondary">Backend</span><span class="text-text-primary">@b.BackendType</span></div>
-        <div class="flex justify-between"><span class="text-text-secondary">Source</span><span class="text-text-primary">@(b.Source == EngineBuildSource.OfficialRelease ? "Official release" : "Compiled from source")</span></div>
+        <div class="flex justify-between"><span class="text-text-secondary">Source</span><span class="text-text-primary">@(b.Source switch { EngineBuildSource.OfficialRelease => "Official release", EngineBuildSource.SourceCompile => "Compiled from source", _ => "Git checkout" })</span></div>
         <div class="flex justify-between"><span class="text-text-secondary">Version tag</span><span class="text-text-primary font-mono">@(b.VersionTag ?? "—")</span></div>
         <div class="flex justify-between"><span class="text-text-secondary">Commit</span><span class="text-text-primary font-mono">@(b.CommitSha ?? "—")</span></div>
-        <div class="flex justify-between"><span class="text-text-secondary">Target</span><span class="text-text-primary font-mono">@(b.TargetOs)-@(b.TargetArch)</span></div>
+        @if (b.Engine == ServerEngine.Strata)
+        {
+            <div class="flex justify-between"><span class="text-text-secondary">Engine binary</span><span class="text-text-primary font-mono">@(LR.Core.Services.EngineBuilds.StrataLayout.ReadEngineVersion(b.InstallPath) ?? "—")</span></div>
+            <div class="flex justify-between gap-4"><span class="text-text-secondary">Models</span><span class="text-text-primary font-mono text-right">@string.Join(", ", LR.Core.Services.EngineBuilds.StrataLayout.FindRunConfigs(b.InstallPath).Select(c => c.FileName))</span></div>
+        }
+        else
+        {
+            <div class="flex justify-between"><span class="text-text-secondary">Target</span><span class="text-text-primary font-mono">@(b.TargetOs)-@(b.TargetArch)</span></div>
+        }
         <div class="flex justify-between"><span class="text-text-secondary">Status</span><span class="text-text-primary" id="build-status">@b.Status</span></div>
         <div class="flex justify-between"><span class="text-text-secondary">Bound servers</span><span class="text-text-primary">@Model.ServerUsage</span></div>
     </div>

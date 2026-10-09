@@ -77,7 +77,7 @@ public class ServerDetailModel : PageModel
 
             InFlight = _concurrencyLimiter.InFlight(Server.Id);
 
-            if (Server.Engine == ServerEngine.LlamaCpp && Server.Status == ServerStatus.Running)
+            if (provider is IServerCapacityProvider && Server.Status == ServerStatus.Running)
             {
                 var preset = Server.ActivePresetId is Guid pid ? _presetManager.GetById(pid) : null;
                 MaxSlots = LlamaSlotCapacity.Resolve(provider, preset, _settings.DefaultParallelSlots);

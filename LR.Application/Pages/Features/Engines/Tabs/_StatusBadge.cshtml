@@ -1,0 +1,25 @@
+@using LR.Core.Models
+@model EngineBuild
+@{
+    var b = Model;
+}
+@if (b.Status == EngineBuildStatus.Ready)
+{
+    <span class="text-xs px-2 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20" title="@b.StatusMessage">Ready@(string.IsNullOrEmpty(b.StatusMessage) ? "" : " *")</span>
+}
+else if (b.Status is EngineBuildStatus.Downloading or EngineBuildStatus.Building)
+{
+    <span class="text-xs px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 build-status" data-build-id="@b.Id">@(b.Status == EngineBuildStatus.Downloading ? "Downloading…" : "Building…")</span>
+}
+else if (b.Status == EngineBuildStatus.Error)
+{
+    <span class="text-xs px-2 py-0.5 rounded bg-red-500/10 text-neon-red border border-red-500/20" title="@b.StatusMessage">Error</span>
+}
+else if (b.Status == EngineBuildStatus.NeedsSetup)
+{
+    <span class="text-xs px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20" title="@b.StatusMessage">Needs setup</span>
+}
+else
+{
+    <span class="text-xs px-2 py-0.5 rounded bg-gray-700/30 text-text-secondary border border-gray-600/20" title="@b.StatusMessage">@b.Status</span>
+}

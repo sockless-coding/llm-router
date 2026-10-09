@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 using LR.Core.Models;
 
-namespace LR.Providers;
+namespace LR.Providers.LlamaCpp;
 
 /// <summary>
 /// Coordinates stdout timing data from llama.cpp with HTTP request/response lifecycle.

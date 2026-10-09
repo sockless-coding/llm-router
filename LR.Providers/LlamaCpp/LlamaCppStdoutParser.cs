@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 using LR.Core.Models;
 
-namespace LR.Providers;
+namespace LR.Providers.LlamaCpp;
 
 /// <summary>
 /// Parses llama.cpp stdout print_timing lines into structured timing events.

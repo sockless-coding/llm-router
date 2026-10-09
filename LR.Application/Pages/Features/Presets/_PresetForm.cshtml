@@ -1,5 +1,11 @@
 @model LR.Application.Pages.Features.Presets.IPresetFormPageModel
+@inject LR.Core.Interfaces.IEngineCatalog EngineCatalog
 @{
+    // What the model path means differs per engine (a GGUF for llama.cpp, a run config for Strata);
+    // the help under the manual path follows the selected server.
+    var modelPathHelpJson = System.Text.Json.JsonSerializer.Serialize(
+        Model.Servers.ToDictionary(s => s.Id.ToString(), s => EngineCatalog.Get(s.Engine)?.ModelPathHelp ?? "")
+    ).Replace("</", "<\\/");
     var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500";
     var selCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all";
     var detectedVarsJson = System.Text.Json.JsonSerializer.Serialize(
@@ -65,8 +71,19 @@
                 <div class="pt-3">
                     <input asp-for="ViewModel.ModelPath" placeholder="/path/to/model.gguf (overrides the model selected above)"
                            class="@inpCls @Html.Raw(ViewData.ModelState["ViewModel.ModelPath"]?.Errors?.Any() == true ? "border-red-500/60" : "")" />
+                    <p id="model-path-help" class="text-xs text-text-secondary mt-1"></p>
                 </div>
             </details>
+            <script>
+                (() => {
+                    const helpByServer = @Html.Raw(modelPathHelpJson);
+                    const serverSelect = document.getElementById('ViewModel_ServerInstanceId');
+                    const help = document.getElementById('model-path-help');
+                    const update = () => { help.textContent = helpByServer[serverSelect.value] || ''; };
+                    serverSelect.addEventListener('change', update);
+                    update();
+                })();
+            </script>
         </div>
 
         <!-- ==================== CORE SETTINGS (Always Visible) ==================== -->

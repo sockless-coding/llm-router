@@ -1,6 +1,6 @@
 using LR.Core.Interfaces;
 using LR.Core.Models;
-using LR.Providers;
+using LR.Providers.LlamaCpp;
 
 namespace LR.Application.Pages.Features.Presets;
 

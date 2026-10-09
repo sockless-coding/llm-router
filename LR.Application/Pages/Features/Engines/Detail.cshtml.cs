@@ -15,15 +15,21 @@ public class EngineBuildDetailModel : PageModel
     [BindProperty(SupportsGet = true)]
     public Guid Id { get; set; }
 
-    public LlamaCppBuild? Build { get; set; }
+    public EngineBuild? Build { get; set; }
     public int ServerUsage { get; set; }
     public string? BuildLog { get; set; }
     public bool InFlight { get; set; }
 
-    public EngineBuildDetailModel(IEngineBuildManager manager, EngineBuildService buildService)
+    /// <summary>Display name of the build's engine.</summary>
+    public string? EngineName => Build is null ? null : _engines.Get(Build.Engine)?.DisplayName;
+
+    private readonly IEngineCatalog _engines;
+
+    public EngineBuildDetailModel(IEngineBuildManager manager, EngineBuildService buildService, IEngineCatalog engines)
     {
         _manager = manager;
         _buildService = buildService;
+        _engines = engines;
     }
 
     public async Task<IActionResult> OnGetAsync()

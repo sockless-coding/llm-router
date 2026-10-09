@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -13,19 +12,17 @@ using LR.Core.Wrapper;
 namespace LR.Providers;
 
 /// <summary>
-/// Manages the llama.cpp server process lifecycle via a standalone LR.Wrapper process rather
-/// than owning the child process directly. The wrapper survives router restarts; this class is
-/// responsible for launching it (or reconnecting to one that's already running), sending it
-/// commands over a named pipe, and feeding the raw output it streams back into
-/// <see cref="LlamaCppStdoutParser"/>/<see cref="LlamaCppTimingCoordinator"/> exactly as the
-/// in-process reader used to.
+/// Manages a server process's lifecycle via a standalone LR.Wrapper process rather than owning
+/// the child process directly. The wrapper survives router restarts; this class is responsible
+/// for launching it (or reconnecting to one that's already running), sending it commands over a
+/// named pipe, and feeding the raw output it streams back to the engine's
+/// <see cref="IServerOutputHandler"/>, which also decides when a start has completed.
 /// </summary>
 public class WrapperProcessManager
 {
     private static readonly string StateDirectory =
         WrapperConventions.GetDefaultStateDirectory(AppDomain.CurrentDomain.BaseDirectory);
 
-    private const int StartupHealthCheckTimeoutMs = 600_000;
     private const int HealthCheckPollIntervalMs = 2000;
     private const int ProgressReportEverySeconds = 5;
     private const int WrapperConnectTimeoutMs = 15_000;
@@ -33,13 +30,14 @@ public class WrapperProcessManager
 
     private readonly ILogger<WrapperProcessManager> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly LlamaCppTimingCoordinator _timingCoordinator;
-    private readonly LlamaCppStdoutParser _stdoutParser;
+    private readonly IServerOutputHandler _outputHandler;
 
-    public string? ExecutableFolderPath { get; set; }
     public string? CompanionAppPath { get; set; }
     public string? EnvironmentSetupCommand { get; set; }
     public int Port { get; set; }
+
+    /// <summary>How long a start may take before it's treated as failed.</summary>
+    public TimeSpan StartupTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
     private ServerInstance? _serverInstance;
     private volatile WrapperPipeConnection? _connection;
@@ -59,13 +57,11 @@ public class WrapperProcessManager
     public WrapperProcessManager(
         ILogger<WrapperProcessManager> logger,
         IServiceScopeFactory scopeFactory,
-        LlamaCppTimingCoordinator timingCoordinator,
-        LlamaCppStdoutParser stdoutParser)
+        IServerOutputHandler outputHandler)
     {
         _logger = logger;
         _scopeFactory = scopeFactory;
-        _timingCoordinator = timingCoordinator;
-        _stdoutParser = stdoutParser;
+        _outputHandler = outputHandler;
     }
 
     public void SetServerInstance(ServerInstance? instance)
@@ -75,13 +71,12 @@ public class WrapperProcessManager
 
     /// <summary>
     /// Sends the idempotent "ensure running" start command to the wrapper (launching it first if
-    /// not already connected) and waits for the same readiness markers the process manager this
-    /// replaced used to scan for directly. Used for fresh starts, crash auto-restarts, and
+    /// not already connected) and waits for the engine's readiness markers (as recognised by the
+    /// <see cref="IServerOutputHandler"/>) to appear in the server's output. Used for fresh starts, crash auto-restarts, and
     /// preset-restarts alike — the wrapper never disturbs the companion app across any of them.
     /// </summary>
     public async Task<bool> StartProcessAsync(
-        string serverExecutablePath,
-        List<string> arguments,
+        ServerLaunchSpec launch,
         Func<StartupProgressEvent, Task>? onProgress,
         CancellationToken cancellationToken)
     {
@@ -95,13 +90,13 @@ public class WrapperProcessManager
             _pendingAck = ackTcs;
 
             _logger.LogInformation("Sending start command to wrapper for {ServerUrl} with args: {Args}",
-                $"http://localhost:{Port}", string.Join(" ", arguments));
+                $"http://localhost:{Port}", string.Join(" ", launch.Arguments));
 
             await _connection!.SendAsync(new StartServerCommand
             {
-                ExecutablePath = serverExecutablePath,
-                Arguments = arguments,
-                WorkingDirectory = ExecutableFolderPath,
+                ExecutablePath = launch.ExecutablePath,
+                Arguments = launch.Arguments,
+                WorkingDirectory = launch.WorkingDirectory,
                 EnvironmentSetupCommand = EnvironmentSetupCommand,
                 CompanionAppPath = CompanionAppPath,
                 Port = Port,
@@ -122,7 +117,7 @@ public class WrapperProcessManager
             var stopwatch = Stopwatch.StartNew();
             double lastProgressElapsedSeconds = 0;
 
-            while (stopwatch.ElapsedMilliseconds < StartupHealthCheckTimeoutMs)
+            while (stopwatch.Elapsed < StartupTimeout)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -183,9 +178,9 @@ public class WrapperProcessManager
             lock (startup.Lock)
                 outputSnippet = string.Join("\n", startup.RecentLines);
 
-            _logger.LogError("Server failed to become healthy within {TimeoutMs}ms.", StartupHealthCheckTimeoutMs);
+            _logger.LogError("Server failed to become healthy within {TimeoutMs}ms.", (long)StartupTimeout.TotalMilliseconds);
             throw new InvalidOperationException(
-                $"Server failed to become healthy within {StartupHealthCheckTimeoutMs / 1000}s. " +
+                $"Server failed to become healthy within {(int)StartupTimeout.TotalSeconds}s. " +
                 (string.IsNullOrEmpty(outputSnippet) ? "No output captured." : $"Recent output: {outputSnippet}"));
         }
         finally
@@ -225,7 +220,7 @@ public class WrapperProcessManager
     }
 
     /// <summary>
-    /// Cancels the background pipe event pump. Called from LlamaCppProvider.Dispose().
+    /// Cancels the background pipe event pump. Called from ManagedServerProviderBase.Dispose().
     /// </summary>
     public void CancelStdoutReader()
     {
@@ -433,24 +428,18 @@ public class WrapperProcessManager
 
     private void HandleOutputLine(OutputLineEvent oe)
     {
-        var timingEvent = _stdoutParser.ParseLine(oe.Line);
-        if (timingEvent != null)
-            _timingCoordinator.ProcessEvent(timingEvent);
+        _outputHandler.OnOutputLine(oe.Line);
 
         var startup = _activeStartup;
         if (startup is null) return;
 
         lock (startup.Lock)
         {
-            if (!startup.ModelLoadedDetected && oe.Line.Contains("llama_server: model loaded"))
+            if (!startup.ModelLoadedDetected && _outputHandler.IsModelLoadedLine(oe.Line))
                 startup.ModelLoadedDetected = true;
 
-            if (!startup.DetectedPort.HasValue && oe.Line.Contains("llama_server: listening on"))
-            {
-                var match = Regex.Match(oe.Line, @"listening\s+on\s+http://[^:]+:(\d+)");
-                if (match.Success)
-                    startup.DetectedPort = int.Parse(match.Groups[1].Value);
-            }
+            if (!startup.DetectedPort.HasValue)
+                startup.DetectedPort = _outputHandler.TryParseListeningPort(oe.Line);
 
             startup.RecentLines.Add(oe.Line);
             if (startup.RecentLines.Count > 10)

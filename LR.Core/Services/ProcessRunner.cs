@@ -34,6 +34,9 @@ public static class ProcessRunner
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // No one can answer a prompt from a background build — closed stdin makes a tool that
+            // unexpectedly asks (git credentials, a setup question) fail fast instead of hanging.
+            RedirectStandardInput = true,
         };
 
         string? tempScript = null;
@@ -62,6 +65,7 @@ public static class ProcessRunner
         process.ErrorDataReceived += (_, e) => { if (e.Data is not null) outputChannel.Writer.TryWrite(e.Data); };
 
         process.Start();
+        process.StandardInput.Close();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 

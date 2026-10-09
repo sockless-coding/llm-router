@@ -17,29 +17,21 @@ public class ServerCreateModel : PageModel
     public ServerCreateViewModel ViewModel { get; set; } = new();
 
     /// <summary>
-    /// Available server engines for the dropdown.
+    /// Available server engines for the dropdown — only engines with a registered provider.
     /// </summary>
-    public List<EngineOption> Engines { get; }
+    public IReadOnlyList<IEngineDescriptor> Engines { get; }
 
     /// <summary>
-    /// Ready managed llama.cpp builds the new server can be bound to.
+    /// Ready managed installs (of every engine) the new server can be bound to — the form only
+    /// shows the selected engine's.
     /// </summary>
-    public List<LlamaCppBuild> AvailableBuilds { get; set; } = new();
+    public List<EngineBuild> AvailableBuilds { get; set; } = new();
 
-    public ServerCreateModel(IServerManager serverManager, LRDbContext context)
+    public ServerCreateModel(IServerManager serverManager, LRDbContext context, IEngineCatalog engines)
     {
         _serverManager = serverManager;
         _context = context;
-        Engines = Enum.GetValues<ServerEngine>().Select(e => new EngineOption
-        {
-            Value = e.ToString(),
-            Label = e switch
-            {
-                ServerEngine.LlamaCpp => "llama.cpp",
-                ServerEngine.Ollama => "Ollama",
-                _ => e.ToString()
-            }
-        }).ToList();
+        Engines = engines.All;
     }
 
     public async Task OnGetAsync()
@@ -54,40 +46,51 @@ public class ServerCreateModel : PageModel
         if (!ModelState.IsValid)
             return Page();
 
-        var engine = Enum.Parse<ServerEngine>(ViewModel.Engine, ignoreCase: true);
-
-        LlamaCppBuild? boundBuild = null;
-        if (engine == ServerEngine.LlamaCpp && ViewModel.EngineBuildId is { } buildId)
+        var descriptor = Enum.TryParse<ServerEngine>(ViewModel.Engine, ignoreCase: true, out var engine)
+            ? Engines.FirstOrDefault(e => e.Engine == engine)
+            : null;
+        if (descriptor is null)
         {
-            boundBuild = await _context.LlamaCppBuilds.FindAsync(buildId);
-            if (boundBuild is null)
+            ModelState.AddModelError(nameof(ViewModel.Engine), "Select a supported server engine.");
+            return Page();
+        }
+
+        EngineBuild? boundBuild = null;
+        if (descriptor.SupportsManagedBuilds && ViewModel.EngineBuildId is { } buildId)
+        {
+            boundBuild = await _context.EngineBuilds.FindAsync(buildId);
+            if (boundBuild is null || boundBuild.Engine != engine)
             {
-                ModelState.AddModelError(nameof(ViewModel.EngineBuildId), "The selected build no longer exists.");
+                ModelState.AddModelError(nameof(ViewModel.EngineBuildId), boundBuild is null
+                    ? "The selected build no longer exists."
+                    : $"That install isn't a {descriptor.DisplayName} install.");
                 return Page();
             }
         }
 
         // A managed build supplies the folder path; otherwise a manually-entered one is required.
-        if (engine == ServerEngine.LlamaCpp && boundBuild is null)
+        if (boundBuild is null)
         {
-            if (string.IsNullOrWhiteSpace(ViewModel.LlamaCppExecutableFolderPath))
+            if (string.IsNullOrWhiteSpace(ViewModel.InstallFolderPath))
             {
-                ModelState.AddModelError(nameof(ViewModel.LlamaCppExecutableFolderPath), "Select a managed build or enter a folder path for llama.cpp.");
+                ModelState.AddModelError(nameof(ViewModel.InstallFolderPath), descriptor.SupportsManagedBuilds
+                    ? $"Select a managed build or enter a folder path for {descriptor.DisplayName}."
+                    : $"Enter the folder path for {descriptor.DisplayName}.");
                 return Page();
             }
 
-            if (!Directory.Exists(ViewModel.LlamaCppExecutableFolderPath))
+            if (descriptor.ValidateInstallFolder(ViewModel.InstallFolderPath) is { } folderError)
             {
-                ModelState.AddModelError(nameof(ViewModel.LlamaCppExecutableFolderPath), $"The folder '{ViewModel.LlamaCppExecutableFolderPath}' does not exist.");
+                ModelState.AddModelError(nameof(ViewModel.InstallFolderPath), folderError);
                 return Page();
             }
         }
 
         var configData = new BackendConfigData
         {
-            LlamaCppExecutableFolderPath = boundBuild is not null
+            InstallFolderPath = boundBuild is not null
                 ? boundBuild.InstallPath
-                : string.IsNullOrWhiteSpace(ViewModel.LlamaCppExecutableFolderPath) ? null : ViewModel.LlamaCppExecutableFolderPath,
+                : string.IsNullOrWhiteSpace(ViewModel.InstallFolderPath) ? null : ViewModel.InstallFolderPath,
             CompanionAppPath = string.IsNullOrWhiteSpace(ViewModel.CompanionAppPath) ? null : ViewModel.CompanionAppPath,
             EnvironmentSetupCommand = string.IsNullOrWhiteSpace(ViewModel.EnvironmentSetupCommand) ? null : ViewModel.EnvironmentSetupCommand,
             EngineBuildId = boundBuild?.Id,
@@ -101,7 +104,7 @@ public class ServerCreateModel : PageModel
 
     private async Task LoadAvailableBuildsAsync()
     {
-        AvailableBuilds = await _context.LlamaCppBuilds
+        AvailableBuilds = await _context.EngineBuilds
             .Where(b => b.Status == EngineBuildStatus.Ready)
             .OrderByDescending(b => b.CreatedAt)
             .ToListAsync();
@@ -111,20 +114,14 @@ public class ServerCreateModel : PageModel
 public class ServerCreateViewModel
 {
     public string Name { get; set; } = "";
-    public string Engine { get; set; } = "LlamaCpp";
+    public string Engine { get; set; } = nameof(ServerEngine.LlamaCpp);
     public int? Port { get; set; }
 
-    // --- llama.cpp-specific configuration ---
+    // --- Engine configuration ---
 
-    /// <summary>Optional managed build to bind this server to (auto-fills the folder path).</summary>
+    /// <summary>Optional managed build to bind this server to (auto-fills the folder path; llama.cpp only).</summary>
     public Guid? EngineBuildId { get; set; }
-    public string? LlamaCppExecutableFolderPath { get; set; }
+    public string? InstallFolderPath { get; set; }
     public string? CompanionAppPath { get; set; }
     public string? EnvironmentSetupCommand { get; set; }
-}
-
-public class EngineOption
-{
-    public string Value { get; set; } = "";
-    public string Label { get; set; } = "";
 }
