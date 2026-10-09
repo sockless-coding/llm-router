@@ -53,9 +53,11 @@ public sealed class StrataInstallTests : IDisposable
         Write("CMakeLists.txt", $"cmake_minimum_required(VERSION 3.24)\nproject(strata VERSION {version} LANGUAGES C CXX)\n");
     }
 
+    /// <summary>What a release install leaves behind (.venv + an engine), plus run configs a preparation wrote.</summary>
     private void RunSetup()
     {
         Write(StrataLayout.PythonRelativePath);
+        Write(Path.Combine("engine", StrataLayout.EngineExecutable));
         Write(Path.Combine("engine", "BUILD.json"), """{ "version": "0.1.39" }""");
         Write("strata-coder.json", """{ "exe": "engine/strata.exe", "args": [], "model_name": "Coder" }""");
         Write("strata-amd.json", """{ "exe": "engine/strata.exe", "args": [], "backend": "hip" }""");
@@ -97,6 +99,11 @@ public sealed class StrataInstallTests : IDisposable
         Assert.Equal(["strata-amd.json", "strata-coder.json"], configs.Select(c => c.FileName));
         Assert.Equal("Coder", configs.Single(c => c.FileName == "strata-coder.json").ModelName);
         Assert.Equal("amd", configs.Single(c => c.FileName == "strata-amd.json").ModelName);
+        Assert.Equal(StrataEngineVariant.Cuda, StrataLayout.InstalledEngine(_root));
+        Assert.Equal(BackendType.Cuda, StrataInstallInfo.DetectBackend(_root));
+
+        Write(Path.Combine("engine", "BUILD.json"), """{ "version": "0.1.39", "backend": "hip" }""");
+        Assert.Equal(StrataEngineVariant.Hip, StrataLayout.InstalledEngine(_root));
         Assert.Equal(BackendType.Hip, StrataInstallInfo.DetectBackend(_root));
     }
 
@@ -168,6 +175,70 @@ public sealed class StrataInstallTests : IDisposable
 
         Assert.Equal("v0.1.40.4", build.VersionTag);
         Assert.Equal(EngineBuildStatus.Ready, build.Status);
+    }
+
+    [Fact]
+    public void PresetSettings_EmptyTakesRecommendationsAndNeverStarts()
+    {
+        Assert.Equal(["--yes", "--no-start", "--no-browser"],
+            StrataPresetSettings.SetupArgs(new ModelPreset(), engine: StrataEngineVariant.Cuda));
+    }
+
+    [Fact]
+    public void PresetSettings_BecomeSetupFlags()
+    {
+        var preset = new ModelPreset
+        {
+            EngineSettings = new()
+            {
+                [StrataPresetSettings.Context] = "65536",
+                [StrataPresetSettings.Gpu] = "1",
+                [StrataPresetSettings.Vision] = "gpu",
+                [StrataPresetSettings.Kv] = "k8v4",
+                [StrataPresetSettings.LowRam] = "resident",
+                [StrataPresetSettings.Parallel] = "2",
+                ["llamacpp.other"] = "ignored",
+            },
+        };
+
+        Assert.Equal(["--yes", "--no-start", "--no-browser", "--cuda", "12", "--context", "65536", "--gpu", "1",
+            "--vision", "gpu", "--kv", "k8v4", "--low-ram", "resident", "--parallel", "2"],
+            StrataPresetSettings.SetupArgs(preset, StrataEngineVariant.Cuda12));
+    }
+
+    [Theory]
+    [InlineData(StrataPresetSettings.Context, "lots")]
+    [InlineData(StrataPresetSettings.Gpu, "-1")]
+    [InlineData(StrataPresetSettings.Vision, "both")]
+    [InlineData(StrataPresetSettings.Kv, "fp16")]
+    public void PresetSettings_RejectWhatStrataDoesNotAccept(string key, string value)
+    {
+        var preset = new ModelPreset { EngineSettings = new() { [key] = value } };
+        Assert.Throws<InvalidOperationException>(() => StrataPresetSettings.SetupArgs(preset, null));
+    }
+
+    [Theory]
+    [InlineData("strata-windows-x64.zip", StrataEngineVariant.Cuda)]
+    [InlineData("strata-windows-x64-cuda12.zip", StrataEngineVariant.Cuda12)]
+    [InlineData("strata-windows-x64-hip.zip", StrataEngineVariant.Hip)]
+    [InlineData("strata-source.zip", null)]
+    public void EngineAssets(string asset, StrataEngineVariant? variant)
+    {
+        if (!OperatingSystem.IsWindows()) asset = asset.Replace("windows", "linux");
+        Assert.Equal(variant, StrataLayout.VariantOfAsset(asset));
+    }
+
+    [Fact]
+    public void Cuda12EngineIsFoundInItsOwnFolder()
+    {
+        CreateClone();
+        Write(StrataLayout.PythonRelativePath);
+        Write(Path.Combine("engine-cuda12", StrataLayout.EngineExecutable));
+        Write(Path.Combine("engine-cuda12", "BUILD.json"), """{ "version": "0.1.41" }""");
+
+        Assert.Equal(StrataEngineVariant.Cuda12, StrataLayout.InstalledEngine(_root));
+        Assert.Equal("0.1.41", StrataLayout.ReadEngineVersion(_root));
+        Assert.True(StrataLayout.IsSetUp(_root));
     }
 
     [Theory]

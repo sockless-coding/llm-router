@@ -178,6 +178,14 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     /// </summary>
     protected virtual TimeSpan StartupTimeout => TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// Runs before every start, ahead of <see cref="BuildLaunchSpec"/>: an engine that must prepare
+    /// something for a preset first (and can skip it when that's already done) does it here, reporting
+    /// through <paramref name="onProgress"/>. Not bounded by <see cref="StartupTimeout"/>.
+    /// </summary>
+    protected virtual Task PrepareAsync(ModelPreset preset, Func<StartupProgressEvent, Task>? onProgress, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
+
     /// <summary>The server instance this provider manages, once <see cref="SetServerInstance"/> has run.</summary>
     protected ServerInstance? ServerInstance => _serverInstance;
 
@@ -216,6 +224,9 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             Port = port.Value;
             _processManager.Port = Port;
         }
+
+        // Engine-specific one-time work (e.g. preparing a model for the engine) before anything is launched.
+        await PrepareAsync(preset, onProgress, cancellationToken);
 
         var launch = BuildLaunchSpec(preset);
         _processManager.StartupTimeout = StartupTimeout;
@@ -487,7 +498,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     /// Uses IServiceScopeFactory to resolve IServerLogService in a new scope, avoiding
     /// the captured-dependency anti-pattern of injecting scoped services into singletons.
     /// </summary>
-    private async Task LogProviderMessage(ServerLogLevel level, string message)
+    protected async Task LogProviderMessage(ServerLogLevel level, string message)
     {
         // Log to console via ILogger (always works)
         var logLevel = level switch

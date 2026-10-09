@@ -14,6 +14,7 @@ public static class PresetViewModelMapper
         viewModel.ServerInstanceId = preset.ServerInstanceId;
         viewModel.Name = preset.Name;
         viewModel.ModelId = preset.ModelId;
+        viewModel.EngineSettings = new Dictionary<string, string>(preset.EngineSettings);
         // Only show the raw path in the manual-override field when there's no registry link —
         // otherwise it'd look like an override is active when the model dropdown is really driving it.
         viewModel.ModelPath = preset.ModelId.HasValue ? "" : preset.ModelPath;
@@ -180,6 +181,10 @@ public static class PresetViewModelMapper
     {
         entity.ServerInstanceId = viewModel.ServerInstanceId;
         entity.Name = viewModel.Name;
+        // Blank means "the engine's default": only settings actually set are stored.
+        entity.EngineSettings = viewModel.EngineSettings
+            .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
+            .ToDictionary(kv => kv.Key, kv => kv.Value.Trim());
         // A filled-in manual override always wins over a selected registry model.
         entity.ModelId = string.IsNullOrWhiteSpace(viewModel.ModelPath) ? viewModel.ModelId : null;
         entity.ModelPath = viewModel.ModelPath ?? "";

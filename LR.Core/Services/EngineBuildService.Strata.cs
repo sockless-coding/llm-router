@@ -1,3 +1,6 @@
+using System.IO.Compression;
+using System.Security.Cryptography;
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -9,35 +12,39 @@ using LR.Core.Services.EngineBuilds;
 namespace LR.Core.Services;
 
 /// <summary>
-/// Strata installs. A Strata install is a git checkout of its repository that Strata's own setup
-/// prepares and updates, and the router drives the same commands Strata's scripts run. Two kinds:
+/// Strata installs: git checkouts of Strata's repository holding its Python frontend, its <c>.venv</c>
+/// and an engine build — but no model. Models come from the model library and are prepared for
+/// Strata when a preset first starts (see the Strata provider). Two kinds:
 /// <list type="bullet">
-/// <item>a checkout following <c>main</c> (<see cref="EngineBuildSource.GitCheckout"/>) — updated like
-/// <c>UPDATE.bat</c>/<c>update.sh</c>: <c>git pull --ff-only</c>, then <c>setup.py --update</c>;</item>
-/// <item>a release install (<see cref="EngineBuildSource.OfficialRelease"/>) pinned to a release tag in
-/// its own versioned folder — updated by checking out a newer tag, then <c>setup.py --update</c>, which
-/// installs that release's ready-made engine.</item>
+/// <item>a release install (<see cref="EngineBuildSource.OfficialRelease"/>): one release tag with one of
+/// its ready-made engine builds (CUDA, CUDA 12, AMD), side by side in its own folder like a llama.cpp
+/// release — updated by checking out a newer tag and installing that release's same engine build;</item>
+/// <item>an existing checkout the user set up themselves (<see cref="EngineBuildSource.GitCheckout"/>),
+/// following <c>main</c> — updated like Strata's <c>UPDATE.bat</c>: <c>git pull --ff-only</c>, then
+/// <c>setup.py --update</c>.</item>
 /// </list>
-/// <c>setup.py --update</c> never asks and never touches the model files. A new release install is set
-/// up the way Strata sets up a newly unpacked copy: like the most recent earlier install on this PC
-/// (same model and settings, model files reused from the shared <c>Strata-data</c> folder) — only when
-/// there is none does the user have to run Strata's interactive first-time setup.
 /// </summary>
 public partial class EngineBuildService
 {
     /// <summary>
-    /// Installs Strata release <paramref name="releaseTag"/> (null = latest) into
-    /// <c>&lt;install root&gt;/strata-&lt;tag&gt;</c> on a background task: clones it at that tag, creates its
-    /// Python environment, and runs Strata's setup unattended (see the class summary). Returns the new row's ID.
+    /// Installs Strata release <paramref name="releaseTag"/> (null = latest) with the engine build in
+    /// release asset <paramref name="assetName"/> into <c>&lt;install root&gt;/strata-&lt;tag&gt;-&lt;engine&gt;</c>
+    /// on a background task: clones the release, creates its <c>.venv</c> with Strata's pinned Python
+    /// packages, and installs the engine (checked against GitHub's SHA-256). Returns the new row's ID.
     /// </summary>
-    public async Task<Guid> StartStrataReleaseInstallAsync(string? releaseTag, string? name)
+    public async Task<Guid> StartStrataReleaseInstallAsync(string? releaseTag, string? assetName, string? name)
     {
         var settings = await _settings.GetAsync();
         if (string.IsNullOrWhiteSpace(settings.InstallRootFolder))
             throw new InvalidOperationException("Set an engine install root folder (Engine Build Settings) before installing Strata releases.");
 
-        var tag = await ResolveStrataReleaseTagAsync(releaseTag);
-        var folder = Path.GetFullPath(Path.Combine(settings.InstallRootFolder, $"strata-{tag}"));
+        var release = await GetStrataReleaseAsync(releaseTag);
+        var tag = release.TagName;
+        var asset = PickStrataEngineAsset(release, assetName);
+        var variant = asset is null ? (StrataEngineVariant?)null : StrataLayout.VariantOfAsset(asset.Name);
+
+        var folderName = variant is { } v ? $"strata-{tag}-{v.ToString().ToLowerInvariant()}" : $"strata-{tag}";
+        var folder = Path.GetFullPath(Path.Combine(settings.InstallRootFolder, folderName));
         if (Directory.Exists(folder) && Directory.EnumerateFileSystemEntries(folder).Any())
             throw new InvalidOperationException($"'{folder}' already exists. Delete it, or add it as an existing checkout.");
 
@@ -51,10 +58,10 @@ public partial class EngineBuildService
             var build = new EngineBuild
             {
                 Id = Guid.NewGuid(),
-                Name = string.IsNullOrWhiteSpace(name) ? $"Strata {tag}" : name.Trim(),
+                Name = string.IsNullOrWhiteSpace(name) ? StrataReleaseName(tag, variant) : name.Trim(),
                 Engine = ServerEngine.Strata,
                 Source = EngineBuildSource.OfficialRelease,
-                BackendType = BackendType.Cuda,
+                BackendType = variant == StrataEngineVariant.Hip ? BackendType.Hip : BackendType.Cuda,
                 InstallPath = folder,
                 VersionTag = tag,
                 Status = EngineBuildStatus.Downloading,
@@ -65,75 +72,135 @@ public partial class EngineBuildService
             buildId = build.Id;
         }
 
-        StartJob(buildId, ct => RunStrataJobAsync(buildId, folder, WorkspaceRoot(settings), isNewInstall: true, async (sink, jobCt) =>
+        var workspaceRoot = WorkspaceRoot(settings);
+        StartJob(buildId, ct => RunStrataJobAsync(buildId, folder, workspaceRoot, isNewInstall: true, async (sink, jobCt) =>
         {
             await sink.PhaseAsync("git", $"Cloning Strata {tag} into {folder}…");
             await RunCheckedAsync(sink, "git", "git", ["clone", "-c", "core.longpaths=true", "--branch", tag, StrataLayout.RepoUrl, folder],
                 settings.InstallRootFolder, jobCt);
 
-            await sink.PhaseAsync("python", "Creating Strata's Python environment (.venv)…");
-            var basePython = await FindBasePythonAsync(folder, jobCt)
-                ?? throw new InvalidOperationException(
-                    "No Python 3.10+ found (no other Strata install, and neither 'py -3' nor 'python' on PATH). Install Python, or run " +
-                    $"{StrataLayout.FirstTimeSetupCommand} in {folder}, which installs Python for you.");
-            await RunCheckedAsync(sink, "python", basePython.Executable,
-                [.. basePython.PrefixArgs, "-m", "venv", Path.Combine(folder, ".venv")], folder, jobCt);
+            await EnsureStrataVenvAsync(sink, folder, jobCt);
+            await InstallStrataPackagesAsync(sink, folder, jobCt);
 
-            // A setup that can't finish on its own (no earlier install to copy, or it needs an answer)
-            // leaves a good checkout behind: the row ends up NeedsSetup, and the log says why.
-            await sink.PhaseAsync("setup", "Setting Strata up like your most recent install (same model and settings, model files reused, this release's engine)…");
-            try
-            {
-                await RunCheckedAsync(sink, "setup", StrataLayout.PythonPath(folder), ["-u", "-c", UnattendedSetupDriver], folder, jobCt,
-                    displayCommand: "Strata's setup (unattended)");
-            }
-            catch (InvalidOperationException ex)
-            {
-                await sink.LineAsync("setup", $"✖ Strata's setup couldn't finish on its own: {ex.Message}");
-                await sink.LineAsync("setup", $"  Run {StrataLayout.FirstTimeSetupCommand} in {folder} to answer its questions, then press Refresh.");
-            }
+            if (asset is not null && variant is { } engineVariant)
+                await InstallStrataEngineAsync(sink, buildId, folder, asset, engineVariant, workspaceRoot, jobCt);
+            else
+                await sink.LineAsync("engine", "No ready-made engine for this OS: Strata's setup compiles one the first time a model is prepared.");
         }, ct, finalize: build => SetStrataRelease(build, tag)));
         return buildId;
     }
 
-    /// <summary>
-    /// Runs Strata's <c>setup.py</c> as a plain start of a new copy would — which, for a folder with no
-    /// model yet and an earlier install on this PC, sets it up like that install without asking — but
-    /// with its final step (starting the model server) replaced by a no-op. With no earlier install,
-    /// setup's first question meets the closed stdin and it exits with an error instead of hanging.
-    /// </summary>
-    private const string UnattendedSetupDriver =
-        "import sys\n" +
-        "sys.argv = ['setup.py']\n" +
-        "sys.path.insert(0, '.')\n" +
-        "import setup\n" +
-        "if not callable(getattr(setup, 'start', None)):\n" +
-        "    sys.exit('this Strata version has no setup.start(): run its setup yourself')\n" +
-        "setup.start = lambda *a, **k: 0\n" +
-        "sys.exit(setup.main())\n";
+    private static string StrataReleaseName(string tag, StrataEngineVariant? variant) =>
+        variant is { } v ? $"Strata {tag} ({StrataLayout.Describe(v)})" : $"Strata {tag}";
 
     /// <summary>Records <paramref name="tag"/> as the release <paramref name="build"/> is on, renaming a default-named install.</summary>
     private static void SetStrataRelease(EngineBuild build, string tag)
     {
-        if (build.VersionTag is { } old && build.Name == $"Strata {old}")
-            build.Name = $"Strata {tag}";
+        if (build.VersionTag is { } old && build.Name.StartsWith($"Strata {old}", StringComparison.Ordinal))
+            build.Name = $"Strata {tag}" + build.Name[$"Strata {old}".Length..];
         build.VersionTag = tag;
     }
 
-    /// <summary><paramref name="requested"/> checked against Strata's tag format, or the latest release's tag when null.</summary>
-    private async Task<string> ResolveStrataReleaseTagAsync(string? requested)
+    /// <summary>Release <paramref name="requested"/> (checked against Strata's tag format), or the latest release.</summary>
+    private async Task<GitHubRelease> GetStrataReleaseAsync(string? requested)
     {
-        if (!string.IsNullOrWhiteSpace(requested))
+        if (string.IsNullOrWhiteSpace(requested))
+            return await _github.GetLatestReleaseAsync(StrataLayout.Repo)
+                ?? throw new InvalidOperationException("Could not reach GitHub to look up the latest Strata release.");
+
+        var tag = requested.Trim();
+        if (!StrataLayout.IsReleaseTag(tag))
+            throw new InvalidOperationException($"'{tag}' isn't a Strata release tag (like v0.1.41).");
+        return await _github.GetReleaseByTagAsync(StrataLayout.Repo, tag)
+            ?? throw new InvalidOperationException($"Strata release {tag} wasn't found on GitHub.");
+    }
+
+    /// <summary>
+    /// The release's engine asset called <paramref name="assetName"/>, which must be one of this OS's
+    /// ready-made engines. On Windows one is required; elsewhere there are none and null is returned.
+    /// </summary>
+    private static GitHubReleaseAsset? PickStrataEngineAsset(GitHubRelease release, string? assetName)
+    {
+        var engines = release.Assets.Where(a => StrataLayout.VariantOfAsset(a.Name) is not null).ToList();
+        if (string.IsNullOrWhiteSpace(assetName))
         {
-            var tag = requested.Trim();
-            if (!StrataLayout.IsReleaseTag(tag))
-                throw new InvalidOperationException($"'{tag}' isn't a Strata release tag (like v0.1.41).");
-            return tag;
+            if (engines.Count == 0)
+                return null;
+            throw new InvalidOperationException("Pick which engine build to install (CUDA, CUDA 12 or AMD).");
         }
 
-        var latest = await _github.GetLatestReleaseAsync(StrataLayout.Repo)
-            ?? throw new InvalidOperationException("Could not reach GitHub to look up the latest Strata release.");
-        return latest.TagName;
+        return engines.FirstOrDefault(a => string.Equals(a.Name, assetName, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException($"Strata {release.TagName} has no engine build '{assetName}' for this OS.");
+    }
+
+    /// <summary>
+    /// Downloads a ready-made engine, checks it against the SHA-256 GitHub published for it, and
+    /// installs it where Strata's setup expects it (<c>engine/</c>, or <c>engine-cuda12/</c>) — keeping
+    /// the engine it replaces in <c>.previous</c>, as Strata does, so it can be rolled back.
+    /// </summary>
+    private async Task InstallStrataEngineAsync(
+        BuildProgressSink sink, Guid buildId, string checkout, GitHubReleaseAsset asset, StrataEngineVariant variant,
+        string workspaceRoot, CancellationToken ct)
+    {
+        var workRoot = Path.Combine(workspaceRoot, ".work", buildId.ToString("N"));
+        var archive = Path.Combine(workRoot, "download", asset.Name);
+        Directory.CreateDirectory(Path.GetDirectoryName(archive)!);
+
+        await sink.PhaseAsync("download", $"Downloading the {StrataLayout.Describe(variant)} engine ({asset.Name})…");
+        await _github.DownloadAssetAsync(asset.BrowserDownloadUrl, archive, sink.AsProgress(), ct);
+
+        if (asset.Digest is { } digest && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+        {
+            await using var stream = File.OpenRead(archive);
+            var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct));
+            if (!string.Equals(actual, digest["sha256:".Length..], StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"{asset.Name} doesn't match the SHA-256 GitHub published for it — not installed.");
+            await sink.LineAsync("download", $"✔ SHA-256 matches GitHub's ({digest["sha256:".Length..][..12]}…)");
+        }
+        else
+        {
+            await sink.LineAsync("download", "GitHub published no checksum for this file; installing it unverified.");
+        }
+
+        var unpacked = Path.Combine(workRoot, "unpacked");
+        TryDelete(unpacked);
+        ZipFile.ExtractToDirectory(archive, unpacked);
+        if (!File.Exists(Path.Combine(unpacked, StrataLayout.EngineExecutable)) || !File.Exists(Path.Combine(unpacked, "BUILD.json")))
+            throw new InvalidOperationException($"{asset.Name} has no {StrataLayout.EngineExecutable} / BUILD.json at its top level.");
+
+        var engineDir = Path.Combine(checkout, StrataLayout.EngineFolder(variant));
+        var previous = Path.Combine(engineDir, ".previous");
+        Directory.CreateDirectory(engineDir);
+        TryDelete(previous);
+        var old = Directory.EnumerateFileSystemEntries(engineDir).ToList();
+        if (old.Count > 0)
+        {
+            Directory.CreateDirectory(previous);
+            foreach (var entry in old)
+                MoveEntry(entry, Path.Combine(previous, Path.GetFileName(entry)));
+        }
+        foreach (var entry in Directory.EnumerateFileSystemEntries(unpacked))
+            MoveEntry(entry, Path.Combine(engineDir, Path.GetFileName(entry)));
+
+        TryDelete(unpacked);
+        TryDelete(Path.GetDirectoryName(archive)!);
+        await sink.LineAsync("engine", $"✔ engine {StrataLayout.ReadEngineVersion(checkout) ?? "?"} installed in {engineDir}");
+    }
+
+    private static void MoveEntry(string source, string destination)
+    {
+        if (Directory.Exists(source)) Directory.Move(source, destination);
+        else File.Move(source, destination, overwrite: true);
+    }
+
+    /// <summary>Installs Strata's pinned Python packages (<c>requirements.txt</c>) into its <c>.venv</c>, as its setup does.</summary>
+    private static async Task InstallStrataPackagesAsync(BuildProgressSink sink, string checkout, CancellationToken ct)
+    {
+        if (!File.Exists(Path.Combine(checkout, "requirements.txt")))
+            return;   // older releases: their setup installs the packages the first time a model is prepared
+        await sink.PhaseAsync("python", "Installing Strata's Python packages (requirements.txt)…");
+        await RunCheckedAsync(sink, "python", StrataLayout.PythonPath(checkout),
+            ["-m", "pip", "install", "--disable-pip-version-check", "-r", "requirements.txt"], checkout, ct);
     }
 
     private sealed record PythonCommand(string Executable, IReadOnlyList<string> PrefixArgs);
@@ -182,6 +249,20 @@ public partial class EngineBuildService
         return null;
     }
 
+    /// <summary>Creates the checkout's <c>.venv</c> (as <c>START-HERE.bat</c> would) unless it already has one.</summary>
+    private async Task EnsureStrataVenvAsync(BuildProgressSink sink, string folder, CancellationToken ct)
+    {
+        if (File.Exists(StrataLayout.PythonPath(folder)))
+            return;
+
+        await sink.PhaseAsync("python", "Creating Strata's Python environment (.venv)…");
+        var basePython = await FindBasePythonAsync(folder, ct)
+            ?? throw new InvalidOperationException(
+                "No Python 3.10+ found (no other Strata install, and neither 'py -3' nor 'python' on PATH). Install Python 3.10 or newer.");
+        await RunCheckedAsync(sink, "python", basePython.Executable,
+            [.. basePython.PrefixArgs, "-m", "venv", Path.Combine(folder, ".venv")], folder, ct);
+    }
+
     /// <summary>Starts tracking an existing Strata checkout. Returns the new row's ID.</summary>
     public async Task<Guid> RegisterStrataCheckoutAsync(string folder, string? name, CancellationToken ct = default)
     {
@@ -215,55 +296,6 @@ public partial class EngineBuildService
         return build.Id;
     }
 
-    /// <summary>
-    /// Clones Strata into <c>&lt;install root&gt;/&lt;folderName&gt;</c> on a background task. The
-    /// clone ends up <see cref="EngineBuildStatus.NeedsSetup"/> until the user runs Strata's own
-    /// first-time setup there. Returns the new row's ID.
-    /// </summary>
-    public async Task<Guid> StartStrataCloneAsync(string? folderName, string? name)
-    {
-        var settings = await _settings.GetAsync();
-        if (string.IsNullOrWhiteSpace(settings.InstallRootFolder))
-            throw new InvalidOperationException("Set an engine install root folder (Engine Build Settings) before cloning Strata.");
-
-        folderName = string.IsNullOrWhiteSpace(folderName) ? "strata" : SanitizeFolder(folderName.Trim());
-        var folder = Path.GetFullPath(Path.Combine(settings.InstallRootFolder, folderName));
-        if (Directory.Exists(folder) && Directory.EnumerateFileSystemEntries(folder).Any())
-            throw new InvalidOperationException($"'{folder}' already exists. Pick another folder name, or add it as an existing checkout.");
-
-        Guid buildId;
-        using (var scope = _scopeFactory.CreateScope())
-        {
-            var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
-            if (await context.EngineBuilds.AnyAsync(b => b.InstallPath == folder))
-                throw new InvalidOperationException($"'{folder}' is already tracked.");
-
-            var build = new EngineBuild
-            {
-                Id = Guid.NewGuid(),
-                Name = string.IsNullOrWhiteSpace(name) ? $"Strata ({folderName})" : name.Trim(),
-                Engine = ServerEngine.Strata,
-                Source = EngineBuildSource.GitCheckout,
-                BackendType = BackendType.Cuda,
-                InstallPath = folder,
-                Status = EngineBuildStatus.Downloading,
-                StatusMessage = "Cloning…",
-            };
-            context.EngineBuilds.Add(build);
-            await context.SaveChangesAsync();
-            buildId = build.Id;
-        }
-
-        var workspaceRoot = WorkspaceRoot(settings);
-        StartJob(buildId, ct => RunStrataJobAsync(buildId, folder, workspaceRoot, isNewInstall: true, async (sink, jobCt) =>
-        {
-            await sink.PhaseAsync("git", $"Cloning {StrataLayout.RepoUrl} into {folder}…");
-            await RunCheckedAsync(sink, "git", "git", ["clone", "-c", "core.longpaths=true", "--branch", StrataLayout.Branch, StrataLayout.RepoUrl, folder],
-                settings.InstallRootFolder, jobCt);
-        }, ct));
-        return buildId;
-    }
-
     /// <summary>Runs <c>setup.py --rollback-engine</c>: the engine kept from before the last update becomes the installed one again.</summary>
     public async Task<Guid> StartStrataRollbackAsync(Guid buildId)
     {
@@ -284,12 +316,13 @@ public partial class EngineBuildService
         StartJob(buildId, ct => RunStrataJobAsync(buildId, installPath, WorkspaceRoot(settings), isNewInstall: false, async (sink, jobCt) =>
         {
             await sink.PhaseAsync("setup", "Restoring the previous engine (setup.py --rollback-engine)…");
-            await RunStrataSetupAsync(sink, installPath, "--rollback-engine", jobCt);
+            await RunStrataSetupAsync(sink, installPath,
+                ["--rollback-engine", .. StrataLayout.SetupFlags(StrataLayout.InstalledEngine(installPath))], jobCt);
         }, ct));
         return buildId;
     }
 
-    /// <summary>Re-reads a Strata checkout's version, commit and setup state (e.g. after running Strata's own scripts by hand).</summary>
+    /// <summary>Re-reads a Strata checkout's version, commit and engine (e.g. after running Strata's own scripts by hand).</summary>
     public async Task RefreshStrataAsync(Guid buildId, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -300,19 +333,35 @@ public partial class EngineBuildService
     }
 
     /// <summary>
-    /// The in-place update behind <see cref="StartUpdateAsync"/> for a Strata install: to
-    /// <paramref name="releaseTag"/> for a release install, else to the newest <c>main</c>.
+    /// The in-place update behind <see cref="StartUpdateAsync"/> for a Strata install. A release
+    /// install moves to <paramref name="releaseTag"/>: that tag's code and packages, and the same engine
+    /// build from that release. A checkout following <c>main</c> pulls and runs Strata's own
+    /// <c>setup.py --update</c>, which updates its engine.
     /// </summary>
     private Task RunStrataUpdateAsync(Guid buildId, string checkout, string workspaceRoot, string? releaseTag, CancellationToken ct) =>
         RunStrataJobAsync(buildId, checkout, workspaceRoot, isNewInstall: false, async (sink, jobCt) =>
         {
             if (releaseTag is not null)
             {
+                var variant = StrataLayout.InstalledEngine(checkout);
+                var release = await GetStrataReleaseAsync(releaseTag);
+
                 await sink.PhaseAsync("git", $"Checking out Strata {releaseTag}…");
                 await RunCheckedAsync(sink, "git", "git", ["fetch", "--tags", "--force", "origin"], checkout, jobCt);
                 await RunCheckedAsync(sink, "git", "git", ["checkout", "--force", releaseTag], checkout, jobCt);
+                await InstallStrataPackagesAsync(sink, checkout, jobCt);
+
+                var asset = variant is { } v
+                    ? release.Assets.FirstOrDefault(a => StrataLayout.VariantOfAsset(a.Name) == v)
+                    : null;
+                if (asset is not null)
+                    await InstallStrataEngineAsync(sink, buildId, checkout, asset, variant!.Value, workspaceRoot, jobCt);
+                else
+                    await sink.LineAsync("engine", $"No ready-made {(variant is { } vv ? StrataLayout.Describe(vv) + " " : "")}engine in {releaseTag}: Strata's setup updates it when a model is next prepared.");
+                return;
             }
-            else if (StrataLayout.IsGitClone(checkout))
+
+            if (StrataLayout.IsGitClone(checkout))
             {
                 await sink.PhaseAsync("git", "Getting the newest Strata (git pull --ff-only)…");
                 await RunCheckedAsync(sink, "git", "git", ["pull", "--ff-only"], checkout, jobCt);
@@ -325,14 +374,14 @@ public partial class EngineBuildService
             }
 
             await sink.PhaseAsync("setup", "Updating the engine, Python packages and model configs (setup.py --update)…");
-            await RunStrataSetupAsync(sink, checkout, "--update", jobCt);
+            await RunStrataSetupAsync(sink, checkout, ["--update"], jobCt);
         }, ct, finalize: releaseTag is null ? null : build => SetStrataRelease(build, releaseTag));
 
     /// <summary>
     /// Runs a Strata job with the usual build bookkeeping: a <c>build.log</c> + live progress, the
-    /// row refreshed from disk afterwards. A failed job on an existing install leaves it
-    /// <see cref="EngineBuildStatus.Ready"/> with the failure noted (Strata's own steps keep the
-    /// previous engine when they fail); a failed clone is an <see cref="EngineBuildStatus.Error"/>.
+    /// row refreshed from disk afterwards. A failed job on an existing install leaves it as the folder
+    /// now is (Ready, normally) with the failure noted; a failed new install is an
+    /// <see cref="EngineBuildStatus.Error"/>.
     /// </summary>
     private async Task RunStrataJobAsync(
         Guid buildId, string checkout, string workspaceRoot, bool isNewInstall,
@@ -359,7 +408,7 @@ public partial class EngineBuildService
                 await context.SaveChangesAsync(ct);
                 summary = $"Strata {build.VersionTag ?? "(unknown version)"}" +
                     (build.CommitSha is { Length: >= 7 } sha ? $" at {sha[..7]}" : "") +
-                    (build.Status == EngineBuildStatus.NeedsSetup ? $" — now run {StrataLayout.FirstTimeSetupCommand} in {checkout} to finish setting it up." : ".");
+                    (StrataLayout.ReadEngineVersion(checkout) is { } ev ? $", engine {ev}" : "") + ".";
             }
 
             await sink.CompletedAsync(summary);
@@ -367,14 +416,14 @@ public partial class EngineBuildService
         catch (OperationCanceledException)
         {
             if (isNewInstall) await FailNewInstallAsync(buildId, checkout, "Install cancelled.");
-            else await RestoreReadyAfterFailedUpdateAsync(buildId, "Cancelled — Strata was left as it was.");
+            else await RestoreStrataAfterFailureAsync(buildId, "Cancelled — Strata was left as it was.");
             await sink.ErrorAsync("Cancelled");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Strata job for {BuildId} failed.", buildId);
             if (isNewInstall) await FailNewInstallAsync(buildId, checkout, ex.Message);
-            else await RestoreReadyAfterFailedUpdateAsync(buildId, $"Last attempt failed: {ex.Message}");
+            else await RestoreStrataAfterFailureAsync(buildId, $"Last attempt failed: {ex.Message}");
             await sink.ErrorAsync(ex.Message);
         }
         finally
@@ -385,8 +434,8 @@ public partial class EngineBuildService
 
     /// <summary>
     /// A new install that failed: marks it <see cref="EngineBuildStatus.Error"/> and removes the
-    /// half-made folder so the install can simply be retried — unless Strata already put model files
-    /// in it (it does when it can't use a data folder next to it), which are never deleted.
+    /// half-made folder so the install can simply be retried — unless it somehow holds model data,
+    /// which is never deleted.
     /// </summary>
     private async Task FailNewInstallAsync(Guid buildId, string folder, string message)
     {
@@ -395,29 +444,45 @@ public partial class EngineBuildService
         await MarkErrorAsync(buildId, message);
     }
 
-    /// <summary>Runs Strata's <c>setup.py</c> with <paramref name="option"/> from its own <c>.venv</c>, unbuffered so its output streams into the log.</summary>
-    private static Task RunStrataSetupAsync(BuildProgressSink sink, string checkout, string option, CancellationToken ct)
+    /// <summary>
+    /// A job on an existing install failed: the folder stays usable (an engine is only replaced once
+    /// the new one is fully downloaded and verified; Strata's setup keeps its previous engine on a failed
+    /// update), so the row goes back to whatever the folder now is, with the failure noted.
+    /// </summary>
+    private async Task RestoreStrataAfterFailureAsync(Guid buildId, string message)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
+        var build = await context.EngineBuilds.FindAsync(buildId);
+        if (build is null) return;
+        await ApplyStrataStateAsync(build, CancellationToken.None);
+        build.StatusMessage = build.Status == EngineBuildStatus.NeedsSetup
+            ? $"{message} {build.StatusMessage}"
+            : message;
+        await context.SaveChangesAsync();
+    }
+
+    /// <summary>Runs Strata's <c>setup.py</c> from its own <c>.venv</c>, unbuffered so its output streams into the log.</summary>
+    private static Task RunStrataSetupAsync(BuildProgressSink sink, string checkout, IReadOnlyList<string> args, CancellationToken ct)
     {
         var python = StrataLayout.PythonPath(checkout);
         if (!File.Exists(python))
-            throw new InvalidOperationException(
-                $"Strata's Python environment is missing — run {StrataLayout.FirstTimeSetupCommand} in {checkout} once to set Strata up.");
+            throw new InvalidOperationException($"Strata's Python environment (.venv) is missing in {checkout}.");
 
-        return RunCheckedAsync(sink, "setup", python, ["-u", StrataLayout.SetupScript, option], checkout, ct);
+        return RunCheckedAsync(sink, "setup", python, ["-u", StrataLayout.SetupScript, .. args], checkout, ct);
     }
 
     private static async Task RunCheckedAsync(
-        BuildProgressSink sink, string phase, string executable, IReadOnlyList<string> args, string workingDirectory, CancellationToken ct,
-        string? displayCommand = null)
+        BuildProgressSink sink, string phase, string executable, IReadOnlyList<string> args, string workingDirectory, CancellationToken ct)
     {
         var result = await ProcessRunner.RunAsync(executable, args, workingDirectory, null, line => sink.LineAsync(phase, line), ct);
         if (result.Cancelled) throw new OperationCanceledException(ct);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(
-                $"{displayCommand ?? $"{Path.GetFileName(executable)} {string.Join(' ', args)}"} failed with exit code {result.ExitCode} (see the log above).");
+                $"{Path.GetFileName(executable)} {string.Join(' ', args)} failed with exit code {result.ExitCode} (see the log above).");
     }
 
-    /// <summary>Reads the checkout's version, commit, GPU backend and setup state onto <paramref name="build"/>.</summary>
+    /// <summary>Reads the checkout's version, commit, engine and readiness onto <paramref name="build"/>.</summary>
     private async Task ApplyStrataStateAsync(EngineBuild build, CancellationToken ct)
     {
         var checkout = build.InstallPath;
@@ -442,7 +507,9 @@ public partial class EngineBuildService
         else
         {
             build.Status = EngineBuildStatus.NeedsSetup;
-            build.StatusMessage = $"Run {StrataLayout.FirstTimeSetupCommand} in this folder to install Strata's engine and a model, then press Refresh.";
+            build.StatusMessage = File.Exists(StrataLayout.PythonPath(checkout))
+                ? "No Strata engine is installed in this folder. Install a Strata release from the Engines page instead (it comes with its engine)."
+                : "This folder has no Python environment (.venv) or engine yet. Install a Strata release from the Engines page instead.";
         }
     }
 

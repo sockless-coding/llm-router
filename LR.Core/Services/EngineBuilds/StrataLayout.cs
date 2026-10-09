@@ -37,11 +37,57 @@ public static partial class StrataLayout
         File.Exists(Path.Combine(folder, ServerScriptRelativePath)) && File.Exists(Path.Combine(folder, SetupScript));
 
     /// <summary>
-    /// True if Strata's setup has run there: its <c>.venv</c> exists and at least one model is set up
-    /// (a run config) — before that there's nothing a server could run.
+    /// True if the checkout can run: its <c>.venv</c> exists and an engine is installed. (On Linux there
+    /// are no ready-made engines; Strata's setup compiles one the first time a model is prepared.)
     /// </summary>
     public static bool IsSetUp(string folder) =>
-        IsCheckout(folder) && File.Exists(PythonPath(folder)) && FindRunConfigs(folder).Count > 0;
+        IsCheckout(folder) && File.Exists(PythonPath(folder)) && (InstalledEngine(folder) is not null || !OperatingSystem.IsWindows());
+
+    /// <summary>The engine executable's name on this OS.</summary>
+    public static string EngineExecutable => OperatingSystem.IsWindows() ? "strata.exe" : "strata";
+
+    /// <summary>
+    /// The engine build a release asset holds, by Strata's asset names: <c>strata-&lt;os&gt;-x64.zip</c> (CUDA),
+    /// <c>…-cuda12.zip</c> (the CUDA 12 build), <c>…-hip.zip</c> (AMD); null for anything else.
+    /// </summary>
+    public static StrataEngineVariant? VariantOfAsset(string assetName)
+    {
+        var os = OperatingSystem.IsWindows() ? "windows" : "linux";
+        if (string.Equals(assetName, $"strata-{os}-x64.zip", StringComparison.OrdinalIgnoreCase)) return StrataEngineVariant.Cuda;
+        if (string.Equals(assetName, $"strata-{os}-x64-cuda12.zip", StringComparison.OrdinalIgnoreCase)) return StrataEngineVariant.Cuda12;
+        if (string.Equals(assetName, $"strata-{os}-x64-hip.zip", StringComparison.OrdinalIgnoreCase)) return StrataEngineVariant.Hip;
+        return null;
+    }
+
+    /// <summary>The checkout folder an engine variant is installed in, where Strata's setup looks for it.</summary>
+    public static string EngineFolder(StrataEngineVariant variant) => variant == StrataEngineVariant.Cuda12 ? "engine-cuda12" : "engine";
+
+    /// <summary>The engine installed in <paramref name="checkout"/>, if any (<c>engine/</c> first, as Strata's setup prefers it).</summary>
+    public static StrataEngineVariant? InstalledEngine(string checkout)
+    {
+        if (File.Exists(Path.Combine(checkout, "engine", EngineExecutable)))
+            return string.Equals(ReadBuildInfo(Path.Combine(checkout, "engine"), "backend"), "hip", StringComparison.OrdinalIgnoreCase)
+                ? StrataEngineVariant.Hip
+                : StrataEngineVariant.Cuda;
+        if (File.Exists(Path.Combine(checkout, "engine-cuda12", EngineExecutable)))
+            return StrataEngineVariant.Cuda12;
+        return null;
+    }
+
+    /// <summary>The <c>setup.py</c> flags that make it use (rather than replace) an installed engine variant.</summary>
+    public static IReadOnlyList<string> SetupFlags(StrataEngineVariant? variant) => variant switch
+    {
+        StrataEngineVariant.Cuda12 => ["--cuda", "12"],
+        StrataEngineVariant.Hip => ["--backend", "hip"],
+        _ => [],
+    };
+
+    public static string Describe(StrataEngineVariant variant) => variant switch
+    {
+        StrataEngineVariant.Cuda12 => "CUDA 12",
+        StrataEngineVariant.Hip => "AMD (HIP)",
+        _ => "CUDA",
+    };
 
     /// <summary>
     /// True if <paramref name="folder"/> holds Strata model data (its <c>models</c>, <c>packs</c> or
@@ -77,13 +123,17 @@ public static partial class StrataLayout
     /// The installed engine binary's version from <c>engine/BUILD.json</c>. Can lag the source
     /// version: Strata keeps the previous engine when compiling a newer one fails.
     /// </summary>
-    public static string? ReadEngineVersion(string folder)
+    public static string? ReadEngineVersion(string folder) =>
+        InstalledEngine(folder) is { } variant ? ReadBuildInfo(Path.Combine(folder, EngineFolder(variant)), "version") : null;
+
+    /// <summary>A string field of an engine folder's <c>BUILD.json</c>, or null.</summary>
+    private static string? ReadBuildInfo(string engineFolder, string field)
     {
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "engine", "BUILD.json")));
+            using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(engineFolder, "BUILD.json")));
             return doc.RootElement.ValueKind == JsonValueKind.Object &&
-                   doc.RootElement.TryGetProperty("version", out var v) && v.ValueKind == JsonValueKind.String
+                   doc.RootElement.TryGetProperty(field, out var v) && v.ValueKind == JsonValueKind.String
                 ? v.GetString()
                 : null;
         }
@@ -136,6 +186,19 @@ public static partial class StrataLayout
 
     [GeneratedRegex(@"^v\d+(\.\d+){1,3}$")]
     private static partial Regex ReleaseTagRegex();
+}
+
+/// <summary>Strata's ready-made engine builds (one per release asset).</summary>
+public enum StrataEngineVariant
+{
+    /// <summary>The default NVIDIA build (CUDA 13), in <c>engine/</c>.</summary>
+    Cuda,
+
+    /// <summary>The experimental CUDA 12 build for older drivers, in <c>engine-cuda12/</c>.</summary>
+    Cuda12,
+
+    /// <summary>The AMD build (HIP/ROCm), in <c>engine/</c>.</summary>
+    Hip,
 }
 
 /// <param name="FileName">The run config's file name, relative to the checkout (what a preset's model path can be).</param>

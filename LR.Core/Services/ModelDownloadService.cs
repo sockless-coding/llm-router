@@ -135,7 +135,40 @@ public class ModelDownloadService
 
         try
         {
-            var resolvedSha = await _hfClient.DownloadFileAsync(repoId, filename, revision, destinationPath, progress, ct);
+            // A split model (…-00001-of-0000N.gguf) is one library entry: every shard is downloaded next
+            // to the first, pinned to the revision the first one resolved to, with progress across all of them.
+            var shardNames = SplitGguf.AllShards(filename);
+            var shardPaths = SplitGguf.AllShards(destinationPath);
+            string? resolvedSha = null;
+
+            if (shardNames.Count == 1)
+            {
+                resolvedSha = await _hfClient.DownloadFileAsync(repoId, filename, revision, destinationPath, progress, ct);
+            }
+            else
+            {
+                var sizes = (await _hfClient.ListGgufFilesAsync(repoId, ct))
+                    .ToDictionary(f => f.Filename, f => f.SizeBytes, StringComparer.OrdinalIgnoreCase);
+                long? total = shardNames.All(n => sizes.GetValueOrDefault(n) is not null)
+                    ? shardNames.Sum(n => sizes[n]!.Value)
+                    : null;
+
+                long done = 0;
+                for (int i = 0; i < shardNames.Count; i++)
+                {
+                    long offset = done;
+                    var shardProgress = new Progress<DownloadProgress>(p =>
+                    {
+                        p.ModelId = modelId;
+                        p.BytesReceived += offset;
+                        p.TotalBytes = total ?? p.TotalBytes;
+                        _ = _progressPublisher.PublishAsync(p);
+                    });
+                    var sha = await _hfClient.DownloadFileAsync(repoId, shardNames[i], resolvedSha ?? revision, shardPaths[i], shardProgress, ct);
+                    resolvedSha ??= sha;
+                    done += new FileInfo(shardPaths[i]).Length;
+                }
+            }
 
             using var scope = _scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
@@ -144,7 +177,7 @@ public class ModelDownloadService
             var model = await context.LocalModels.FindAsync(modelId);
             if (model is not null)
             {
-                model.FileSizeBytes = File.Exists(destinationPath) ? new FileInfo(destinationPath).Length : null;
+                model.FileSizeBytes = shardPaths.All(File.Exists) ? shardPaths.Sum(p => new FileInfo(p).Length) : null;
                 if (!string.IsNullOrEmpty(resolvedSha))
                     model.HfRevision = resolvedSha;
                 await context.SaveChangesAsync();

@@ -25,6 +25,9 @@ public class PresetViewModel
     [MaxLength(1024)]
     public string? ModelPath { get; set; }
 
+    /// <summary>Engine-specific settings (<see cref="LR.Core.Models.ModelPreset.EngineSettings"/>), e.g. the Strata section.</summary>
+    public Dictionary<string, string> EngineSettings { get; set; } = new();
+
     // Core
     public int? ContextSize { get; set; }
     public int? GpuLayers { get; set; }

@@ -30,7 +30,8 @@ public class EngineActionsModel : PageModel
     [BindProperty] public string? Name { get; set; }
     [BindProperty] public string? RecipeJson { get; set; }
     [BindProperty] public string? Folder { get; set; }
-    [BindProperty] public string? FolderName { get; set; }
+    /// <summary>Strata: the release asset holding the engine build to install (e.g. <c>strata-windows-x64.zip</c>).</summary>
+    [BindProperty] public string? Asset { get; set; }
 
     /// <summary>The engine a release install is for (llama.cpp when not given).</summary>
     [BindProperty] public ServerEngine? Engine { get; set; }
@@ -41,8 +42,6 @@ public class EngineActionsModel : PageModel
         {
             "registerstrata" => await RunAsync(async () =>
                 new { success = true, buildId = await _buildService.RegisterStrataCheckoutAsync(Folder ?? "", Name, HttpContext.RequestAborted), message = "Checkout added." }),
-            "clonestrata" => await RunAsync(async () =>
-                new { success = true, buildId = await _buildService.StartStrataCloneAsync(FolderName, Name), message = "Clone started." }),
             "rollbackengine" => await RunAsync(async () =>
                 new { success = true, buildId = await _buildService.StartStrataRollbackAsync(BuildId), message = "Rollback started." }),
             "refresh" => await RunAsync(async () =>
@@ -81,7 +80,7 @@ public class EngineActionsModel : PageModel
             var tag = string.IsNullOrWhiteSpace(ReleaseTag) ? null : ReleaseTag.Trim();
             var name = string.IsNullOrWhiteSpace(Name) ? null : Name;
             var id = Engine == ServerEngine.Strata
-                ? await _buildService.StartStrataReleaseInstallAsync(tag, name)
+                ? await _buildService.StartStrataReleaseInstallAsync(tag, Asset, name)
                 : await _buildService.StartReleaseInstallAsync(Backend, tag, name);
             return new JsonResult(new { success = true, buildId = id, message = "Install started." });
         }

@@ -222,7 +222,7 @@ public partial class EngineBuildService
             if (build.Engine == ServerEngine.Strata)
             {
                 string? releaseTag = build.Source == EngineBuildSource.OfficialRelease
-                    ? await ResolveStrataReleaseTagAsync(refOverride)
+                    ? (await GetStrataReleaseAsync(refOverride)).TagName
                     : null;
                 build.Status = EngineBuildStatus.Building;
                 build.StatusMessage = "Updating in place…";

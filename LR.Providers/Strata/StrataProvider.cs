@@ -1,5 +1,9 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -8,6 +12,7 @@ using Microsoft.Extensions.Logging;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
+using LR.Core.Services;
 using LR.Core.Services.EngineBuilds;
 
 namespace LR.Providers.Strata;
@@ -18,11 +23,15 @@ namespace LR.Providers.Strata;
 /// Anthropic-compatible <c>/v1/messages</c>, and llama.cpp-style <c>/health</c>, <c>/props</c>
 /// and <c>/slots</c> — so request handling, health and capacity reporting are all inherited.
 ///
-/// Strata keeps its model settings (GGUF, context, KV/offload, GPU split, sampling defaults) in
-/// a per-model run config, <c>strata-&lt;model&gt;.json</c>, written by its own setup
-/// (<c>START-HERE.bat</c> / <c>setup.sh</c>). A preset for a Strata server therefore points its
-/// <see cref="ModelPreset.ModelPath"/> at that run config rather than at a GGUF; the llama.cpp
-/// launch settings on the preset don't apply. The server is launched the same way Strata's own
+/// Strata starts from a run config (<c>strata-&lt;model&gt;.json</c>: the engine, its tuned arguments,
+/// the prepared model files). A preset's <see cref="ModelPreset.ModelPath"/> is normally a GGUF from the
+/// model library (a Qwen3.8-Flash-Next GSQ-RCO / Swift / Coder / Unsloth file); the first time the
+/// preset starts — and again whenever its model, its Strata settings
+/// (<see cref="StrataPresetSettings"/>) or the install change — <see cref="PrepareAsync"/> runs
+/// Strata's own <c>setup.py</c> on it in its existing-GGUF mode (<c>--gguf-dir</c>), which builds the
+/// model's pack and the MTP draft layer and writes a run config tuned to this PC; the router keeps a
+/// copy per preset. A <see cref="ModelPreset.ModelPath"/> that is itself a run config (one made by
+/// Strata's <c>START-HERE.bat</c>) is used as it is. The server is launched the way Strata's own
 /// <c>run-&lt;model&gt;</c> scripts do, but bound to loopback on the router-assigned port.
 /// </summary>
 public partial class StrataProvider : ManagedServerProviderBase
@@ -65,11 +74,12 @@ public partial class StrataProvider : ManagedServerProviderBase
         if (!File.Exists(script))
             throw new FileNotFoundException($"Strata server script not found at: {script}");
 
-        string configPath = ResolveRunConfigPath(preset.ModelPath);
-        if (!File.Exists(configPath))
-            throw new FileNotFoundException($"Strata run config not found at: {configPath}. Point the preset's model path at a strata-<model>.json written by Strata's setup.");
+        bool ownRunConfig = IsRunConfig(preset.ModelPath);
+        string configPath = RunConfigPathFor(preset);
+        if (ownRunConfig && !File.Exists(configPath))
+            throw new FileNotFoundException($"Strata run config not found at: {configPath}.");
 
-        _apiKey = ReadApiKey(configPath);
+        _apiKey = File.Exists(configPath) ? ReadApiKey(configPath) : null;
         _apiKeyResolved = true;
 
         var args = new List<string>
@@ -84,7 +94,9 @@ public partial class StrataProvider : ManagedServerProviderBase
             "--host", "127.0.0.1",
         };
 
-        if (preset.MainGpu is int gpu)
+        // A prepared config already has the GPU the preset chose (strata.gpu); a run config of
+        // Strata's own takes the preset's Main GPU, as before.
+        if (ownRunConfig && preset.MainGpu is int gpu)
         {
             args.Add("--gpu");
             args.Add(gpu.ToString(CultureInfo.InvariantCulture));
@@ -120,6 +132,19 @@ public partial class StrataProvider : ManagedServerProviderBase
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
     }
 
+    /// <summary>True if the preset points at a run config of Strata's own rather than at a GGUF.</summary>
+    private static bool IsRunConfig(string? modelPath) =>
+        modelPath is not null && modelPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The run config <paramref name="preset"/> starts from: its own, or the one prepared for it.</summary>
+    private string RunConfigPathFor(ModelPreset preset) =>
+        IsRunConfig(preset.ModelPath) ? ResolveRunConfigPath(preset.ModelPath) : PreparedConfigPath(preset.Id);
+
+    /// <summary>Where the router keeps the run config prepared for a preset, inside the install it was prepared with.</summary>
+    private string PreparedConfigPath(Guid presetId) =>
+        Path.Combine(InstallFolderPath ?? throw new InvalidOperationException("Strata folder is not set."),
+            ".router", "presets", $"{presetId:N}.json");
+
     /// <summary>
     /// A relative run-config path is taken relative to the Strata folder, where Strata's setup
     /// writes them — so a preset can just say <c>strata-coder.json</c>.
@@ -127,11 +152,152 @@ public partial class StrataProvider : ManagedServerProviderBase
     private string ResolveRunConfigPath(string modelPath)
     {
         if (string.IsNullOrWhiteSpace(modelPath))
-            throw new InvalidOperationException("The preset has no model path — set it to a Strata run config (strata-<model>.json).");
+            throw new InvalidOperationException("The preset has no model — pick a Qwen3.8-Flash-Next GGUF from the model library.");
 
         return Path.IsPathRooted(modelPath) || string.IsNullOrEmpty(InstallFolderPath)
             ? modelPath
             : Path.GetFullPath(Path.Combine(InstallFolderPath, modelPath));
+    }
+
+    /// <summary>One preparation at a time per install: Strata's setup writes into the checkout and its data folder.</summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> PrepareLocks = new(StringComparer.OrdinalIgnoreCase);
+
+    private const string PreparedConfigMarker = "STRATA_PREP_CONFIG ";
+    private const string PrepareErrorMarker = "STRATA_PREP_ERROR ";
+
+    /// <summary>
+    /// Finds the Strata family and size of the GGUF in <c>argv[1]</c> by matching its file name against
+    /// setup's own <c>FAMILIES</c>/<c>MODELS</c> file patterns, then runs <c>setup.py</c> in its
+    /// existing-GGUF mode with the rest of <c>argv</c>, and prints the run config it wrote.
+    /// </summary>
+    private const string PrepareDriver =
+        "import os, sys\n" +
+        "gguf, extra = os.path.abspath(sys.argv[1]), sys.argv[2:]\n" +
+        "sys.path.insert(0, '.')\n" +
+        "import setup as s\n" +
+        "name, found = os.path.basename(gguf), None\n" +
+        "for fk, f in s.FAMILIES.items():\n" +
+        "    for mk, m in s.MODELS.items():\n" +
+        "        if fk not in m.get('families', ('qwen', 'swift')):\n" +
+        "            continue\n" +
+        "        try:\n" +
+        "            if (m.get('file') or f.get('file', '')).format(q=mk, i=1) == name:\n" +
+        "                found = (fk, mk)\n" +
+        "        except (KeyError, IndexError, ValueError):\n" +
+        "            pass\n" +
+        "if found is None:\n" +
+        "    print('" + PrepareErrorMarker + "' + name + ' is not a model Strata runs. ' + getattr(s, 'SUPPORTED_GGUFS', ''), flush=True)\n" +
+        "    sys.exit(3)\n" +
+        "fam, model = found\n" +
+        "print('Strata model: %s %s' % (s.FAMILIES[fam].get('title', fam), model), flush=True)\n" +
+        "sys.argv = ['setup.py', '--gguf-dir', os.path.dirname(gguf), '--family', fam, '--model', model] + extra\n" +
+        "rc = s.main()\n" +
+        "if rc:\n" +
+        "    sys.exit(rc)\n" +
+        "tag = (s.FAMILIES[fam].get('tag', '') + model).lower()\n" +
+        "print('" + PreparedConfigMarker + "' + os.path.join(str(s.ROOT), 'strata-%s.json' % tag), flush=True)\n";
+
+    /// <summary>
+    /// Prepares the preset's GGUF for Strata unless the run config prepared before still matches —
+    /// same model file, same Strata settings, same install version and engine. Runs Strata's
+    /// <c>setup.py</c> (see the class summary): the first time, that installs its remaining Python
+    /// packages, builds the model's pack, and downloads the ~5 GB MTP draft layer (shared by every
+    /// model), so it can take several minutes; its output goes to the server log and the start progress.
+    /// </summary>
+    protected override async Task PrepareAsync(ModelPreset preset, Func<StartupProgressEvent, Task>? onProgress, CancellationToken cancellationToken)
+    {
+        if (IsRunConfig(preset.ModelPath))
+            return;
+
+        if (string.IsNullOrEmpty(InstallFolderPath))
+            throw new InvalidOperationException("Strata folder is not set — bind the server to a Strata install.");
+        var python = StrataLayout.PythonPath(InstallFolderPath);
+        if (!File.Exists(python))
+            throw new FileNotFoundException($"Strata's Python environment was not found at: {python}. Install a Strata release from the Engines page.");
+        if (string.IsNullOrWhiteSpace(preset.ModelPath))
+            throw new InvalidOperationException("The preset has no model — pick a Qwen3.8-Flash-Next GGUF from the model library.");
+
+        var gguf = Path.GetFullPath(preset.ModelPath);
+        if (!gguf.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) || !File.Exists(gguf))
+            throw new FileNotFoundException($"The preset's model wasn't found: {gguf}");
+        if (SplitGguf.AllShards(gguf).FirstOrDefault(s => !File.Exists(s)) is { } missing)
+            throw new FileNotFoundException($"A part of the split model is missing: {missing}. Download the model again from the Models page.");
+
+        var setupArgs = StrataPresetSettings.SetupArgs(preset, StrataLayout.InstalledEngine(InstallFolderPath));
+        var configPath = PreparedConfigPath(preset.Id);
+        var keyPath = configPath + ".key";
+        var key = PreparationKey(gguf, setupArgs);
+        if (File.Exists(configPath) && File.Exists(keyPath) && File.ReadAllText(keyPath) == key)
+            return;
+
+        var gate = PrepareLocks.GetOrAdd(InstallFolderPath, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var stopwatch = Stopwatch.StartNew();
+            await ReportPreparingAsync(onProgress, "Preparing the model for Strata (first start with this model and settings; can take several minutes)…", 0);
+            await LogProviderMessage(ServerLogLevel.Info,
+                $"Preparing {Path.GetFileName(gguf)} for Strata: setup.py --gguf-dir {Path.GetDirectoryName(gguf)} {string.Join(' ', setupArgs)}");
+
+            string? written = null, error = null;
+            var tail = new Queue<string>();
+            double lastReport = 0;
+            var result = await ProcessRunner.RunAsync(python, ["-u", "-c", PrepareDriver, gguf, .. setupArgs], InstallFolderPath, null,
+                async line =>
+                {
+                    if (line.StartsWith(PreparedConfigMarker, StringComparison.Ordinal)) { written = line[PreparedConfigMarker.Length..].Trim(); return; }
+                    if (line.StartsWith(PrepareErrorMarker, StringComparison.Ordinal)) error = line[PrepareErrorMarker.Length..].Trim();
+                    if (string.IsNullOrWhiteSpace(line)) return;
+
+                    tail.Enqueue(line.Trim());
+                    if (tail.Count > 8) tail.Dequeue();
+                    await LogProviderMessage(ServerLogLevel.Info, line.TrimEnd());
+                    if (stopwatch.Elapsed.TotalSeconds - lastReport >= 2)
+                    {
+                        lastReport = stopwatch.Elapsed.TotalSeconds;
+                        await ReportPreparingAsync(onProgress, $"Preparing the model for Strata: {line.Trim()}", lastReport);
+                    }
+                }, cancellationToken);
+
+            if (result.Cancelled)
+                throw new OperationCanceledException(cancellationToken);
+            if (result.ExitCode != 0 || written is null || !File.Exists(written))
+                throw new InvalidOperationException("Preparing the model for Strata failed: " +
+                    (error ?? string.Join(" | ", tail)) + " (the server log has Strata's full output)");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+            File.Copy(written, configPath, overwrite: true);
+            File.WriteAllText(keyPath, key);
+            await LogProviderMessage(ServerLogLevel.Info, $"Model prepared for Strata in {stopwatch.Elapsed.TotalSeconds:F0}s: {configPath}");
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private Task ReportPreparingAsync(Func<StartupProgressEvent, Task>? onProgress, string message, double elapsedSeconds) =>
+        onProgress?.Invoke(new StartupProgressEvent
+        {
+            InstanceId = ServerInstance?.Id ?? Guid.Empty,
+            EventType = StartupEventType.HealthChecking,
+            Message = message,
+            ElapsedSeconds = elapsedSeconds,
+        }) ?? Task.CompletedTask;
+
+    /// <summary>
+    /// What a prepared run config depends on: the model file (path, size, time), the setup arguments
+    /// (the preset's Strata settings and the engine build), and the install's source and engine version.
+    /// </summary>
+    private string PreparationKey(string gguf, IReadOnlyList<string> setupArgs)
+    {
+        var file = new FileInfo(gguf);
+        var material = string.Join("\n",
+            gguf, file.Length.ToString(CultureInfo.InvariantCulture), file.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture),
+            string.Join(' ', setupArgs),
+            StrataLayout.ReadSourceVersion(InstallFolderPath!) ?? "",
+            StrataLayout.ReadEngineVersion(InstallFolderPath!) ?? "");
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
     }
 
     /// <summary>
@@ -190,7 +356,7 @@ public partial class StrataProvider : ManagedServerProviderBase
             if (preset is null)
                 return;
 
-            string configPath = ResolveRunConfigPath(preset.ModelPath);
+            string configPath = RunConfigPathFor(preset);
             if (File.Exists(configPath))
                 _apiKey = ReadApiKey(configPath);
         }

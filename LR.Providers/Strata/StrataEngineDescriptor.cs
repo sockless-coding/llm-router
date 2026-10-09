@@ -24,9 +24,9 @@ public class StrataEngineDescriptor : IEngineDescriptor
     public string InstallFolderPlaceholder => @"C:\Strata";
 
     public string ModelPathHelp =>
-        "Path to the Strata run config for the model (strata-<model>.json, written by Strata's setup). " +
-        "A relative path is resolved against the Strata folder. Model, context, GPU and offload settings come " +
-        "from that file; the llama.cpp settings on this preset are ignored except Main GPU and Slot Save Path.";
+        "Pick a Qwen3.8-Flash-Next GGUF from the library (ISTA-DASLab's GSQ-RCO quants, Swift 1.5, the Coder, or Unsloth's) — " +
+        "the first start prepares it for Strata using the Strata settings below. A run config made by Strata's own " +
+        "setup (strata-<model>.json) also works here, as it is.";
 
     public string? ValidateInstallFolder(string folderPath)
     {

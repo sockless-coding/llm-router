@@ -7,10 +7,10 @@
 
 <div class="flex items-start justify-between gap-4 mb-4">
     <p class="text-text-secondary text-sm">
-        Install <a href="https://github.com/@StrataLayout.Repo/releases" target="_blank" rel="noopener" class="text-neon-cyan/80 hover:text-neon-cyan">Strata releases</a> side by side,
-        or track checkouts you set up yourself, and keep them up to date. A release install stays on its release and updates to newer ones;
-        a checkout of <span class="font-mono">main</span> updates like Strata's own <span class="font-mono">UPDATE.bat</span> / <span class="font-mono">update.sh</span>.
-        Either way Strata's <span class="font-mono">setup.py --update</span> refreshes the engine, Python packages and model configs — model files are never touched.
+        Install <a href="https://github.com/@StrataLayout.Repo/releases" target="_blank" rel="noopener" class="text-neon-cyan/80 hover:text-neon-cyan">Strata releases</a>
+        side by side, each with its engine (CUDA, CUDA 12 or AMD), and bind Strata servers to them. Models come from the
+        <a href="/Features/Models/Index" class="text-neon-cyan/80 hover:text-neon-cyan">model library</a> (e.g. Qwen3.8-Flash-Next GSQ-RCO GGUFs);
+        a preset's first start prepares its model for Strata. A release install stays on its release and updates to newer ones.
     </p>
     <a href="/Features/Engines/Releases?engine=Strata" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium shrink-0">
         <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
@@ -23,7 +23,7 @@
 {
     <div class="text-center py-10 bg-cyber-card rounded-xl border border-neon-cyan/10 mb-8">
         <p class="text-text-secondary">No Strata installs tracked yet</p>
-        <p class="text-text-secondary text-sm mt-1">Add the folder you set Strata up in, or clone a fresh copy below.</p>
+        <p class="text-text-secondary text-sm mt-1">Install a release, or add a Strata folder you set up yourself below.</p>
     </div>
 }
 else
@@ -35,7 +35,7 @@ else
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Version</th>
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Commit</th>
-                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Models</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium" title="Models prepared for Strata in this install (by a preset's first start, or Strata's own setup)">Prepared models</th>
                     <th class="text-center px-4 py-3 text-text-secondary font-medium">Status</th>
                     <th class="text-center px-4 py-3 text-text-secondary font-medium">Used By</th>
                     <th class="text-right px-4 py-3 text-text-secondary font-medium"></th>
@@ -116,23 +116,10 @@ else
     </div>
 }
 
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-    <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3">
-        <h3 class="text-sm font-semibold text-text-primary">Add an existing checkout</h3>
-        <p class="text-xs text-text-secondary">The folder you cloned Strata into and ran <span class="font-mono">@StrataLayout.FirstTimeSetupCommand</span> in (it contains <span class="font-mono">serve\server.py</span>).</p>
-        <input id="strata-register-folder" placeholder="C:\Strata" class="@inpCls font-mono" />
-        <input id="strata-register-name" placeholder="Name (optional)" class="@inpCls" />
-        <button type="button" onclick="registerStrata()" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">Add checkout</button>
-    </div>
-    <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3">
-        <h3 class="text-sm font-semibold text-text-primary">Clone a fresh copy</h3>
-        <p class="text-xs text-text-secondary">
-            Clones <span class="font-mono">@StrataLayout.Repo</span> into a folder under the install root
-            (@(string.IsNullOrEmpty(Model.InstallRootFolder) ? "not set — set it in Engine Build Settings above" : Model.InstallRootFolder)).
-            Afterwards, run <span class="font-mono">@StrataLayout.FirstTimeSetupCommand</span> there once to pick and download a model (tens of GB), then press Refresh.
-        </p>
-        <input id="strata-clone-folder" placeholder="Folder name (default: strata)" class="@inpCls font-mono" />
-        <input id="strata-clone-name" placeholder="Name (optional)" class="@inpCls" />
-        <button type="button" onclick="cloneStrata()" class="text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all font-medium">Clone</button>
-    </div>
+<div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3 max-w-xl">
+    <h3 class="text-sm font-semibold text-text-primary">Add an existing Strata folder</h3>
+    <p class="text-xs text-text-secondary">A Strata checkout you set up yourself with <span class="font-mono">@StrataLayout.FirstTimeSetupCommand</span> (it contains <span class="font-mono">serve\server.py</span>). It's updated like Strata's own <span class="font-mono">UPDATE.bat</span>.</p>
+    <input id="strata-register-folder" placeholder="C:\Strata" class="@inpCls font-mono" />
+    <input id="strata-register-name" placeholder="Name (optional)" class="@inpCls" />
+    <button type="button" onclick="registerStrata()" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">Add folder</button>
 </div>

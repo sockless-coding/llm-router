@@ -78,7 +78,7 @@ Protocols are toggled via `Gateway:EnabledProtocols` in configuration. Only `"fu
 - .NET 10.0 SDK or later
 - Node.js/npm (to build the Tailwind CSS bundle — see below)
 - For llama.cpp servers: `llama-server`/`llama-server.exe` binaries for whichever backend(s) you plan to run (CPU/CUDA/Vulkan/SYCL) — downloaded/compiled from the Engines page or your own builds
-- For Strata servers: a Strata checkout on which Strata's own setup (`START-HERE.bat` / `./setup.sh`) has been run — see [Strata servers](#strata-servers)
+- For Strata servers: Git and Python 3.10+ (installed from the Engines page — see [Strata servers](#strata-servers))
 
 ### Building the frontend assets
 
@@ -145,14 +145,18 @@ launched and adapts automatically (no separate build or flag required).
 
 ### Strata servers
 
-[Strata](https://github.com/Niko1221/Strata) runs large Mixture-of-Experts models on consumer GPUs by offloading dormant experts to system RAM. The router runs it the way Strata's own `run-<model>` scripts do — `.venv` Python with `serve/server.py --engine strata --config strata-<model>.json` — but on the router-assigned port and bound to `127.0.0.1`.
+[Strata](https://github.com/Niko1221/Strata) runs large Mixture-of-Experts models (Qwen3.8-Flash-Next) on consumer GPUs by offloading dormant experts to system RAM. It's set up the same way as llama.cpp:
 
-1. Install Strata and a model with its own setup (`START-HERE.bat` on Windows, `./setup.sh` on Linux). This creates `.venv`, builds/downloads the engine, and writes a run config `strata-<model>.json` per model.
-2. On **Engines → Strata**, add the checkout (or clone a fresh copy there and run Strata's setup in it). **Install a release** installs a Strata release side by side, like llama.cpp releases: it clones that tag into `<install root>/strata-<tag>`, creates its `.venv`, and runs Strata's setup unattended, which sets the new copy up like your most recent Strata install (same model and settings, model files reused from the shared `Strata-data` folder) and installs that release's ready-made engine. With no earlier install it stops at **Needs setup** until you run `START-HERE.bat` there once. Release installs stay on their release; updating one checks out the latest release tag. The tab shows each checkout's version, commit, engine binary version and installed models, and can check for updates (changelog against Strata's `main`), update in place (`git pull --ff-only` + `setup.py --update`, like Strata's own `UPDATE.bat`; refused while a server is running from it), roll back the engine, or stop tracking it (files are never deleted).
-3. Create a server with engine **Strata** bound to that install (or pointed at the checkout folder directly).
-4. Create a preset for it whose **model path** is that run config (e.g. `strata-coder.json`, relative to the Strata folder, or an absolute path). Strata reads the GGUF, context, KV/offload, GPU split, and sampling defaults from that file; the preset's llama.cpp settings don't apply, except **Main GPU** (`--gpu`) and **Slot Save Path** (`--slot-save-path`).
+1. **Engines → Strata → Install a release**: pick a release and its engine build — CUDA, CUDA 12 (older NVIDIA drivers) or AMD. The router clones that release into `<install root>/strata-<tag>-<engine>`, creates its `.venv` with Strata's pinned Python packages, and installs the engine, checked against the SHA-256 GitHub publishes for it. No model is installed. (Linux has no ready-made engines; Strata compiles one when a model is first prepared.)
+2. **Models → Hugging Face**: download a Qwen3.8-Flash-Next GGUF, e.g. `ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF` → `IQ3_XXS` (Swift 1.5, the Coder and Unsloth's quants work too). Split models are one entry: all shards are downloaded together.
+3. **Servers**: create a server with engine **Strata**, bound to the install.
+4. **Presets**: pick the model from the library and, in the **Strata** section, the context length, GPU, images, KV cache type, low-RAM mode and parallel requests (blank = Strata's recommendation for this PC). Start it.
 
-If the run config (or `STRATA_API_KEY`) sets an API key, the router sends it automatically. Strata's `/props` and `/slots` mirror llama.cpp's, so slot-based concurrency limits, context-aware queuing, and the dashboard's slot/KV usage work the same as for llama.cpp servers.
+The first start of a preset prepares its model for Strata with Strata's own `setup.py` in its existing-GGUF mode (`--gguf-dir`): it builds the model's pack, downloads the ~5 GB MTP draft layer once (shared by all models), and writes a run config tuned to this PC, which the router keeps per preset. Progress shows in the server's start status and log. This can take several minutes (longer in low-RAM mode, which writes the experts into one 35–77 GB file once); later starts skip it until the model, the preset's Strata settings or the install change. Prepared packs and the draft layer live in Strata's shared `Strata-data` folder next to the install. The server then runs as Strata's own `run-<model>` scripts would — `.venv` Python with `serve/server.py --engine strata --config <run config>` — on the router-assigned port, bound to `127.0.0.1`.
+
+The Strata tab shows each install's version, commit, engine version and prepared models. It can check for updates (a release install against the latest release), update in place (a release install checks out the new tag and installs that release's same engine build; refused while a server is running from it), roll back the engine, or stop tracking an install (its files are never deleted). A Strata folder you set up yourself with `START-HERE.bat` can be added too; it updates like Strata's `UPDATE.bat`, and a preset can also point straight at one of its `strata-<model>.json` run configs.
+
+If a run config (or `STRATA_API_KEY`) sets an API key, the router sends it automatically. Strata's `/props` and `/slots` mirror llama.cpp's, so slot-based concurrency limits, context-aware queuing, and the dashboard's slot/KV usage work the same as for llama.cpp servers.
 
 ### Adding another engine
 

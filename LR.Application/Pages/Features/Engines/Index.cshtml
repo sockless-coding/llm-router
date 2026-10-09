@@ -130,14 +130,6 @@ else
                 if (result.success) location.reload(); else alert(result.message || 'Could not add the checkout.');
             };
 
-            window.cloneStrata = async function () {
-                const folderName = document.getElementById('strata-clone-folder').value.trim();
-                const name = document.getElementById('strata-clone-name').value.trim();
-                if (!confirm('Clone Strata from GitHub into the install root?')) return;
-                const result = await postAction({ Command: 'cloneStrata', FolderName: folderName, Name: name });
-                if (result.success) toDetail(result.buildId); else alert(result.message || 'Could not start the clone.');
-            };
-
             window.updateInstall = async function (id, name) {
                 if (!confirm(`Update "${name}" to the newest version (the latest release for a release install, main otherwise) and run Strata's setup.py --update? Stop any server using it first.`)) return;
                 const result = await postAction({ Command: 'update', BuildId: id });

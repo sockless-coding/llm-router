@@ -116,6 +116,13 @@ public class LRDbContext : DbContext
         modelBuilder.Entity<Models.ModelPreset>(entity =>
         {
             entity.ToTable("ModelPresets");
+            entity.Property(e => e.EngineSettings).HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v),
+                v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v) ?? new Dictionary<string, string>(),
+                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<Dictionary<string, string>>(
+                    (a, b) => a!.Count == b!.Count && !a.Except(b).Any(),
+                    v => v.Aggregate(0, (h, kv) => HashCode.Combine(h, kv.Key, kv.Value)),
+                    v => new Dictionary<string, string>(v)));
             entity.Property(e => e.Flags).HasConversion(
                 v => System.Text.Json.JsonSerializer.Serialize(v),
                 v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v) ?? new Dictionary<string, string>());

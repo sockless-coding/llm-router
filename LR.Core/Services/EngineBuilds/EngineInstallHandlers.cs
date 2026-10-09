@@ -55,9 +55,7 @@ public sealed class StrataInstallHandler : IEngineInstallHandler
 /// <summary>Helpers for reading a Strata checkout into an <see cref="EngineBuild"/> row.</summary>
 public static class StrataInstallInfo
 {
-    /// <summary>AMD (HIP) if any installed model runs on Strata's HIP backend, else CUDA — Strata's default.</summary>
+    /// <summary>AMD (HIP) for an installed HIP engine, else CUDA — Strata's default.</summary>
     public static BackendType DetectBackend(string checkout) =>
-        StrataLayout.FindRunConfigs(checkout).Any(c => string.Equals(c.Backend, "hip", StringComparison.OrdinalIgnoreCase))
-            ? BackendType.Hip
-            : BackendType.Cuda;
+        StrataLayout.InstalledEngine(checkout) == StrataEngineVariant.Hip ? BackendType.Hip : BackendType.Cuda;
 }

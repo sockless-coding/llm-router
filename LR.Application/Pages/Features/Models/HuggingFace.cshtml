@@ -127,7 +127,9 @@
                     <span class="text-text-primary filename-label"></span>
                     <button type="button" class="download-btn text-xs px-3 py-1 rounded-md bg-neon-green/10 text-neon-green hover:bg-neon-green/20 transition-all font-medium">Download</button>
                 `;
-                row.querySelector('.filename-label').textContent = `${file.filename} (${formatBytes(file.sizeBytes)})`;
+                row.querySelector('.filename-label').textContent = file.parts > 1
+                    ? `${file.filename} (${file.parts} parts, ${formatBytes(file.sizeBytes)} — all downloaded together)`
+                    : `${file.filename} (${formatBytes(file.sizeBytes)})`;
                 row.querySelector('.download-btn').addEventListener('click', () => downloadFile(repoId, file.filename));
                 container.appendChild(row);
             }
