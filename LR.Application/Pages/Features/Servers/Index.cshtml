@@ -104,6 +104,11 @@
                                 <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                 Details
                             </a>
+                            <button type="button" onclick="deleteServer(this)" data-id="@server.Id" data-name="@server.Name"
+                                    class="text-neon-red hover:text-neon-red/80 transition-colors mr-3 inline-flex items-center gap-1" title="Delete server" aria-label="Delete server @server.Name">
+                                <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                Delete
+                            </button>
                             <button type="button" onclick="toggleCommand('@server.Id')" aria-expanded="false" aria-controls="cmd-row-@server.Id"
                                     class="text-text-secondary hover:text-neon-cyan transition-colors inline-flex items-center gap-1" title="Show start command" aria-label="Show start command for @server.Name">
                                 <svg id="cmd-icon-@server.Id" class="w-4 h-4 transform transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -307,6 +312,22 @@ async function toggleCommand(instanceId) {
     } catch (e) {
         const contentEl = document.getElementById('cmd-content-' + instanceId);
         if (contentEl) contentEl.innerHTML = '<p class="text-neon-red text-sm">Failed to load command: ' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+async function deleteServer(btn) {
+    const id = btn.dataset.id, name = btn.dataset.name;
+    if (!confirm(`Delete server "${name}"? Its presets, logs and stats are deleted too. This cannot be undone.`)) return;
+    const token = document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+    try {
+        const resp = await fetch('/Features/Servers/Index?handler=Delete&instanceId=' + id, {
+            method: 'POST',
+            headers: { 'RequestVerificationToken': token }
+        });
+        if (resp.ok) location.reload();
+        else alert('Delete failed: ' + (await resp.text() || resp.status));
+    } catch (e) {
+        alert('Delete failed: ' + e.message);
     }
 }
 
