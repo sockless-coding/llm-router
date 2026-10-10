@@ -10,7 +10,7 @@
 <form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
 
 <div class="flex items-center gap-3 mb-6">
-    <a href="/Features/Engines/Index" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
+    <a href="/Features/Engines/Index?engine=@b.Engine" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
     <span class="text-text-secondary">/</span>
     <p class="text-text-primary text-sm font-medium">@b.Name — changelog</p>
 </div>
@@ -44,7 +44,18 @@ else
                 <button type="button" onclick="updateInPlace('@b.Id')" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">
                     Update in place to @s.LatestTag
                 </button>
-                <span class="text-[11px] text-text-secondary">Replaces the files in <span class="font-mono break-all">@b.InstallPath</span> — the @Model.ServerUsage bound server(s) keep working, no re-pointing.</span>
+                @if (b.Engine == ServerEngine.Strata && b.Source == EngineBuildSource.OfficialRelease)
+                {
+                    <span class="text-[11px] text-text-secondary">Checks out @s.LatestTag in <span class="font-mono break-all">@b.InstallPath</span> and runs Strata's own <span class="font-mono">setup.py --update</span>, which installs that release's engine. Model files and settings are kept; the @Model.ServerUsage bound server(s) keep working. To keep this version, install the new release side by side from the Releases page instead.</span>
+                }
+                else if (b.Source == EngineBuildSource.GitCheckout)
+                {
+                    <span class="text-[11px] text-text-secondary">Pulls the newest code into <span class="font-mono break-all">@b.InstallPath</span> and runs Strata's own <span class="font-mono">setup.py --update</span> (engine, Python packages, model configs). Model files and settings are kept; the @Model.ServerUsage bound server(s) keep working.</span>
+                }
+                else
+                {
+                    <span class="text-[11px] text-text-secondary">Replaces the files in <span class="font-mono break-all">@b.InstallPath</span> — the @Model.ServerUsage bound server(s) keep working, no re-pointing.</span>
+                }
             </div>
             <p class="text-[11px] text-text-secondary mt-1">
                 @if (b.Source == EngineBuildSource.SourceCompile)

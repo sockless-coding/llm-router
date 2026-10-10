@@ -1,6 +1,7 @@
 using LR.Core.Interfaces;
 using LR.Core.Models;
-using LR.Providers;
+using LR.Core.Services.EngineBuilds;
+using LR.Providers.LlamaCpp;
 
 namespace LR.Application.Pages.Features.Presets;
 
@@ -41,15 +42,51 @@ public static class PresetPreview
         }
     }
 
-    public static object Build(ModelPreset preset)
+    public static object Build(ModelPreset preset, ServerEngine engine = ServerEngine.LlamaCpp)
     {
         if (string.IsNullOrWhiteSpace(preset.ModelPath))
             preset.ModelPath = "<no model selected>";
+
+        if (engine == ServerEngine.Strata)
+            return BuildStrata(preset);
 
         var args = new LlamaCppArgBuilder { Port = 8080 }.Build(preset);
         var commandLine = "llama-server " + string.Join(' ', args.Select(QuoteIfNeeded));
 
         return new { commandLine, args };
+    }
+
+    /// <summary>
+    /// A Strata preset: what its first start runs to prepare the model (Strata's setup in its
+    /// existing-GGUF mode; the family/size and the engine build are filled in at start), then the
+    /// server launch from the prepared run config.
+    /// </summary>
+    private static object BuildStrata(ModelPreset preset)
+    {
+        if (preset.ModelPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            var own = $"python serve/server.py --engine strata --config {QuoteIfNeeded(preset.ModelPath)} --host 127.0.0.1 --port <port>";
+            return new { commandLine = own, args = Array.Empty<string>() };
+        }
+
+        List<string> setupArgs;
+        try
+        {
+            setupArgs = StrataPresetSettings.SetupArgs(preset, engine: null);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new { commandLine = ex.Message, args = Array.Empty<string>() };
+        }
+
+        var dir = Path.GetDirectoryName(preset.ModelPath) ?? preset.ModelPath;
+        var commandLine =
+            "# first start (and after a change): prepare the model\n" +
+            $"python setup.py --gguf-dir {QuoteIfNeeded(dir)} --family <from the file> --model <from the file> " +
+            string.Join(' ', setupArgs.Select(QuoteIfNeeded)) + "\n" +
+            "# every start\n" +
+            "python serve/server.py --engine strata --config <prepared config> --host 127.0.0.1 --port <port>";
+        return new { commandLine, args = setupArgs };
     }
 
     private static string QuoteIfNeeded(string arg)

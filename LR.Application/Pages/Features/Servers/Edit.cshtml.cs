@@ -8,12 +8,13 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace LR.Application.Pages.Features.Servers;
 
-public class EditModel : PageModel
+public partial class EditModel : PageModel
 {
     private readonly IServerManager _serverManager;
     private readonly LRDbContext _context;
+    private readonly IEngineCatalog _engines;
 
-    public List<LlamaCppBuild> AvailableBuilds { get; set; } = new();
+    public List<EngineBuild> AvailableBuilds { get; set; } = new();
 
     /// <summary>
     /// Bound from the query string (e.g., ?Id=...). SupportsGet enables binding on GET requests.
@@ -23,13 +24,17 @@ public class EditModel : PageModel
 
     public ServerInstance? Server { get; set; }
 
+    /// <summary>The server's engine, or null if it has no registered provider.</summary>
+    public IEngineDescriptor? Engine => Server is null ? null : _engines.Get(Server.Engine);
+
     [BindProperty]
     public EditViewModel ViewModel { get; set; } = new();
 
-    public EditModel(IServerManager serverManager, LRDbContext context)
+    public EditModel(IServerManager serverManager, LRDbContext context, IEngineCatalog engines)
     {
         _serverManager = serverManager;
         _context = context;
+        _engines = engines;
     }
 
     public async Task<IActionResult> OnGetAsync()
@@ -41,15 +46,12 @@ public class EditModel : PageModel
         if (Server is null)
             return NotFound();
 
-        ViewModel.LlamaCppExecutableFolderPath = Server.Config?.LlamaCppExecutableFolderPath ?? string.Empty;
+        ViewModel.InstallFolderPath = Server.Config?.InstallFolderPath ?? string.Empty;
         ViewModel.CompanionAppPath = Server.Config?.CompanionAppPath ?? string.Empty;
         ViewModel.EnvironmentSetupCommand = Server.Config?.EnvironmentSetupCommand ?? string.Empty;
         ViewModel.EngineBuildId = Server.Config?.EngineBuildId;
 
-        AvailableBuilds = await _context.LlamaCppBuilds
-            .Where(b => b.Status == EngineBuildStatus.Ready)
-            .OrderByDescending(b => b.CreatedAt)
-            .ToListAsync();
+        AvailableBuilds = await LoadAvailableBuildsAsync(Server.Engine);
 
         // Get the start command for display
         ViewModel.StartCommand = await _serverManager.GetStartCommandAsync(Id);
@@ -59,14 +61,6 @@ public class EditModel : PageModel
 
     public async Task<IActionResult> OnPostAsync()
     {
-        AvailableBuilds = await _context.LlamaCppBuilds
-            .Where(b => b.Status == EngineBuildStatus.Ready)
-            .OrderByDescending(b => b.CreatedAt)
-            .ToListAsync();
-
-        if (!ModelState.IsValid)
-            return Page();
-
         Server = await _context.ServerInstances
             .Include(s => s.Config)
             .FirstOrDefaultAsync(s => s.Id == Id);
@@ -74,25 +68,30 @@ public class EditModel : PageModel
         if (Server is null)
             return NotFound();
 
-        var boundBuild = ViewModel.EngineBuildId is { } bid
-            ? await _context.LlamaCppBuilds.FindAsync(bid)
+        AvailableBuilds = await LoadAvailableBuildsAsync(Server.Engine);
+
+        if (!ModelState.IsValid)
+            return Page();
+
+        var boundBuild = Engine is { SupportsManagedBuilds: true } && ViewModel.EngineBuildId is { } bid
+            ? AvailableBuilds.FirstOrDefault(b => b.Id == bid)
             : null;
 
         // A managed build supplies the folder path; only validate a manually-entered one.
         if (boundBuild is null
-            && Server.Engine == ServerEngine.LlamaCpp
-            && !string.IsNullOrWhiteSpace(ViewModel.LlamaCppExecutableFolderPath)
-            && !Directory.Exists(ViewModel.LlamaCppExecutableFolderPath))
+            && Engine is not null
+            && !string.IsNullOrWhiteSpace(ViewModel.InstallFolderPath)
+            && Engine.ValidateInstallFolder(ViewModel.InstallFolderPath) is { } folderError)
         {
-            ModelState.AddModelError(nameof(ViewModel.LlamaCppExecutableFolderPath), $"The folder '{ViewModel.LlamaCppExecutableFolderPath}' does not exist.");
+            ModelState.AddModelError(nameof(ViewModel.InstallFolderPath), folderError);
             return Page();
         }
 
         var configData = new BackendConfigData
         {
-            LlamaCppExecutableFolderPath = boundBuild is not null
+            InstallFolderPath = boundBuild is not null
                 ? boundBuild.InstallPath
-                : string.IsNullOrWhiteSpace(ViewModel.LlamaCppExecutableFolderPath) ? null : ViewModel.LlamaCppExecutableFolderPath,
+                : string.IsNullOrWhiteSpace(ViewModel.InstallFolderPath) ? null : ViewModel.InstallFolderPath,
             CompanionAppPath = string.IsNullOrWhiteSpace(ViewModel.CompanionAppPath) ? null : ViewModel.CompanionAppPath,
             EnvironmentSetupCommand = string.IsNullOrWhiteSpace(ViewModel.EnvironmentSetupCommand) ? null : ViewModel.EnvironmentSetupCommand,
             EngineBuildId = boundBuild?.Id,
@@ -109,13 +108,23 @@ public class EditModel : PageModel
     }
 }
 
+public partial class EditModel
+{
+    /// <summary>Ready installs of <paramref name="engine"/> — the only ones a server of that engine can bind to.</summary>
+    private Task<List<EngineBuild>> LoadAvailableBuildsAsync(ServerEngine engine) =>
+        _context.EngineBuilds
+            .Where(b => b.Status == EngineBuildStatus.Ready && b.Engine == engine)
+            .OrderByDescending(b => b.CreatedAt)
+            .ToListAsync();
+}
+
 public class EditViewModel
 {
-    public string? LlamaCppExecutableFolderPath { get; set; }
+    public string? InstallFolderPath { get; set; }
     public string? CompanionAppPath { get; set; }
     public string? EnvironmentSetupCommand { get; set; }
     public string? StartCommand { get; set; }
 
-    /// <summary>Optional managed build to bind this server to (auto-fills the folder path).</summary>
+    /// <summary>Optional managed build to bind this server to (auto-fills the folder path; llama.cpp only).</summary>
     public Guid? EngineBuildId { get; set; }
 }

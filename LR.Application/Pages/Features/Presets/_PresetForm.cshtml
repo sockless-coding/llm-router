@@ -1,5 +1,16 @@
 @model LR.Application.Pages.Features.Presets.IPresetFormPageModel
+@inject LR.Core.Interfaces.IEngineCatalog EngineCatalog
+@using LR.Core.Services.EngineBuilds
 @{
+    // Which engine each server runs: a Strata server shows only Identity and the Strata section.
+    var engineByServerJson = System.Text.Json.JsonSerializer.Serialize(
+        Model.Servers.ToDictionary(s => s.Id.ToString(), s => s.Engine.ToString()));
+    string Strata(string key) => Model.ViewModel.EngineSettings.GetValueOrDefault(key) ?? "";
+    // What the model path means differs per engine (a GGUF for llama.cpp, a run config for Strata);
+    // the help under the manual path follows the selected server.
+    var modelPathHelpJson = System.Text.Json.JsonSerializer.Serialize(
+        Model.Servers.ToDictionary(s => s.Id.ToString(), s => EngineCatalog.Get(s.Engine)?.ModelPathHelp ?? "")
+    ).Replace("</", "<\\/");
     var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500";
     var selCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all";
     var detectedVarsJson = System.Text.Json.JsonSerializer.Serialize(
@@ -65,8 +76,102 @@
                 <div class="pt-3">
                     <input asp-for="ViewModel.ModelPath" placeholder="/path/to/model.gguf (overrides the model selected above)"
                            class="@inpCls @Html.Raw(ViewData.ModelState["ViewModel.ModelPath"]?.Errors?.Any() == true ? "border-red-500/60" : "")" />
+                    <p id="model-path-help" class="text-xs text-text-secondary mt-1"></p>
                 </div>
             </details>
+            <script>
+                (() => {
+                    const helpByServer = @Html.Raw(modelPathHelpJson);
+                    const serverSelect = document.getElementById('ViewModel_ServerInstanceId');
+                    const help = document.getElementById('model-path-help');
+                    const engineByServer = @Html.Raw(engineByServerJson);
+                    // Sections that don't apply to the selected server's engine are hidden (their
+                    // values are kept and still saved, so switching back loses nothing).
+                    const update = () => {
+                        help.textContent = helpByServer[serverSelect.value] || '';
+                        const strata = engineByServer[serverSelect.value] === 'Strata';
+                        document.querySelectorAll('[id^="section-"]').forEach(el => {
+                            if (el.id === 'section-identity') return;
+                            el.classList.toggle('hidden', el.id === 'section-strata' ? !strata : strata);
+                        });
+                        document.querySelectorAll('.preset-nav-link').forEach(a => {
+                            const id = a.dataset.section;
+                            if (id === 'section-identity') return;
+                            a.classList.toggle('hidden', id === 'section-strata' ? !strata : strata);
+                        });
+                    };
+                    serverSelect.addEventListener('change', update);
+                    // Called again once the rest of the form and the section nav exist (end of _PresetFormNav).
+                    window.__presetEngineUpdate = update;
+                    update();
+                })();
+            </script>
+        </div>
+
+        <!-- ==================== STRATA (Strata servers only) ==================== -->
+        <div id="section-strata" class="hidden bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-4 scroll-mt-24">
+            <h2 class="text-lg font-semibold text-text-primary">Strata</h2>
+            <p class="text-xs text-text-secondary">
+                The first start of this preset prepares its model for Strata with Strata's own setup — the model's pack, the shared ~5 GB
+                MTP draft layer, and a run config tuned to this PC — which can take several minutes; later starts are quick. It runs again when
+                the model, these settings or the Strata install change. Leave a setting blank to take Strata's recommendation for this PC.
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="strata-context" class="block text-sm font-medium text-text-secondary mb-1">Context length</label>
+                    <input id="strata-context" name="ViewModel.EngineSettings[@StrataPresetSettings.Context]" value="@Strata(StrataPresetSettings.Context)"
+                           list="strata-contexts" inputmode="numeric" placeholder="recommended for this GPU" class="@inpCls" />
+                    <datalist id="strata-contexts">
+                        @foreach (var c in StrataPresetSettings.SuggestedContexts)
+                        {
+                            <option value="@c">@(c / 1024)K@(c > 262144 ? " (rope scaling, experimental)" : "")</option>
+                        }
+                    </datalist>
+                    <p class="text-xs text-text-secondary mt-1">Tokens. Longer needs more VRAM, leaving fewer experts on the GPU.</p>
+                </div>
+                <div>
+                    <label for="strata-gpu" class="block text-sm font-medium text-text-secondary mb-1">GPU</label>
+                    <input id="strata-gpu" name="ViewModel.EngineSettings[@StrataPresetSettings.Gpu]" value="@Strata(StrataPresetSettings.Gpu)"
+                           type="number" min="0" placeholder="setup picks" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1">One GPU, numbered as <span class="font-mono">nvidia-smi</span> numbers them.</p>
+                </div>
+                <div>
+                    <label for="strata-vision" class="block text-sm font-medium text-text-secondary mb-1">Images</label>
+                    <select id="strata-vision" name="ViewModel.EngineSettings[@StrataPresetSettings.Vision]" class="@selCls">
+                        <option value="">Recommended (no images)</option>
+                        <option value="gpu" selected="@(Strata(StrataPresetSettings.Vision) == "gpu")">Image encoder on the GPU</option>
+                        <option value="cpu" selected="@(Strata(StrataPresetSettings.Vision) == "cpu")">Image encoder on the CPU</option>
+                        <option value="none" selected="@(Strata(StrataPresetSettings.Vision) == "none")">No images</option>
+                    </select>
+                    <p class="text-xs text-text-secondary mt-1">The encoder is downloaded if it isn't next to the model.</p>
+                </div>
+                <div>
+                    <label for="strata-kv" class="block text-sm font-medium text-text-secondary mb-1">KV cache</label>
+                    <select id="strata-kv" name="ViewModel.EngineSettings[@StrataPresetSettings.Kv]" class="@selCls">
+                        <option value="">Recommended</option>
+                        <option value="int8" selected="@(Strata(StrataPresetSettings.Kv) == "int8")">int8</option>
+                        <option value="k8v4" selected="@(Strata(StrataPresetSettings.Kv) == "k8v4")">k8v4 (8-bit K, 4-bit V)</option>
+                        <option value="q4_0" selected="@(Strata(StrataPresetSettings.Kv) == "q4_0")">q4_0</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="strata-lowram" class="block text-sm font-medium text-text-secondary mb-1">Low-RAM mode</label>
+                    <select id="strata-lowram" name="ViewModel.EngineSettings[@StrataPresetSettings.LowRam]" class="@selCls">
+                        <option value="">Automatic (when the model doesn't fit in RAM)</option>
+                        <option value="on" selected="@(Strata(StrataPresetSettings.LowRam) == "on")">On</option>
+                        <option value="off" selected="@(Strata(StrataPresetSettings.LowRam) == "off")">Off</option>
+                        <option value="resident" selected="@(Strata(StrataPresetSettings.LowRam) == "resident")">Resident (experts kept in RAM)</option>
+                        <option value="mmap" selected="@(Strata(StrataPresetSettings.LowRam) == "mmap")">Mapped (experts read through the file cache)</option>
+                    </select>
+                    <p class="text-xs text-text-secondary mt-1">Writes the experts into one file the first time (35–77 GB).</p>
+                </div>
+                <div>
+                    <label for="strata-parallel" class="block text-sm font-medium text-text-secondary mb-1">Parallel requests</label>
+                    <input id="strata-parallel" name="ViewModel.EngineSettings[@StrataPresetSettings.Parallel]" value="@Strata(StrataPresetSettings.Parallel)"
+                           type="number" min="1" placeholder="1" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1">Each extra slot leaves fewer experts in VRAM.</p>
+                </div>
+            </div>
         </div>
 
         <!-- ==================== CORE SETTINGS (Always Visible) ==================== -->

@@ -11,8 +11,11 @@ public interface IEngineBuildManager
     /// <summary>The GitHub repo builds/updates are sourced from ("ggml-org/llama.cpp").</summary>
     string Repo { get; }
 
-    Task<IReadOnlyList<LlamaCppBuild>> GetAllBuildsAsync();
-    Task<LlamaCppBuild?> GetBuildAsync(Guid id);
+    Task<IReadOnlyList<EngineBuild>> GetAllBuildsAsync();
+
+    /// <summary>Installs of one engine, newest first.</summary>
+    Task<IReadOnlyList<EngineBuild>> GetBuildsAsync(ServerEngine engine);
+    Task<EngineBuild?> GetBuildAsync(Guid id);
 
     /// <summary>Removes a build from the registry, optionally deleting its install folder too.
     /// Servers bound to it have their link cleared.</summary>

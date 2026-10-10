@@ -13,12 +13,18 @@ using LR.Core.Wrapper;
 namespace LR.Providers;
 
 /// <summary>
-/// Thin orchestrator for llama.cpp-based backend providers.
-/// Delegates to specialized components: ArgBuilder, ProcessManager, ResponseParser, TimingCoordinator.
+/// Shared base for providers whose engine runs as a local HTTP server process supervised by
+/// LR.Wrapper and speaks the OpenAI-compatible <c>/v1/chat/completions</c> API (plus, optionally,
+/// Anthropic's <c>/v1/messages</c>) with llama.cpp-style <c>/health</c>, <c>/props</c> and
+/// <c>/slots</c> endpoints. Handles process start/stop/reconnect, health checks, request sending,
+/// SSE parsing and server logging; a concrete engine supplies how to launch it
+/// (<see cref="BuildLaunchSpec"/>), how to tell from its output that it's ready
+/// (<see cref="IsModelLoadedLine"/>/<see cref="TryParseListeningPort"/>), and optionally
+/// per-request hooks and extra request headers.
 /// </summary>
-public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCapacityProvider, IDisposable
+public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiagnostics, IServerCapacityProvider, IServerOutputHandler, IDisposable
 {
-    public ServerEngine Engine => ServerEngine.LlamaCpp;
+    public abstract ServerEngine Engine { get; }
 
     /// <inheritdoc />
     public int? WrapperPid => _processManager.WrapperPid;
@@ -50,29 +56,10 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     public LlamaRuntimeUsage? RuntimeUsage => _runtimeUsage;
 
     /// <summary>
-    /// Path to the folder containing the llama.cpp server executable (e.g., "llama-server").
-    /// Each GPU backend build (CUDA, Vulkan, SYCL) should be in its own folder.
+    /// The engine's install folder, from <see cref="BackendConfigData.InstallFolderPath"/>.
+    /// What it must contain is engine-specific — see <see cref="BuildLaunchSpec"/>.
     /// </summary>
-    protected string? ExecutableFolderPath { get; set; }
-
-    /// <summary>
-    /// Path to the server executable within the folder (e.g., "llama-server.exe" on Windows).
-    /// Override for engine-specific defaults.
-    /// </summary>
-    protected virtual string ServerExecutableName =>
-        OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
-
-    /// <summary>
-    /// Full path to the server executable (computed from ExecutableFolderPath + ServerExecutableName).
-    /// </summary>
-    protected string? ServerExecutablePath
-    {
-        get
-        {
-            if (string.IsNullOrEmpty(ExecutableFolderPath)) return null;
-            return Path.Combine(ExecutableFolderPath, ServerExecutableName);
-        }
-    }
+    protected string? InstallFolderPath { get; private set; }
 
     /// <summary>
     /// The port this instance is listening on.
@@ -90,25 +77,17 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     /// </summary>
     protected virtual string? ServerUrl => $"http://127.0.0.1:{Port}";
 
-    /// <summary>
-    /// The GPU backend type this llama.cpp build was compiled for (e.g., CUDA, Vulkan, SYCL).
-    /// Can be auto-detected from the folder name or set explicitly.
-    /// </summary>
-    protected BackendType? GpuBackendType { get; set; }
-
-    private readonly LlamaCppArgBuilder _argBuilder;
     private readonly WrapperProcessManager _processManager;
-    private readonly LlamaCppTimingCoordinator _timingCoordinator;
 
     /// <summary>
-    /// HTTP client for communicating with the llama.cpp server.
+    /// HTTP client for communicating with the engine's server.
     /// </summary>
     private readonly HttpClient _httpClient;
 
     /// <summary>
     /// Logger for this provider instance.
     /// </summary>
-    private readonly ILogger<LlamaCppProvider> _logger;
+    private readonly ILogger _logger;
 
     /// <summary>
     /// Factory for creating scoped service instances (used to resolve IServerLogService safely from a singleton).
@@ -120,8 +99,8 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     /// </summary>
     private ServerInstance? _serverInstance;
 
-    public LlamaCppProvider(
-        ILogger<LlamaCppProvider> logger,
+    protected ManagedServerProviderBase(
+        ILogger logger,
         IServiceScopeFactory scopeFactory)
     {
         _logger = logger;
@@ -143,21 +122,79 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
         // per-chunk timeout — if no data arrives within this window, the read will cancel.
         _httpClient.Timeout = TimeSpan.FromMinutes(5);
 
-        // Initialize sub-components
-        var stdoutParser = new LlamaCppStdoutParser();
-        _argBuilder = new LlamaCppArgBuilder();
-
-        // Resolve loggers from a scope for the sub-components
         using (var scope = scopeFactory.CreateScope())
         {
-            var serviceProvider = scope.ServiceProvider;
-            var timingLogger = serviceProvider.GetRequiredService<ILogger<LlamaCppTimingCoordinator>>();
-            var processManagerLogger = serviceProvider.GetRequiredService<ILogger<WrapperProcessManager>>();
-
-            _timingCoordinator = new LlamaCppTimingCoordinator(timingLogger);
-            _processManager = new WrapperProcessManager(processManagerLogger, scopeFactory, _timingCoordinator, stdoutParser);
+            var processManagerLogger = scope.ServiceProvider.GetRequiredService<ILogger<WrapperProcessManager>>();
+            _processManager = new WrapperProcessManager(processManagerLogger, scopeFactory, this);
         }
     }
+
+    // --- Engine-specific hooks ---
+
+    /// <summary>
+    /// Builds the process launch for <paramref name="preset"/> on <see cref="Port"/>. Throws
+    /// (with a user-facing message) if the install folder or preset isn't usable — e.g.
+    /// <see cref="InvalidOperationException"/> when nothing is configured,
+    /// <see cref="FileNotFoundException"/> when the executable is missing.
+    /// </summary>
+    protected abstract ServerLaunchSpec BuildLaunchSpec(ModelPreset preset);
+
+    /// <inheritdoc cref="IServerOutputHandler.IsModelLoadedLine"/>
+    protected abstract bool IsModelLoadedLine(string line);
+
+    /// <inheritdoc cref="IServerOutputHandler.TryParseListeningPort"/>
+    protected abstract int? TryParseListeningPort(string line);
+
+    /// <inheritdoc cref="IServerOutputHandler.OnOutputLine"/>
+    protected virtual void OnOutputLine(string line) { }
+
+    /// <summary>
+    /// Called with a fresh <see cref="RouteResponse"/> just before a request is sent, so an engine
+    /// that reports metrics out-of-band (e.g. llama.cpp's stdout timings) can correlate them.
+    /// </summary>
+    protected virtual void OnRequestStarting(RouteResponse response) { }
+
+    /// <summary>
+    /// Called once the response has been parsed (or the stream has ended), to merge any
+    /// out-of-band metrics into it.
+    /// </summary>
+    protected virtual void OnRequestCompleted(RouteResponse response) { }
+
+    /// <summary>
+    /// Adds engine-specific headers (e.g. an API key) to every request sent to the server,
+    /// including <c>/props</c> and <c>/slots</c> reads.
+    /// </summary>
+    protected virtual void ApplyRequestHeaders(HttpRequestMessage request) { }
+
+    /// <summary>
+    /// Endpoint for streaming OpenAI-protocol requests. The body always carries
+    /// <c>"stream": true</c>; engines that also want it in the query string override this.
+    /// </summary>
+    protected virtual string OpenAiStreamingEndpoint => "/v1/chat/completions";
+
+    /// <summary>
+    /// How long a start may take (process launch through the ready markers) before it's treated
+    /// as failed. Engines that load very large models from disk can raise this.
+    /// </summary>
+    protected virtual TimeSpan StartupTimeout => TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Runs before every start, ahead of <see cref="BuildLaunchSpec"/>: an engine that must prepare
+    /// something for a preset first (and can skip it when that's already done) does it here, reporting
+    /// through <paramref name="onProgress"/>. Not bounded by <see cref="StartupTimeout"/>.
+    /// </summary>
+    protected virtual Task PrepareAsync(ModelPreset preset, Func<StartupProgressEvent, Task>? onProgress, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
+
+    /// <summary>The server instance this provider manages, once <see cref="SetServerInstance"/> has run.</summary>
+    protected ServerInstance? ServerInstance => _serverInstance;
+
+    /// <summary>For resolving scoped services (e.g. <see cref="IPresetManager"/>) from this long-lived provider.</summary>
+    protected IServiceScopeFactory ScopeFactory => _scopeFactory;
+
+    void IServerOutputHandler.OnOutputLine(string line) => OnOutputLine(line);
+    bool IServerOutputHandler.IsModelLoadedLine(string line) => IsModelLoadedLine(line);
+    int? IServerOutputHandler.TryParseListeningPort(string line) => TryParseListeningPort(line);
 
     /// <summary>
     /// Sets the server instance reference for logging purposes.
@@ -174,55 +211,37 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     /// </summary>
     public virtual void Configure(BackendConfigData configData)
     {
-        ExecutableFolderPath = configData.LlamaCppExecutableFolderPath;
-        _processManager.ExecutableFolderPath = ExecutableFolderPath;
+        InstallFolderPath = configData.InstallFolderPath;
         _processManager.CompanionAppPath = configData.CompanionAppPath;
         _processManager.EnvironmentSetupCommand = configData.EnvironmentSetupCommand;
     }
 
-    public virtual void StartPort(int? port)
+    public async Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, Func<StartupProgressEvent, Task>? onProgress = null, CancellationToken cancellationToken = default)
     {
+        // Update port if provided — before building the launch, which bakes the port in.
         if (port.HasValue)
         {
             Port = port.Value;
-            _argBuilder.Port = Port;
             _processManager.Port = Port;
         }
-    }
 
-    public async Task<bool> StartProcessAsync(ModelPreset preset, int? port = null, Func<StartupProgressEvent, Task>? onProgress = null, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(ServerExecutablePath))
-            throw new InvalidOperationException($"Server executable path is not set. ExecutableFolderPath: '{ExecutableFolderPath}'");
+        // Engine-specific one-time work (e.g. preparing a model for the engine) before anything is launched.
+        await PrepareAsync(preset, onProgress, cancellationToken);
 
-        if (!File.Exists(ServerExecutablePath))
-            throw new FileNotFoundException($"Server executable not found at: {ServerExecutablePath}");
+        var launch = BuildLaunchSpec(preset);
+        _processManager.StartupTimeout = StartupTimeout;
 
         // Forget the previous run's /props and /metrics — this start may use a different config.
         _serverProps = null;
         _runtimeUsage = null;
 
-        // Update port if provided
-        if (port.HasValue)
-        {
-            Port = port.Value;
-            _argBuilder.Port = Port;
-            _processManager.Port = Port;
-        }
-
-        // Auto-detect GPU backend type from folder name
-        GpuBackendType = DetectGpuBackendType(ExecutableFolderPath);
-
-        // Build args via ArgBuilder and start process via ProcessManager
-        var args = _argBuilder.Build(preset);
-        string argPreview = string.Join(" ", args);
+        string argPreview = string.Join(" ", launch.Arguments);
 
         await LogProviderMessage(ServerLogLevel.Info,
             $"Starting server on port {Port}. Args: {argPreview.Substring(0, Math.Min(argPreview.Length, 200))}{(argPreview.Length > 200 ? "..." : "")}");
 
         var result = await _processManager.StartProcessAsync(
-            ServerExecutablePath,
-            args,
+            launch,
             onProgress,
             cancellationToken);
 
@@ -289,15 +308,16 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     }
 
     /// <summary>
-    /// Best-effort read of llama.cpp's <c>/props</c> endpoint. Any failure is swallowed — the
-    /// server is already known healthy and callers fall back to preset/GGUF data until this
-    /// succeeds on a later health check.
+    /// Best-effort read of the server's llama.cpp-style <c>/props</c> endpoint. Any failure is
+    /// swallowed — the server is already known healthy and callers fall back to preset/GGUF data
+    /// until this succeeds on a later health check.
     /// </summary>
     private async Task TryRefreshServerPropsAsync(HttpClient httpClient, CancellationToken cancellationToken)
     {
         try
         {
-            using var response = await httpClient.GetAsync($"{ServerUrl}/props", cancellationToken);
+            using var request = CreateRequest(HttpMethod.Get, "/props");
+            using var response = await httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
                 return;
 
@@ -348,7 +368,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     }
 
     /// <summary>
-    /// Best-effort read of llama.cpp's <c>/slots</c> endpoint. Populates <see cref="RuntimeUsage"/>
+    /// Best-effort read of the server's llama.cpp-style <c>/slots</c> endpoint. Populates <see cref="RuntimeUsage"/>
     /// with per-slot context (KV-cache) occupancy — <c>n_ctx</c> and the tokens each slot is
     /// currently holding (cached prompt + generated so far). llama.cpp's Prometheus
     /// <c>/metrics</c> no longer exposes a KV-cache gauge, and <c>/slots</c> is on by default and
@@ -365,7 +385,8 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(2));
 
-            using var response = await _httpClient.GetAsync($"{ServerUrl}/slots", cts.Token);
+            using var request = CreateRequest(HttpMethod.Get, "/slots");
+            using var response = await _httpClient.SendAsync(request, cts.Token);
             if (!response.IsSuccessStatusCode)
                 return;
 
@@ -384,7 +405,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
         const int maxRetries = 2;
         Exception? lastException = null;
 
-        // llama.cpp exposes a native Anthropic-compatible endpoint alongside its OpenAI one, so
+        // The engine exposes a native Anthropic-compatible endpoint alongside its OpenAI one, so
         // a Claude-protocol payload (as built by ClaudeHandler) is routed there unchanged instead
         // of being sent to /v1/chat/completions, which doesn't understand its shape (top-level
         // "system", content blocks, etc.).
@@ -403,10 +424,8 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
             {
                 if (string.IsNullOrEmpty(ServerUrl)) return null;
 
-                // Register this request for timing data collection from stdout
                 var routeResponse = new RouteResponse();
-                _timingCoordinator.EnqueuePending(DateTimeOffset.UtcNow, routeResponse);
-                _logger.LogInformation("[Stats] Enqueued non-streaming request.");
+                OnRequestStarting(routeResponse);
 
                 // This method reads the entire response body as one JSON document, so the
                 // backend must not switch to SSE framing ("data: {...}\n\n") — force "stream"
@@ -416,10 +435,9 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
                     ?? new Dictionary<string, JsonElement>();
                 requestBody["stream"] = JsonSerializer.SerializeToElement(false);
 
-                var response = await _httpClient.PostAsJsonAsync(
-                    $"{ServerUrl}{endpoint}",
-                    requestBody,
-                    cancellationToken);
+                using var httpRequest = CreateRequest(HttpMethod.Post, endpoint);
+                httpRequest.Content = JsonContent.Create(requestBody);
+                using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -433,13 +451,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
                 else
                     LlamaCppResponseParser.ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
 
-                // Non-streaming request: by the time we get here, stdout parsing should have
-                // already captured completion timing. Merge it into our response.
-                _logger.LogInformation("[Stats] Before merge - PromptMs={PromptMs}, GenMs={GenMs}, TotalMs={TotalMs}",
-                    routeResponse.PromptProcessingMs, routeResponse.GenerationMs, routeResponse.TotalLatencyMs);
-                _timingCoordinator.MergeTimingData(routeResponse);
-                _logger.LogInformation("[Stats] After merge - PromptMs={PromptMs:F0}, GenMs={GenMs:F0}, TotalMs={TotalMs:F0}, TokensProcessed={Tokens}",
-                    routeResponse.PromptProcessingMs, routeResponse.GenerationMs, routeResponse.TotalLatencyMs, routeResponse.PromptTokensProcessed);
+                OnRequestCompleted(routeResponse);
 
                 return routeResponse;
             }
@@ -486,7 +498,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
     /// Uses IServiceScopeFactory to resolve IServerLogService in a new scope, avoiding
     /// the captured-dependency anti-pattern of injecting scoped services into singletons.
     /// </summary>
-    private async Task LogProviderMessage(ServerLogLevel level, string message)
+    protected async Task LogProviderMessage(ServerLogLevel level, string message)
     {
         // Log to console via ILogger (always works)
         var logLevel = level switch
@@ -536,18 +548,20 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
         HttpResponseMessage? response = null;
         HttpRequestMessage? httpRequest = null;
 
-        // Register this request for timing data collection from stdout
         var streamResponse = new RouteResponse();
-        _timingCoordinator.EnqueuePending(DateTimeOffset.UtcNow, streamResponse);
-        _logger.LogInformation("[Stats] Enqueued streaming request.");
+        OnRequestStarting(streamResponse);
+
+        // Whatever the original client asked for, this path reads SSE — make sure the body says
+        // so (a payload queued from a non-streaming request may still have "stream": false).
+        var streamBody = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload)
+            ?? new Dictionary<string, JsonElement>();
+        streamBody["stream"] = JsonSerializer.SerializeToElement(true);
+        payload = JsonSerializer.Serialize(streamBody);
 
         const int maxRetries = 2;
         Exception? lastException = null;
 
-        // llama.cpp's native Anthropic endpoint takes "stream" as a body field (like the real
-        // Claude API), not a query string — unlike the ?stream=true convention used below for
-        // its OpenAI-compatible endpoint.
-        string endpoint = protocol == ApiProtocol.Claude ? "/v1/messages" : "/v1/chat/completions?stream=true";
+        string endpoint = protocol == ApiProtocol.Claude ? "/v1/messages" : OpenAiStreamingEndpoint;
 
         for (int attempt = 0; attempt <= maxRetries; attempt++)
         {
@@ -570,10 +584,8 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
                 // allowing chunks to flow through the stream incrementally instead of buffering
                 // the entire response before yielding.
                 httpRequest?.Dispose(); // dispose a prior attempt's request, if this is a retry
-                httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{ServerUrl}{endpoint}")
-                {
-                    Content = requestContent
-                };
+                httpRequest = CreateRequest(HttpMethod.Post, endpoint);
+                httpRequest.Content = requestContent;
                 response = await _httpClient.SendAsync(
                     httpRequest,
                     HttpCompletionOption.ResponseHeadersRead,
@@ -687,7 +699,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
                 // choices, which the code below folds into streamResponse as it's seen).
                 streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
                 streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
-                _timingCoordinator.MergeTimingData(streamResponse);
+                OnRequestCompleted(streamResponse);
                 completed = true;
                 yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
                 break;
@@ -866,7 +878,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
             streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
             streamResponse.Payload = accumulatedText ?? string.Empty;
             streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
-            _timingCoordinator.MergeTimingData(streamResponse);
+            OnRequestCompleted(streamResponse);
             yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
         }
         }
@@ -1030,7 +1042,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
                         streamResponse.Payload = accumulatedText ?? string.Empty;
                         streamResponse.ReasoningContent = accumulatedThinking;
                         streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
-                        _timingCoordinator.MergeTimingData(streamResponse);
+                        OnRequestCompleted(streamResponse);
                         completed = true;
                         chunksToYield.Add(new RouteStreamChunk { IsFinal = true, Response = streamResponse });
                         break;
@@ -1059,7 +1071,7 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
             streamResponse.Payload = accumulatedText ?? string.Empty;
             streamResponse.ReasoningContent = accumulatedThinking;
             streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
-            _timingCoordinator.MergeTimingData(streamResponse);
+            OnRequestCompleted(streamResponse);
             yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
         }
     }
@@ -1084,47 +1096,43 @@ public class LlamaCppProvider : IBackendProvider, IWrapperDiagnostics, IServerCa
 
     public virtual string? GetStartCommand(ModelPreset preset, int? port = null)
     {
-        if (string.IsNullOrEmpty(ServerExecutablePath) || !File.Exists(ServerExecutablePath))
+        ServerLaunchSpec launch;
+        try
+        {
+            launch = BuildLaunchSpec(preset);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
             return null;
+        }
 
-        var args = _argBuilder.Build(preset);
-        string argString = WindowsCommandLine.Join(args);
+        string argString = WindowsCommandLine.Join(launch.Arguments);
 
         // If environment setup is configured, the actual command runs as a two-line batch
         // script (see WrapperHost.CreateTempBatchScriptAsync) — mirror that here rather than
         // trying to flatten it into a single cmd.exe /c line, which needs another layer of
         // quoting and would no longer match what's actually executed.
         if (!string.IsNullOrEmpty(_processManager.EnvironmentSetupCommand))
-            return $"call {_processManager.EnvironmentSetupCommand}\r\ncall \"{ServerExecutablePath}\" {argString}";
+            return $"call {_processManager.EnvironmentSetupCommand}\r\ncall \"{launch.ExecutablePath}\" {argString}";
 
-        return $"\"{ServerExecutablePath}\" {argString}";
+        return $"\"{launch.ExecutablePath}\" {argString}";
     }
 
     /// <summary>
-    /// Auto-detects the GPU backend type from the executable folder path name.
+    /// Creates a request to <paramref name="path"/> on the running server with
+    /// <see cref="ApplyRequestHeaders"/> applied.
     /// </summary>
-    private static BackendType DetectGpuBackendType(string? folderPath)
+    private HttpRequestMessage CreateRequest(HttpMethod method, string path)
     {
-        if (string.IsNullOrEmpty(folderPath)) return BackendType.Unknown;
-
-        string lower = folderPath.ToLowerInvariant();
-        if (lower.Contains("cuda")) return BackendType.Cuda;
-        if (lower.Contains("vulkan")) return BackendType.Vulkan;
-        if (lower.Contains("sycl") || lower.Contains("oneapi")) return BackendType.Sycl;
-        if (lower.Contains("rocm") || lower.Contains("hip")) return BackendType.Hip;
-        if (lower.Contains("metal")) return BackendType.Metal;
-        if (lower.Contains("opencl") || lower.Contains("adreno")) return BackendType.OpenCL;
-        if (lower.Contains("openvino")) return BackendType.OpenVino;
-        if (lower.Contains("musa")) return BackendType.Musa;
-        if (lower.Contains("cann") || lower.Contains("ascend")) return BackendType.Cann;
-
-        return BackendType.Unknown;
+        var request = new HttpRequestMessage(method, $"{ServerUrl}{path}");
+        ApplyRequestHeaders(request);
+        return request;
     }
 
     /// <summary>
     /// Disposes the HTTP client and cancels any running stdout reader.
     /// </summary>
-    public void Dispose()
+    public virtual void Dispose()
     {
         _processManager.CancelStdoutReader();
         _httpClient.Dispose();

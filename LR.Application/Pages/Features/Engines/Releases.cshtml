@@ -1,23 +1,44 @@
 @page
 @using LR.Core.Models
+@using LR.Core.Services.EngineBuilds
+@using LR.Application.Pages.Features.Engines
 @model LR.Application.Pages.Features.Engines.EngineReleasesModel
 @{
     ViewData["Title"] = "Install a release";
+    var strata = Model.Engine == ServerEngine.Strata;
 }
 
 <form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
 
 <div class="flex items-center gap-3 mb-6">
-    <a href="/Features/Engines/Index" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
+    <a href="/Features/Engines/Index?engine=@Model.Engine" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
     <span class="text-text-secondary">/</span>
-    <p class="text-text-secondary text-sm">Prebuilt llama.cpp releases for <span class="text-text-primary font-mono">@Model.HostOs-@Model.HostArch</span></p>
+    @if (strata)
+    {
+        <p class="text-text-secondary text-sm">Strata releases</p>
+    }
+    else
+    {
+        <p class="text-text-secondary text-sm">Prebuilt llama.cpp releases for <span class="text-text-primary font-mono">@Model.HostOs-@Model.HostArch</span></p>
+    }
 </div>
 
 @if (!Model.RootConfigured)
 {
     <div class="bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 rounded-lg px-4 py-3 text-sm mb-6">
-        Set a builds root folder in <a href="/Features/Engines/Index" class="underline">Engine Build Settings</a> before installing.
+        Set a builds root folder in <a href="/Features/Engines/Index?engine=@Model.Engine" class="underline">Engine Build Settings</a> before installing.
     </div>
+}
+
+@if (strata)
+{
+    <p class="text-text-secondary text-sm mb-6">
+        Install a Strata release with one of its ready-made engines — CUDA for current NVIDIA drivers, CUDA 12 for older ones, or AMD.
+        Each installs side by side into its own folder under <span class="font-mono">@(Model.InstallRoot is { Length: > 0 } root ? root : "<install root>")</span>
+        with the release's code, its Python packages and the engine (checked against GitHub's SHA-256). No model is installed:
+        download one on the <a href="/Features/Models/HuggingFace?repoId=ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF" class="text-neon-cyan/80 hover:text-neon-cyan">Models page</a>,
+        then use it in a preset on a Strata server.
+    </p>
 }
 
 @if (Model.LoadError is not null)
@@ -28,9 +49,8 @@
 <div class="space-y-4">
     @foreach (var release in Model.Releases)
     {
-        var backends = Model.AvailableBackends(release).ToList();
         <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4">
-            <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center justify-between mb-2 gap-4">
                 <div>
                     <a href="@release.HtmlUrl" target="_blank" rel="noopener" class="text-text-primary font-semibold hover:text-neon-cyan transition-colors">@(release.Name ?? release.TagName)</a>
                     <span class="text-xs text-text-secondary ml-2 font-mono">@release.TagName</span>
@@ -39,22 +59,63 @@
                         <span class="text-xs text-text-secondary ml-2">@Html.Timestamp(release.PublishedAt.Value, "date-full")</span>
                     }
                 </div>
-            </div>
-            @if (backends.Count == 0)
-            {
-                <p class="text-xs text-text-secondary">No prebuilt archive for @Model.HostOs-@Model.HostArch in this release.</p>
-            }
-            else
-            {
-                <div class="flex flex-wrap items-center gap-2">
-                    @foreach (var backend in backends)
+                @if (strata)
+                {
+                    if (Model.InstalledTags.Contains(release.TagName))
                     {
-                        <button type="button" onclick="installRelease('@backend', '@release.TagName')"
+                        <span class="text-xs px-2 py-0.5 rounded bg-neon-green/10 text-neon-green border border-neon-green/20 shrink-0">Installed</span>
+                    }
+                }
+            </div>
+            @if (strata)
+            {
+                if (EngineReleasesModel.Headline(release) is { } headline)
+                {
+                    <p class="text-sm text-text-secondary mb-2">@headline</p>
+                }
+                var engines = release.Assets
+                    .Select(a => (Asset: a, Variant: StrataLayout.VariantOfAsset(a.Name)))
+                    .Where(x => x.Variant is not null)
+                    .OrderBy(x => x.Variant)
+                    .ToList();
+                <div class="flex flex-wrap items-center gap-2">
+                    @if (engines.Count == 0)
+                    {
+                        <button type="button" onclick="installRelease('@ServerEngine.Strata', '', '@release.TagName', '')"
                                 class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">
-                            Install @backend
+                            Install @release.TagName
+                        </button>
+                        <span class="text-[11px] text-text-secondary">No ready-made engine for this OS — Strata compiles one the first time a model is prepared.</span>
+                    }
+                    @foreach (var (asset, variant) in engines)
+                    {
+                        <button type="button" onclick="installRelease('@ServerEngine.Strata', '@StrataLayout.Describe(variant!.Value)', '@release.TagName', '@asset.Name')"
+                                title="@asset.Name"
+                                class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">
+                            Install @StrataLayout.Describe(variant!.Value) (@EngineReleasesModel.FormatSize(asset.Size))
                         </button>
                     }
                 </div>
+            }
+            else
+            {
+                var backends = Model.AvailableBackends(release).ToList();
+                if (backends.Count == 0)
+                {
+                    <p class="text-xs text-text-secondary">No prebuilt archive for @Model.HostOs-@Model.HostArch in this release.</p>
+                }
+                else
+                {
+                    <div class="flex flex-wrap items-center gap-2">
+                        @foreach (var backend in backends)
+                        {
+                            <button type="button" onclick="installRelease('@ServerEngine.LlamaCpp', '@backend', '@release.TagName')"
+                                    class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">
+                                Install @backend
+                            </button>
+                        }
+                    </div>
+                }
             }
         </div>
     }
@@ -64,11 +125,16 @@
     <script>
         (function () {
             const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
-            window.installRelease = async function (backend, tag) {
-                if (!confirm(`Install the ${backend} build from ${tag}?`)) return;
+            window.installRelease = async function (engine, backend, tag, asset) {
+                const what = engine === 'Strata'
+                    ? (backend ? `Strata ${tag} with the ${backend} engine` : `Strata ${tag}`)
+                    : `the ${backend} build from ${tag}`;
+                if (!confirm(`Install ${what}?`)) return;
                 const formData = new FormData();
                 formData.append('Command', 'installRelease');
-                formData.append('Backend', backend);
+                formData.append('Engine', engine);
+                if (engine === 'Strata') { if (asset) formData.append('Asset', asset); }
+                else if (backend) formData.append('Backend', backend);
                 formData.append('ReleaseTag', tag);
                 formData.append('__RequestVerificationToken', token());
                 const resp = await fetch('/Features/Engines/Actions', { method: 'POST', body: formData });

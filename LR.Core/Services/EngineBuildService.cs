@@ -17,7 +17,7 @@ namespace LR.Core.Services;
 /// uses <see cref="IServiceScopeFactory"/> per operation to reach the scoped DbContext — the same
 /// shape as <see cref="ModelDownloadService"/>.
 /// </summary>
-public class EngineBuildService
+public partial class EngineBuildService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IGitHubClient _github;
@@ -47,10 +47,18 @@ public class EngineBuildService
     public async Task<string?> GetWorkRootAsync(Guid buildId)
     {
         var settings = await _settings.GetAsync();
-        if (string.IsNullOrWhiteSpace(settings.InstallRootFolder) && string.IsNullOrWhiteSpace(settings.BuildWorkspaceFolder))
-            return null;
-        return Path.Combine(settings.ResolveWorkspaceRoot(), ".work", buildId.ToString("N"));
+        return Path.Combine(WorkspaceRoot(settings), ".work", buildId.ToString("N"));
     }
+
+    /// <summary>
+    /// The configured build workspace, or — when neither an install root nor a workspace is set
+    /// (e.g. only Strata checkouts are tracked, which live wherever the user put them) — a folder
+    /// next to the app, so jobs still have somewhere to keep their logs.
+    /// </summary>
+    private static string WorkspaceRoot(EngineBuildSettings settings) =>
+        string.IsNullOrWhiteSpace(settings.InstallRootFolder) && string.IsNullOrWhiteSpace(settings.BuildWorkspaceFolder)
+            ? Path.Combine(AppContext.BaseDirectory, "data", "engine-builds")
+            : settings.ResolveWorkspaceRoot();
 
     /// <summary>Full transcript of a build's <c>build.log</c>, or null if there isn't one.</summary>
     public async Task<string?> ReadBuildLogAsync(Guid buildId)
@@ -76,7 +84,7 @@ public class EngineBuildService
     }
 
     /// <summary>
-    /// Creates a placeholder <see cref="LlamaCppBuild"/> row (Status = Downloading) and kicks off
+    /// Creates a placeholder <see cref="EngineBuild"/> row (Status = Downloading) and kicks off
     /// the official-release install pipeline on a background task. Returns the build's ID.
     /// </summary>
     public async Task<Guid> StartReleaseInstallAsync(BackendType backend, string? releaseTag, string? name)
@@ -85,7 +93,7 @@ public class EngineBuildService
         var installRoot = settings.InstallRootFolder;
         if (string.IsNullOrWhiteSpace(installRoot))
             throw new InvalidOperationException("Set an engine install root folder in Settings before installing builds.");
-        var workspaceRoot = settings.ResolveWorkspaceRoot();
+        var workspaceRoot = WorkspaceRoot(settings);
 
         // Resolve "latest" up front so the folder is named for the actual build number.
         if (releaseTag is null)
@@ -104,10 +112,10 @@ public class EngineBuildService
         {
             var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
 
-            if (await context.LlamaCppBuilds.AnyAsync(b => b.InstallPath == outputDir))
+            if (await context.EngineBuilds.AnyAsync(b => b.InstallPath == outputDir))
                 throw new InvalidOperationException($"A build already exists at {outputDir}. Delete it first or pick a different release.");
 
-            var build = new LlamaCppBuild
+            var build = new EngineBuild
             {
                 Id = Guid.NewGuid(),
                 Name = name ?? $"llama.cpp {tagLabel} ({backend})",
@@ -117,7 +125,7 @@ public class EngineBuildService
                 VersionTag = releaseTag,
                 Status = EngineBuildStatus.Downloading,
             };
-            context.LlamaCppBuilds.Add(build);
+            context.EngineBuilds.Add(build);
             await context.SaveChangesAsync();
             buildId = build.Id;
         }
@@ -129,7 +137,7 @@ public class EngineBuildService
     }
 
     /// <summary>
-    /// Creates a placeholder <see cref="LlamaCppBuild"/> row (Status = Building) and kicks off the
+    /// Creates a placeholder <see cref="EngineBuild"/> row (Status = Building) and kicks off the
     /// source-compile pipeline for a recipe on a background task. Returns the build's ID.
     /// </summary>
     public async Task<Guid> StartSourceBuildAsync(Guid recipeId, string? gitRefOverride, string? name)
@@ -138,7 +146,7 @@ public class EngineBuildService
         var installRoot = settings.InstallRootFolder;
         if (string.IsNullOrWhiteSpace(installRoot))
             throw new InvalidOperationException("Set an engine install root folder in Settings before building.");
-        var workspaceRoot = settings.ResolveWorkspaceRoot();
+        var workspaceRoot = WorkspaceRoot(settings);
 
         LlamaCppBuildRecipe recipe;
         Guid buildId;
@@ -154,10 +162,10 @@ public class EngineBuildService
             var folderName = SanitizeFolder($"{refLabel}-{recipe.BackendType.ToString().ToLowerInvariant()}-{recipeSlug}");
             outputDir = Path.GetFullPath(Path.Combine(installRoot, folderName));
 
-            if (await context.LlamaCppBuilds.AnyAsync(b => b.InstallPath == outputDir))
+            if (await context.EngineBuilds.AnyAsync(b => b.InstallPath == outputDir))
                 throw new InvalidOperationException($"A build already exists at {outputDir}. Delete it or change the recipe/ref.");
 
-            var build = new LlamaCppBuild
+            var build = new EngineBuild
             {
                 Id = Guid.NewGuid(),
                 Name = name ?? $"{recipe.Name} ({refLabel})",
@@ -167,7 +175,7 @@ public class EngineBuildService
                 InstallPath = outputDir,
                 Status = EngineBuildStatus.Building,
             };
-            context.LlamaCppBuilds.Add(build);
+            context.EngineBuilds.Add(build);
             await context.SaveChangesAsync();
             buildId = build.Id;
         }
@@ -180,7 +188,7 @@ public class EngineBuildService
 
     /// <summary>
     /// Refreshes an existing build <em>in place</em>: the new version is staged in scratch, then
-    /// swapped into the build's current <see cref="LlamaCppBuild.InstallPath"/> and the same row is
+    /// swapped into the build's current <see cref="EngineBuild.InstallPath"/> and the same row is
     /// updated — so every server bound to it picks up the new binaries with no re-pointing. A
     /// release build re-downloads; a source build recompiles from its recipe. Returns the build ID
     /// (unchanged). Throws if the build is busy or a bound server is still running.
@@ -188,7 +196,7 @@ public class EngineBuildService
     public async Task<Guid> StartUpdateAsync(Guid buildId, string? refOverride)
     {
         var settings = await _settings.GetAsync();
-        var workspaceRoot = settings.ResolveWorkspaceRoot();
+        var workspaceRoot = WorkspaceRoot(settings);
 
         EngineBuildSource source;
         BackendType backend;
@@ -198,7 +206,7 @@ public class EngineBuildService
         using (var scope = _scopeFactory.CreateScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
-            var build = await context.LlamaCppBuilds.FindAsync(buildId)
+            var build = await context.EngineBuilds.FindAsync(buildId)
                 ?? throw new InvalidOperationException("Build not found.");
 
             if (_active.ContainsKey(buildId) ||
@@ -208,15 +216,20 @@ public class EngineBuildService
             if (string.IsNullOrWhiteSpace(build.InstallPath))
                 throw new InvalidOperationException("This build has no install folder to update in place.");
 
-            // The executable would be locked (and swapping binaries under a live inference server
-            // is unsafe), so require bound servers to be stopped first.
-            var busyServers = await context.BackendConfigs
-                .Where(c => c.EngineBuildId == buildId)
-                .Join(context.ServerInstances, c => c.ServerInstanceId, s => s.Id, (c, s) => s.Status)
-                .CountAsync(st => st == ServerStatus.Running || st == ServerStatus.Starting || st == ServerStatus.Reconnecting);
-            if (busyServers > 0)
-                throw new InvalidOperationException(
-                    $"Stop the {busyServers} running server(s) bound to this build before updating it in place.");
+            await EnsureNoRunningServersAsync(context, build);
+
+            // Strata updates itself: new code (pull, or a release tag), then its own setup.
+            if (build.Engine == ServerEngine.Strata)
+            {
+                string? releaseTag = build.Source == EngineBuildSource.OfficialRelease
+                    ? (await GetStrataReleaseAsync(refOverride)).TagName
+                    : null;
+                build.Status = EngineBuildStatus.Building;
+                build.StatusMessage = "Updating in place…";
+                await context.SaveChangesAsync();
+                StartJob(buildId, ct => RunStrataUpdateAsync(buildId, build.InstallPath, workspaceRoot, releaseTag, ct));
+                return buildId;
+            }
 
             if (build.Source == EngineBuildSource.SourceCompile)
             {
@@ -312,7 +325,7 @@ public class EngineBuildService
 
             using var scope = _scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
-            var build = await context.LlamaCppBuilds.FindAsync(new object?[] { buildId }, ct);
+            var build = await context.EngineBuilds.FindAsync(new object?[] { buildId }, ct);
             if (build is not null)
             {
                 build.Status = EngineBuildStatus.Ready;
@@ -363,11 +376,35 @@ public class EngineBuildService
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
-        var build = await context.LlamaCppBuilds.FindAsync(buildId);
+        var build = await context.EngineBuilds.FindAsync(buildId);
         if (build is null) return;
         build.Status = EngineBuildStatus.Ready;
         build.StatusMessage = message;
         await context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Throws if a server running from <paramref name="build"/> — bound to it, or pointed at its
+    /// folder by hand — is up: its files would be locked, and swapping them under a live
+    /// inference server is unsafe.
+    /// </summary>
+    private static async Task EnsureNoRunningServersAsync(LRDbContext context, EngineBuild build)
+    {
+        var busyServers = await context.BackendConfigs
+            .Where(c => c.EngineBuildId == build.Id || c.InstallFolderPath == build.InstallPath)
+            .Join(context.ServerInstances, c => c.ServerInstanceId, s => s.Id, (c, s) => s.Status)
+            .CountAsync(st => st == ServerStatus.Running || st == ServerStatus.Starting || st == ServerStatus.Reconnecting);
+        if (busyServers > 0)
+            throw new InvalidOperationException(
+                $"Stop the {busyServers} running server(s) using this install before updating it in place.");
+    }
+
+    /// <summary>Tracks <paramref name="buildId"/> as running (so it can be cancelled) and runs <paramref name="job"/> in the background.</summary>
+    private void StartJob(Guid buildId, Func<CancellationToken, Task> job)
+    {
+        var cts = new CancellationTokenSource();
+        _active[buildId] = cts;
+        _ = Task.Run(() => job(cts.Token));
     }
 
     private async Task RunSourceBuildAsync(
@@ -412,7 +449,7 @@ public class EngineBuildService
 
             using var scope = _scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
-            var build = await context.LlamaCppBuilds.FindAsync(new object?[] { buildId }, ct);
+            var build = await context.EngineBuilds.FindAsync(new object?[] { buildId }, ct);
             if (build is not null)
             {
                 build.Status = EngineBuildStatus.Ready;
@@ -480,7 +517,7 @@ public class EngineBuildService
 
             using var scope = _scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
-            var build = await context.LlamaCppBuilds.FindAsync(new object?[] { buildId }, ct);
+            var build = await context.EngineBuilds.FindAsync(new object?[] { buildId }, ct);
             if (build is not null)
             {
                 build.Status = EngineBuildStatus.Ready;
@@ -526,7 +563,7 @@ public class EngineBuildService
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
-        var build = await context.LlamaCppBuilds.FindAsync(buildId);
+        var build = await context.EngineBuilds.FindAsync(buildId);
         if (build is null) return;
         build.Status = EngineBuildStatus.Error;
         build.StatusMessage = message;

@@ -98,7 +98,7 @@ public class WrapperReconciliationService
         {
             provider.Configure(new BackendConfigData
             {
-                LlamaCppExecutableFolderPath = instance.Config.LlamaCppExecutableFolderPath,
+                InstallFolderPath = instance.Config.InstallFolderPath,
                 CompanionAppPath = instance.Config.CompanionAppPath,
                 EnvironmentSetupCommand = instance.Config.EnvironmentSetupCommand,
             });

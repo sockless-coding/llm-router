@@ -999,6 +999,14 @@ public class ModelPreset
     // ==================== NAVIGATION ====================
 
     /// <summary>
+    /// Settings that only one engine understands, keyed <c>&lt;engine&gt;.&lt;setting&gt;</c> (e.g.
+    /// <c>strata.vision</c>). Lets an engine add its own launch options without a column per option;
+    /// the llama.cpp settings keep their typed columns above. Stored as JSON.
+    /// </summary>
+    [Column(TypeName = "TEXT")]
+    public Dictionary<string, string> EngineSettings { get; set; } = new();
+
+    /// <summary>
     /// Navigation: parent server instance.
     /// </summary>
     public ServerInstance? ServerInstance { get; set; }

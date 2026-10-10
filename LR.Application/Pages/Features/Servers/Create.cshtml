@@ -35,7 +35,12 @@
                     class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all">
                 @foreach (var engine in Model.Engines)
                 {
-                    <option value="@engine.Value">@engine.Label</option>
+                    <option value="@engine.Engine"
+                            data-display-name="@engine.DisplayName"
+                            data-managed-builds="@(engine.SupportsManagedBuilds ? "true" : "false")"
+                            data-folder-label="@engine.InstallFolderLabel"
+                            data-folder-help="@engine.InstallFolderHelp"
+                            data-folder-placeholder="@engine.InstallFolderPlaceholder">@engine.DisplayName</option>
                 }
             </select>
         </div>
@@ -47,16 +52,16 @@
                    class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500" />
         </div>
 
-        <!-- llama.cpp-specific configuration -->
-        <div id="llamacppFields" class="space-y-4">
-            <h3 class="text-sm font-semibold text-gray-200 border-b border-gray-700/50 pb-2">llama.cpp Configuration</h3>
+        <!-- Engine configuration (labels/help switch with the selected engine) -->
+        <div id="engineFields" class="space-y-4">
+            <h3 class="text-sm font-semibold text-gray-200 border-b border-gray-700/50 pb-2"><span id="engineConfigTitle">llama.cpp</span> Configuration</h3>
 
-            <!-- Managed build -->
-            <div>
+            <!-- Managed build (engines that support managed builds only) -->
+            <div id="managedBuildField">
                 <label asp-for="ViewModel.EngineBuildId" class="block text-sm font-medium text-text-secondary mb-1">
                     Engine Build
                 </label>
-                <p class="text-xs text-gray-500 mb-2">Bind this server to a build from <a href="/Features/Engines/Index" class="text-neon-cyan/70 hover:text-neon-cyan">Engines</a>. Its install folder and GPU backend are used automatically. Choose <em>custom folder</em> to point at a build you manage yourself.</p>
+                <p class="text-xs text-gray-500 mb-2">Bind this server to a build from <a id="enginesLink" href="/Features/Engines/Index" class="text-neon-cyan/70 hover:text-neon-cyan">Engines</a>. Its install folder and GPU backend are used automatically. Choose <em>custom folder</em> to point at a build you manage yourself.</p>
                 @if (Model.AvailableBuilds.Count == 0)
                 {
                     <p class="text-xs text-yellow-400/80 mb-2">No ready builds yet — <a href="/Features/Engines/Index" class="underline hover:text-yellow-300">download or compile one</a>, or enter a folder path below.</p>
@@ -66,21 +71,21 @@
                     <option value="">— custom folder (enter path below) —</option>
                     @foreach (var build in Model.AvailableBuilds)
                     {
-                        <option value="@build.Id">@build.Name — @build.BackendType (@(build.VersionTag ?? "?"))</option>
+                        <option value="@build.Id" data-engine="@build.Engine">@build.Name — @build.BackendType (@(build.VersionTag ?? "?"))</option>
                     }
                 </select>
                 <span asp-validation-for="ViewModel.EngineBuildId" class="text-xs text-neon-red mt-1"></span>
             </div>
 
-            <!-- Executable Folder Path -->
-            <div id="llamacppFolderField">
-                <label for="ViewModel_LlamaCppExecutableFolderPath" class="block text-sm font-medium text-text-secondary mb-1">
+            <!-- Install Folder Path -->
+            <div id="installFolderField">
+                <label id="installFolderLabel" for="ViewModel_InstallFolderPath" class="block text-sm font-medium text-text-secondary mb-1">
                     Server Folder Path
                 </label>
-                <p class="text-xs text-gray-500 mb-2">Path to the folder containing your llama.cpp server executable (e.g., <code>llama-server.exe</code>). Each GPU backend build should be in its own folder. Ignored when an engine build is selected above.</p>
-                <input asp-for="ViewModel.LlamaCppExecutableFolderPath" placeholder="C:\llamacpp\cuda-build"
+                <p class="text-xs text-gray-500 mb-2"><span id="installFolderHelp"></span><span id="installFolderBuildNote"> Ignored when an engine build is selected above.</span></p>
+                <input asp-for="ViewModel.InstallFolderPath"
                        class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
-                <span asp-validation-for="ViewModel.LlamaCppExecutableFolderPath" class="text-xs text-neon-red mt-1"></span>
+                <span asp-validation-for="ViewModel.InstallFolderPath" class="text-xs text-neon-red mt-1"></span>
             </div>
 
             <!-- Companion App Path -->
@@ -123,16 +128,30 @@
 @section Scripts {
 <script>
 function toggleEngineFields() {
-    const engine = document.getElementById('ViewModel_Engine').value;
-    const llamacppFields = document.getElementById('llamacppFields');
-    llamacppFields.classList.toggle('hidden', engine !== 'LlamaCpp');
+    const engineSelect = document.getElementById('ViewModel_Engine');
+    const option = engineSelect.options[engineSelect.selectedIndex];
+    if (!option) return;
+
+    const supportsBuilds = option.dataset.managedBuilds === 'true';
+    document.getElementById('engineConfigTitle').textContent = option.dataset.displayName;
+    document.getElementById('installFolderLabel').textContent = option.dataset.folderLabel;
+    document.getElementById('installFolderHelp').textContent = option.dataset.folderHelp;
+    document.getElementById('ViewModel_InstallFolderPath').placeholder = option.dataset.folderPlaceholder;
+    document.getElementById('installFolderBuildNote').classList.toggle('hidden', !supportsBuilds);
+
+    // Managed installs are per-engine: only offer the selected engine's, and clear a stale pick.
+    const buildSelect = document.getElementById('ViewModel_EngineBuildId');
+    document.getElementById('managedBuildField').classList.toggle('hidden', !supportsBuilds);
+    document.getElementById('enginesLink').href = '/Features/Engines/Index?engine=' + engineSelect.value;
+    if (buildSelect) {
+        for (const opt of buildSelect.options) {
+            if (opt.dataset.engine) opt.hidden = opt.dataset.engine !== engineSelect.value;
+        }
+        if (!supportsBuilds || buildSelect.selectedOptions[0]?.hidden) buildSelect.value = '';
+    }
 
     // The manual folder path only applies when no managed build is selected.
-    const buildSelect = document.getElementById('ViewModel_EngineBuildId');
-    const folderField = document.getElementById('llamacppFolderField');
-    if (buildSelect && folderField) {
-        folderField.classList.toggle('hidden', !!buildSelect.value);
-    }
+    document.getElementById('installFolderField').classList.toggle('hidden', supportsBuilds && !!buildSelect?.value);
 }
 
 // Runs immediately rather than on DOMContentLoaded: the <select> above is already in the

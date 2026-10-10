@@ -13,7 +13,7 @@ public class EngineChangelogModel : PageModel
     [BindProperty(SupportsGet = true)]
     public Guid Id { get; set; }
 
-    public LlamaCppBuild? Build { get; set; }
+    public EngineBuild? Build { get; set; }
     public EngineBuildUpdateStatus? Status { get; set; }
     public int ServerUsage { get; set; }
 

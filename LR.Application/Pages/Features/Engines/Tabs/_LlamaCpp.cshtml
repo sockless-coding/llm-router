@@ -1,0 +1,124 @@
+@using LR.Core.Models
+@model LR.Application.Pages.Features.Engines.EnginesIndexModel
+@functions {
+    string FormatSize(long? bytes)
+    {
+        if (bytes is null) return "—";
+        double gb = bytes.Value / 1024.0 / 1024.0 / 1024.0;
+        return gb >= 1 ? $"{gb:F1} GB" : $"{bytes.Value / 1024.0 / 1024.0:F0} MB";
+    }
+
+    string BackendBadge(BackendType b) => b switch
+    {
+        BackendType.Cuda => "bg-neon-green/10 text-neon-green border-neon-green/20",
+        BackendType.Vulkan => "bg-neon-magenta/10 text-neon-magenta border-neon-magenta/20",
+        BackendType.Sycl => "bg-neon-cyan/10 text-neon-cyan border-neon-cyan/20",
+        BackendType.Hip => "bg-red-500/10 text-red-400 border-red-500/20",
+        BackendType.Metal => "bg-gray-400/10 text-gray-300 border-gray-400/20",
+        BackendType.OpenCL => "bg-amber-500/10 text-amber-400 border-amber-500/20",
+        BackendType.OpenVino => "bg-blue-500/10 text-blue-400 border-blue-500/20",
+        _ => "bg-gray-700/30 text-text-secondary border-gray-600/20",
+    };
+
+    string BackendLabel(BackendType b) => b switch
+    {
+        BackendType.Hip => "HIP/ROCm",
+        BackendType.OpenVino => "OpenVINO",
+        BackendType.OpenCL => "OpenCL",
+        _ => b.ToString(),
+    };
+}
+
+<div class="flex items-center justify-between mb-4">
+    <p class="text-text-secondary text-sm">Install official llama.cpp releases or compile your own from source, and track what version each backend folder holds.</p>
+    <a href="/Features/Engines/Releases" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium shrink-0">
+        <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+        Install a release
+    </a>
+</div>
+
+<h2 class="text-sm font-semibold uppercase tracking-wider text-text-secondary mb-3">Installed builds</h2>
+@if (!Model.Builds.Any())
+{
+    <div class="text-center py-12 bg-cyber-card rounded-xl border border-neon-cyan/10 mb-8">
+        <p class="text-text-secondary">No managed builds yet</p>
+        <p class="text-text-secondary text-sm mt-1">Install an official release, or compile one from a recipe below.</p>
+    </div>
+}
+else
+{
+    <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden overflow-x-auto mb-8">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Backend</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Version</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Source</th>
+                    <th class="text-right px-4 py-3 text-text-secondary font-medium">Size</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Status</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Used By</th>
+                    <th class="text-right px-4 py-3 text-text-secondary font-medium"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var b in Model.Builds)
+                {
+                    var usage = Model.ServerUsageCounts.GetValueOrDefault(b.Id, 0);
+                    var inFlight = b.Status is EngineBuildStatus.Downloading or EngineBuildStatus.Building;
+                    <tr class="border-b border-gray-700/30 hover:bg-gray-800/20">
+                        <td class="px-4 py-3">
+                            <a href="/Features/Engines/Detail?id=@b.Id" class="text-text-primary font-medium hover:text-neon-cyan transition-colors">@b.Name</a>
+                            <p class="text-xs text-text-secondary mt-0.5 font-mono">@b.InstallPath</p>
+                        </td>
+                        <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded border @BackendBadge(b.BackendType)">@BackendLabel(b.BackendType)</span></td>
+                        <td class="px-4 py-3 text-text-primary font-mono">@(b.VersionTag ?? (b.CommitSha is { Length: >= 7 } sha ? sha[..7] : "—"))</td>
+                        <td class="px-4 py-3 text-text-secondary">@(b.Source == EngineBuildSource.OfficialRelease ? "Release" : "Compiled")</td>
+                        <td class="px-4 py-3 text-right text-text-primary">@FormatSize(b.SizeBytes)</td>
+                        <td class="px-4 py-3 text-center"><partial name="~/Pages/Features/Engines/Tabs/_StatusBadge.cshtml" model="b" /></td>
+                        <td class="px-4 py-3 text-center text-text-primary">@usage</td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap">
+                            @if (b.Status == EngineBuildStatus.Ready)
+                            {
+                                <a href="/Features/Engines/Changelog?id=@b.Id" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check updates</a>
+                            }
+                            @if (inFlight)
+                            {
+                                <button type="button" onclick="cancelBuild('@b.Id')" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Cancel</button>
+                            }
+                            else
+                            {
+                                <button type="button" onclick="deleteBuild('@b.Id', '@b.Name', @usage)" class="text-xs px-2 py-1 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Delete</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold uppercase tracking-wider text-text-secondary">Compile recipes</h2>
+    <a href="/Features/Engines/Recipe" class="text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all font-medium">New recipe</a>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    @foreach (var r in Model.Recipes)
+    {
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4">
+            <div class="flex items-center justify-between mb-1">
+                <a href="/Features/Engines/Recipe?id=@r.Id" class="text-text-primary font-medium hover:text-neon-magenta transition-colors">@r.Name</a>
+                <span class="text-xs px-2 py-0.5 rounded border @BackendBadge(r.BackendType)">@BackendLabel(r.BackendType)</span>
+            </div>
+            <p class="text-xs text-text-secondary mb-3">@r.Description</p>
+            <p class="text-[11px] text-text-secondary font-mono break-words mb-3">@string.Join(" ", r.CMakeArgs)</p>
+            <div class="flex items-center gap-2">
+                <button type="button" onclick="startBuild('@r.Id', '@r.Name')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Build now</button>
+                @if (r.IsBuiltIn)
+                {
+                    <span class="text-[11px] text-text-secondary">built-in</span>
+                }
+            </div>
+        </div>
+    }
+</div>

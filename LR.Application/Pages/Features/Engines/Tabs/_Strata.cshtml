@@ -1,0 +1,125 @@
+@using LR.Core.Models
+@using LR.Core.Services.EngineBuilds
+@model LR.Application.Pages.Features.Engines.EnginesIndexModel
+@{
+    var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 text-sm";
+}
+
+<div class="flex items-start justify-between gap-4 mb-4">
+    <p class="text-text-secondary text-sm">
+        Install <a href="https://github.com/@StrataLayout.Repo/releases" target="_blank" rel="noopener" class="text-neon-cyan/80 hover:text-neon-cyan">Strata releases</a>
+        side by side, each with its engine (CUDA, CUDA 12 or AMD), and bind Strata servers to them. Models come from the
+        <a href="/Features/Models/Index" class="text-neon-cyan/80 hover:text-neon-cyan">model library</a> (e.g. Qwen3.8-Flash-Next GSQ-RCO GGUFs);
+        a preset's first start prepares its model for Strata. A release install stays on its release and updates to newer ones.
+    </p>
+    <a href="/Features/Engines/Releases?engine=Strata" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium shrink-0">
+        <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+        Install a release
+    </a>
+</div>
+
+<h2 class="text-sm font-semibold uppercase tracking-wider text-text-secondary mb-3">Strata installs</h2>
+@if (!Model.Builds.Any())
+{
+    <div class="text-center py-10 bg-cyber-card rounded-xl border border-neon-cyan/10 mb-8">
+        <p class="text-text-secondary">No Strata installs tracked yet</p>
+        <p class="text-text-secondary text-sm mt-1">Install a release, or add a Strata folder you set up yourself below.</p>
+    </div>
+}
+else
+{
+    <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden overflow-x-auto mb-8">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Version</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Commit</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium" title="Models prepared for Strata in this install (by a preset's first start, or Strata's own setup)">Prepared models</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Status</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Used By</th>
+                    <th class="text-right px-4 py-3 text-text-secondary font-medium"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var b in Model.Builds)
+                {
+                    var usage = Model.ServerUsageCounts.GetValueOrDefault(b.Id, 0);
+                    var inFlight = b.Status is EngineBuildStatus.Downloading or EngineBuildStatus.Building;
+                    var info = Model.StrataInfo.GetValueOrDefault(b.Id);
+                    var sourceVersion = b.VersionTag?.TrimStart('v');
+                    <tr class="border-b border-gray-700/30 hover:bg-gray-800/20 align-top">
+                        <td class="px-4 py-3">
+                            <a href="/Features/Engines/Detail?id=@b.Id" class="text-text-primary font-medium hover:text-neon-cyan transition-colors">@b.Name</a>
+                            <p class="text-xs text-text-secondary mt-0.5 font-mono">@b.InstallPath</p>
+                        </td>
+                        <td class="px-4 py-3 text-text-primary font-mono">
+                            @(b.VersionTag ?? "—")
+                            <p class="text-[11px] text-text-secondary mt-0.5 font-sans">@(b.Source == EngineBuildSource.OfficialRelease ? "release" : "follows main")</p>
+                            @if (info?.EngineVersion is { } ev && ev != sourceVersion)
+                            {
+                                <p class="text-[11px] text-amber-400 mt-0.5" title="The installed engine binary is older than the source — Strata keeps the previous engine when building a new one fails, or setup hasn't run since the last pull.">engine @ev</p>
+                            }
+                        </td>
+                        <td class="px-4 py-3 font-mono">
+                            @if (b.CommitSha is { Length: >= 7 } sha)
+                            {
+                                <a href="https://github.com/@StrataLayout.Repo/commit/@sha" target="_blank" rel="noopener" class="text-text-secondary hover:text-neon-cyan">@sha[..7]</a>
+                            }
+                            else
+                            {
+                                <span class="text-text-secondary" title="@(info?.IsGitClone == false ? "Not a git clone — it can't be updated by pulling." : null)">@(info?.IsGitClone == false ? "not git" : "—")</span>
+                            }
+                        </td>
+                        <td class="px-4 py-3 text-text-secondary">
+                            @if (info is null || info.RunConfigs.Count == 0)
+                            {
+                                <span>—</span>
+                            }
+                            else
+                            {
+                                foreach (var rc in info.RunConfigs)
+                                {
+                                    <span class="inline-block text-[11px] font-mono px-1.5 py-0.5 mr-1 mb-1 rounded bg-gray-700/30 border border-gray-600/20" title="Preset model path: @rc.FileName">@rc.ModelName</span>
+                                }
+                            }
+                        </td>
+                        <td class="px-4 py-3 text-center"><partial name="~/Pages/Features/Engines/Tabs/_StatusBadge.cshtml" model="b" /></td>
+                        <td class="px-4 py-3 text-center text-text-primary">@usage</td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap space-x-1">
+                            @if (inFlight)
+                            {
+                                <button type="button" onclick="cancelBuild('@b.Id')" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Cancel</button>
+                            }
+                            else
+                            {
+                                if (b.Status == EngineBuildStatus.Ready)
+                                {
+                                    <a href="/Features/Engines/Changelog?id=@b.Id" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check updates</a>
+                                    <button type="button" onclick="updateInstall('@b.Id', '@b.Name')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Update</button>
+                                    <button type="button" onclick="rollbackEngine('@b.Id', '@b.Name')" title="Put back the engine kept from before the last update (setup.py --rollback-engine)" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium">Roll back engine</button>
+                                }
+                                <button type="button" onclick="refreshInstall('@b.Id')" title="Re-read version, commit and setup state (e.g. after running Strata's scripts yourself)" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium">Refresh</button>
+                                <button type="button" onclick="unregisterInstall('@b.Id', '@b.Name', @usage)" class="text-xs px-2 py-1 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Remove</button>
+                            }
+                        </td>
+                    </tr>
+                    @if (b.Status is EngineBuildStatus.NeedsSetup or EngineBuildStatus.Error || (b.Status == EngineBuildStatus.Ready && !string.IsNullOrEmpty(b.StatusMessage)))
+                    {
+                        <tr class="border-b border-gray-700/30">
+                            <td colspan="7" class="px-4 pb-3 -mt-2 text-xs @(b.Status == EngineBuildStatus.Error ? "text-neon-red" : "text-amber-400")">@b.StatusMessage</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3 max-w-xl">
+    <h3 class="text-sm font-semibold text-text-primary">Add an existing Strata folder</h3>
+    <p class="text-xs text-text-secondary">A Strata checkout you set up yourself with <span class="font-mono">@StrataLayout.FirstTimeSetupCommand</span> (it contains <span class="font-mono">serve\server.py</span>). It's updated like Strata's own <span class="font-mono">UPDATE.bat</span>.</p>
+    <input id="strata-register-folder" placeholder="C:\Strata" class="@inpCls font-mono" />
+    <input id="strata-register-name" placeholder="Name (optional)" class="@inpCls" />
+    <button type="button" onclick="registerStrata()" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">Add folder</button>
+</div>

@@ -20,7 +20,7 @@ public class LRDbContext : DbContext
     public DbSet<Models.ModelLibrarySettings> ModelLibrarySettings => Set<Models.ModelLibrarySettings>();
     public DbSet<Models.ApiKey> ApiKeys => Set<Models.ApiKey>();
     public DbSet<Models.ApiKeyModelPreset> ApiKeyModelPresets => Set<Models.ApiKeyModelPreset>();
-    public DbSet<Models.LlamaCppBuild> LlamaCppBuilds => Set<Models.LlamaCppBuild>();
+    public DbSet<Models.EngineBuild> EngineBuilds => Set<Models.EngineBuild>();
     public DbSet<Models.LlamaCppBuildRecipe> LlamaCppBuildRecipes => Set<Models.LlamaCppBuildRecipe>();
     public DbSet<Models.EngineBuildSettings> EngineBuildSettings => Set<Models.EngineBuildSettings>();
 
@@ -88,9 +88,9 @@ public class LRDbContext : DbContext
             v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
             v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new List<string>());
 
-        modelBuilder.Entity<Models.LlamaCppBuild>(entity =>
+        modelBuilder.Entity<Models.EngineBuild>(entity =>
         {
-            entity.ToTable("LlamaCppBuilds");
+            entity.ToTable("EngineBuilds");
             entity.HasIndex(e => e.InstallPath).IsUnique();
 
             // A deleted recipe leaves its builds in place, just unlinked.
@@ -116,6 +116,13 @@ public class LRDbContext : DbContext
         modelBuilder.Entity<Models.ModelPreset>(entity =>
         {
             entity.ToTable("ModelPresets");
+            entity.Property(e => e.EngineSettings).HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v),
+                v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v) ?? new Dictionary<string, string>(),
+                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<Dictionary<string, string>>(
+                    (a, b) => a!.Count == b!.Count && !a.Except(b).Any(),
+                    v => v.Aggregate(0, (h, kv) => HashCode.Combine(h, kv.Key, kv.Value)),
+                    v => new Dictionary<string, string>(v)));
             entity.Property(e => e.Flags).HasConversion(
                 v => System.Text.Json.JsonSerializer.Serialize(v),
                 v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v) ?? new Dictionary<string, string>());

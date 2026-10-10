@@ -116,6 +116,8 @@ builder.Services.AddHttpClient<IGitHubClient, GitHubReleaseClient>(client =>
     AllowAutoRedirect = true,
     AutomaticDecompression = DecompressionMethods.GZip,
 });
+builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.LlamaCppInstallHandler>();
+builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.StrataInstallHandler>();
 builder.Services.AddScoped<IEngineBuildManager, EngineBuildManager>();
 builder.Services.AddSingleton<IEngineBuildProgressPublisher, EngineBuildProgressPublisher>();
 builder.Services.AddSingleton<EngineBuildService>();
@@ -144,14 +146,8 @@ builder.Services.AddScoped<IApiRequestLogger, ApiRequestLogger>();
 builder.Services.AddScoped<ResponseChainBuilder>();
 builder.Services.AddSingleton<IBackgroundResponseRegistry, BackgroundResponseRegistry>();
 
-// Backend provider factory (mock by default)
-builder.Services.AddSingleton<IBackendProviderFactory>(sp =>
-{
-    var factory = new BackendProviderFactory(sp);
-    // Override with real providers here when ready:
-    // factory.Register(ServerEngine.LlamaCpp, () => new RealLlamaCppProvider());
-    return factory;
-});
+// Supported server engines (llama.cpp, Strata, ...) and the provider factory that creates them
+builder.Services.AddBackendEngines();
 
 // --- Gateway configuration ---
 var gatewaySettings = builder.Configuration.GetSection("Gateway").Get<GatewaySettings>() ?? new GatewaySettings();

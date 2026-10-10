@@ -81,9 +81,12 @@ public class DashboardModel : PageModel
             ActivePresetNames = activePresets.ToDictionary(kv => kv.Key, kv => kv.Value.Name);
         }
 
-        foreach (var s in Servers.Where(s => s.Engine == ServerEngine.LlamaCpp && s.Status == ServerStatus.Running))
+        foreach (var s in Servers.Where(s => s.Status == ServerStatus.Running))
         {
             var provider = _serverManager.GetProvider(s.Id);
+            if (provider is not IServerCapacityProvider)
+                continue;
+
             var preset = s.ActivePresetId is Guid pid && activePresets.TryGetValue(pid, out var p) ? p : null;
             var maxSlots = LlamaSlotCapacity.Resolve(provider, preset, _settings.DefaultParallelSlots);
             ServerSlots[s.Id] = (_concurrencyLimiter.InFlight(s.Id), maxSlots);

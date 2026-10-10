@@ -40,6 +40,10 @@ public class GitHubReleaseAsset
 
     [JsonPropertyName("size")]
     public long Size { get; set; }
+
+    /// <summary>GitHub's checksum of the uploaded file, e.g. <c>sha256:3dd7…</c>; null on older releases.</summary>
+    [JsonPropertyName("digest")]
+    public string? Digest { get; set; }
 }
 
 /// <summary>

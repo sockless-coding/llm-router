@@ -254,19 +254,19 @@ public class RoutingEngine : IRoutingEngine
     /// <summary>
     /// Reserves one parallel-request slot on <paramref name="instance"/>, returning a
     /// <see cref="RouteDecision"/> the caller disposes when the request finishes, or null if the
-    /// instance is already at its capacity (caller should queue). Only llama.cpp instances are
+    /// instance is already at its capacity (caller should queue). Only instances whose provider
+    /// reports slot capacity (<see cref="IServerCapacityProvider"/> — llama.cpp, Strata) are
     /// gated — other engines manage their own parallelism and always get a no-op lease.
     ///
-    /// Capacity is taken from the live server (llama.cpp's reported <c>total_slots</c>) when
+    /// Capacity is taken from the live server (its reported <c>total_slots</c>) when
     /// known, else the preset's <see cref="ModelPreset.Parallel"/> when positive, else
     /// <see cref="GatewaySettings.DefaultParallelSlots"/>.
     /// </summary>
     private RouteDecision? TryReserve(ServerInstance instance, ModelPreset? preset)
     {
-        if (instance.Engine != ServerEngine.LlamaCpp)
-            return new RouteDecision { Server = instance, Lease = ServerConcurrencyLimiter.NoopLease };
-
         var provider = _serverManager.GetProvider(instance.Id);
+        if (provider is not IServerCapacityProvider)
+            return new RouteDecision { Server = instance, Lease = ServerConcurrencyLimiter.NoopLease };
 
         // Context-aware queuing: hold the request (return null → caller queues) while the
         // server's KV cache is (almost) full and it already has work in flight.

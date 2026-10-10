@@ -45,16 +45,13 @@ public class ServerManager : IServerManager
         };
 
         // Create the backend config entity alongside the server instance
-        if (engine == ServerEngine.LlamaCpp)
+        instance.Config = new BackendConfig
         {
-            instance.Config = new BackendConfig
-            {
-                LlamaCppExecutableFolderPath = configData.LlamaCppExecutableFolderPath,
-                CompanionAppPath = configData.CompanionAppPath,
-                EnvironmentSetupCommand = configData.EnvironmentSetupCommand,
-                EngineBuildId = configData.EngineBuildId,
-            };
-        }
+            InstallFolderPath = configData.InstallFolderPath,
+            CompanionAppPath = configData.CompanionAppPath,
+            EnvironmentSetupCommand = configData.EnvironmentSetupCommand,
+            EngineBuildId = configData.EngineBuildId,
+        };
 
         _context.ServerInstances.Add(instance);
         await _context.SaveChangesAsync();
@@ -377,7 +374,7 @@ public class ServerManager : IServerManager
         var config = await _context.BackendConfigs.FirstOrDefaultAsync(c => c.ServerInstanceId == instanceId)
             ?? throw new KeyNotFoundException($"Backend config for server {instanceId} not found.");
 
-        config.LlamaCppExecutableFolderPath = configData.LlamaCppExecutableFolderPath;
+        config.InstallFolderPath = configData.InstallFolderPath;
         config.CompanionAppPath = configData.CompanionAppPath;
         config.EnvironmentSetupCommand = configData.EnvironmentSetupCommand;
         config.EngineBuildId = configData.EngineBuildId;
@@ -393,18 +390,18 @@ public class ServerManager : IServerManager
     /// </summary>
     private async Task<BackendConfigData> ResolveConfigDataAsync(BackendConfig config)
     {
-        var folderPath = config.LlamaCppExecutableFolderPath;
+        var folderPath = config.InstallFolderPath;
 
         if (config.EngineBuildId is { } buildId)
         {
-            var build = await _context.LlamaCppBuilds.FindAsync(buildId);
+            var build = await _context.EngineBuilds.FindAsync(buildId);
             if (build is { Status: Models.EngineBuildStatus.Ready } && !string.IsNullOrWhiteSpace(build.InstallPath))
                 folderPath = build.InstallPath;
         }
 
         return new BackendConfigData
         {
-            LlamaCppExecutableFolderPath = folderPath,
+            InstallFolderPath = folderPath,
             CompanionAppPath = config.CompanionAppPath,
             EnvironmentSetupCommand = config.EnvironmentSetupCommand,
             EngineBuildId = config.EngineBuildId,

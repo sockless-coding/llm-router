@@ -77,22 +77,19 @@ public class ServerLoadBroadcastService : BackgroundService
             int maxSlots = 0;
             int kvUsagePct = -1;
             int kvTokens = 0;
-            if (s.Engine == ServerEngine.LlamaCpp && s.Status == ServerStatus.Running)
+            var provider = s.Status == ServerStatus.Running ? serverManager.GetProvider(s.Id) : null;
+            if (provider is IServerCapacityProvider capacity)
             {
-                var provider = serverManager.GetProvider(s.Id);
                 var preset = s.ActivePresetId is Guid pid ? presetManager.GetById(pid) : null;
                 maxSlots = LlamaSlotCapacity.Resolve(provider, preset, _settings.DefaultParallelSlots);
 
                 // Refresh and read the server's live context (KV-cache) usage from /slots (best-effort).
-                if (provider is IServerCapacityProvider capacity)
+                await capacity.RefreshRuntimeUsageAsync(CancellationToken.None);
+                if (capacity.RuntimeUsage is { } usage)
                 {
-                    await capacity.RefreshRuntimeUsageAsync(CancellationToken.None);
-                    if (capacity.RuntimeUsage is { } usage)
-                    {
-                        if (usage.BusiestSlotUsageRatio is double ratio)
-                            kvUsagePct = Math.Clamp((int)Math.Round(ratio * 100.0), 0, 100);
-                        kvTokens = usage.UsedTokens ?? 0;
-                    }
+                    if (usage.BusiestSlotUsageRatio is double ratio)
+                        kvUsagePct = Math.Clamp((int)Math.Round(ratio * 100.0), 0, 100);
+                    kvTokens = usage.UsedTokens ?? 0;
                 }
             }
 

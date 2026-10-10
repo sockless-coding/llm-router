@@ -21,11 +21,13 @@ public class BackendConfig
     public Guid ServerInstanceId { get; set; }
 
     /// <summary>
-    /// Path to the folder containing the llama.cpp server executable (e.g., "llama-server").
-    /// Each GPU backend build (CUDA, Vulkan, SYCL) should be in its own folder.
+    /// Path to the engine's install folder — for llama.cpp the folder containing
+    /// <c>llama-server</c> (each GPU backend build in its own folder); for Strata the repository
+    /// checkout containing <c>serve/server.py</c> and <c>.venv</c>. See
+    /// <see cref="LR.Core.Interfaces.IEngineDescriptor.InstallFolderHelp"/> per engine.
     /// </summary>
     [MaxLength(1024)]
-    public string? LlamaCppExecutableFolderPath { get; set; }
+    public string? InstallFolderPath { get; set; }
 
     /// <summary>
     /// The GPU backend type this llama.cpp build was compiled for.
@@ -34,16 +36,16 @@ public class BackendConfig
     public BackendType? GpuBackendType { get; set; }
 
     /// <summary>
-    /// Optional link to a managed <see cref="LlamaCppBuild"/>. When set, the server's executable
-    /// folder is taken from that build's <see cref="LlamaCppBuild.InstallPath"/> and
-    /// <see cref="LlamaCppExecutableFolderPath"/> acts only as a manual override/fallback. Nulled
+    /// Optional link to a managed <see cref="EngineBuild"/>. When set, the server's executable
+    /// folder is taken from that build's <see cref="EngineBuild.InstallPath"/> and
+    /// <see cref="InstallFolderPath"/> acts only as a manual override/fallback. Nulled
     /// out (not cascade-deleted) if the referenced build is removed.
     /// </summary>
     [ForeignKey(nameof(EngineBuild))]
     public Guid? EngineBuildId { get; set; }
 
     /// <summary>Navigation: the managed build this server is bound to, if any.</summary>
-    public LlamaCppBuild? EngineBuild { get; set; }
+    public EngineBuild? EngineBuild { get; set; }
 
     /// <summary>
     /// Path to a companion application that should run alongside the server.

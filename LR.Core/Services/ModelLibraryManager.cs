@@ -71,6 +71,8 @@ public class ModelLibraryManager : IModelLibrary
         return Directory.EnumerateFiles(folder, "*.gguf", SearchOption.AllDirectories)
             .Select(Path.GetFullPath)
             .Where(p => !registeredSet.Contains(p))
+            // shards 2..N of a split model belong to its first shard's entry
+            .Where(p => SplitGguf.Parse(p) is not { Index: > 1 })
             .OrderBy(p => p)
             .ToList();
     }
@@ -127,10 +129,14 @@ public class ModelLibraryManager : IModelLibrary
         _context.LocalModels.Remove(model);
         await _context.SaveChangesAsync();
 
-        if (deleteFile && File.Exists(model.FilePath))
+        if (deleteFile)
         {
-            try { File.Delete(model.FilePath); }
-            catch { /* best effort — registry entry is already gone */ }
+            // every shard of a split model
+            foreach (var path in SplitGguf.AllShards(model.FilePath).Where(File.Exists))
+            {
+                try { File.Delete(path); }
+                catch { /* best effort — registry entry is already gone */ }
+            }
         }
 
         return true;

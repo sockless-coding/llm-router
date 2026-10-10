@@ -66,7 +66,8 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
         var preset = new ModelPreset();
         PresetViewModelMapper.ApplyToEntity(ViewModel, preset);
         await PresetPreview.ResolveLinkedModelsAsync(preset, _modelLibrary);
-        return new JsonResult(PresetPreview.Build(preset));
+        var engine = _serverManager.GetAllInstances().FirstOrDefault(s => s.Id == ViewModel.ServerInstanceId)?.Engine ?? ServerEngine.LlamaCpp;
+        return new JsonResult(PresetPreview.Build(preset, engine));
     }
 
     public async Task<IActionResult> OnPostAsync()

@@ -7,18 +7,24 @@ namespace LR.Providers;
 
 /// <summary>
 /// Factory that creates the correct IBackendProvider based on ServerEngine.
-/// Uses LlamaCppProvider by default; register custom providers via Register().
+/// Each engine registered in the <see cref="IEngineCatalog"/> gets its descriptor's
+/// <see cref="IEngineDescriptor.ProviderType"/>, created through DI; register custom
+/// providers via Register() to override.
 /// </summary>
 public class BackendProviderFactory : IBackendProviderFactory
 {
     private readonly Dictionary<ServerEngine, Func<IServiceProvider, IBackendProvider>> _factories = new();
     private readonly IServiceProvider _serviceProvider;
 
-    public BackendProviderFactory(IServiceProvider serviceProvider)
+    public BackendProviderFactory(IServiceProvider serviceProvider, IEngineCatalog engines)
     {
         _serviceProvider = serviceProvider;
-        // Register default real provider for llama.cpp via DI (supports ILogger + IServerLogService injection)
-        _factories[ServerEngine.LlamaCpp] = sp => (IBackendProvider)ActivatorUtilities.CreateInstance(sp, typeof(LlamaCppProvider));
+
+        foreach (var engine in engines.All)
+        {
+            var providerType = engine.ProviderType;
+            _factories[engine.Engine] = sp => (IBackendProvider)ActivatorUtilities.CreateInstance(sp, providerType);
+        }
     }
 
     /// <summary>

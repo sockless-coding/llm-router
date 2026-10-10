@@ -8,8 +8,9 @@ using LR.Core.Services.EngineBuilds;
 namespace LR.Core.Services;
 
 /// <summary>
-/// Registry of managed llama.cpp builds and the reusable compile recipes, with SQLite persistence
-/// via EF Core. Mirrors <see cref="ModelLibraryManager"/>.
+/// Registry of managed engine installs (llama.cpp builds, Strata checkouts) and the reusable
+/// llama.cpp compile recipes, with SQLite persistence via EF Core. Engine-specific checks go
+/// through each engine's <see cref="IEngineInstallHandler"/>. Mirrors <see cref="ModelLibraryManager"/>.
 /// </summary>
 public class EngineBuildManager : IEngineBuildManager
 {
@@ -17,31 +18,49 @@ public class EngineBuildManager : IEngineBuildManager
 
     private readonly LRDbContext _context;
     private readonly IGitHubClient _github;
+    private readonly Dictionary<ServerEngine, IEngineInstallHandler> _handlers;
 
-    public EngineBuildManager(LRDbContext context, IGitHubClient github)
+    public EngineBuildManager(LRDbContext context, IGitHubClient github, IEnumerable<IEngineInstallHandler> handlers)
     {
         _context = context;
         _github = github;
+        _handlers = handlers.ToDictionary(h => h.Engine);
     }
 
     public string Repo => LlamaCppRepo;
 
-    public async Task<IReadOnlyList<LlamaCppBuild>> GetAllBuildsAsync()
+    public async Task<IReadOnlyList<EngineBuild>> GetAllBuildsAsync()
     {
-        var list = await _context.LlamaCppBuilds
+        var list = await _context.EngineBuilds
             .Include(b => b.Recipe)
             .OrderByDescending(b => b.CreatedAt)
             .ToListAsync();
         return list.AsReadOnly();
     }
 
-    public Task<LlamaCppBuild?> GetBuildAsync(Guid id) =>
-        _context.LlamaCppBuilds.Include(b => b.Recipe).FirstOrDefaultAsync(b => b.Id == id);
+    public async Task<IReadOnlyList<EngineBuild>> GetBuildsAsync(ServerEngine engine)
+    {
+        var list = await _context.EngineBuilds
+            .Include(b => b.Recipe)
+            .Where(b => b.Engine == engine)
+            .OrderByDescending(b => b.CreatedAt)
+            .ToListAsync();
+        return list.AsReadOnly();
+    }
+
+    public Task<EngineBuild?> GetBuildAsync(Guid id) =>
+        _context.EngineBuilds.Include(b => b.Recipe).FirstOrDefaultAsync(b => b.Id == id);
 
     public async Task<bool> DeleteBuildAsync(Guid id, bool deleteFiles)
     {
-        var build = await _context.LlamaCppBuilds.FindAsync(id);
+        var build = await _context.EngineBuilds.FindAsync(id);
         if (build is null) return false;
+
+        // A git checkout (Strata) holds the user's models and settings next to the engine: it is
+        // only ever unregistered, never deleted, and bound servers keep pointing at the folder.
+        bool keepsFiles = build.Source == EngineBuildSource.GitCheckout;
+        if (keepsFiles)
+            deleteFiles = false;
 
         // Clear the link on any server bound to this build (FK is SetNull, but the manual folder
         // path should also be wiped so the server doesn't silently keep using a deleted folder).
@@ -49,8 +68,10 @@ public class EngineBuildManager : IEngineBuildManager
         foreach (var cfg in boundConfigs)
         {
             cfg.EngineBuildId = null;
-            if (string.Equals(cfg.LlamaCppExecutableFolderPath, build.InstallPath, StringComparison.OrdinalIgnoreCase))
-                cfg.LlamaCppExecutableFolderPath = null;
+            if (keepsFiles)
+                cfg.InstallFolderPath = build.InstallPath;
+            else if (string.Equals(cfg.InstallFolderPath, build.InstallPath, StringComparison.OrdinalIgnoreCase))
+                cfg.InstallFolderPath = null;
         }
 
         if (deleteFiles && !string.IsNullOrWhiteSpace(build.InstallPath) && Directory.Exists(build.InstallPath))
@@ -59,7 +80,7 @@ public class EngineBuildManager : IEngineBuildManager
             catch { /* leave the folder; the row is going away regardless */ }
         }
 
-        _context.LlamaCppBuilds.Remove(build);
+        _context.EngineBuilds.Remove(build);
         await _context.SaveChangesAsync();
         return true;
     }
@@ -173,7 +194,7 @@ public class EngineBuildManager : IEngineBuildManager
 
     public async Task ReconcileAsync(CancellationToken ct = default)
     {
-        var builds = await _context.LlamaCppBuilds.ToListAsync(ct);
+        var builds = await _context.EngineBuilds.ToListAsync(ct);
         var changed = false;
 
         foreach (var build in builds)
@@ -191,20 +212,34 @@ public class EngineBuildManager : IEngineBuildManager
                 changed = true;
             }
 
-            var serverExists = !string.IsNullOrWhiteSpace(build.InstallPath) &&
-                Directory.Exists(build.InstallPath) &&
-                (File.Exists(Path.Combine(build.InstallPath, "llama-server.exe")) ||
-                 File.Exists(Path.Combine(build.InstallPath, "llama-server")));
+            if (!_handlers.TryGetValue(build.Engine, out var handler))
+                continue;
 
-            if (!serverExists && build.Status != EngineBuildStatus.Missing)
+            var present = !string.IsNullOrWhiteSpace(build.InstallPath) &&
+                Directory.Exists(build.InstallPath) &&
+                handler.IsInstallPresent(build.InstallPath);
+
+            if (!present)
             {
-                build.Status = EngineBuildStatus.Missing;
-                build.StatusMessage = "Install folder is no longer on disk.";
-                changed = true;
+                if (build.Status != EngineBuildStatus.Missing)
+                {
+                    build.Status = EngineBuildStatus.Missing;
+                    build.StatusMessage = "Install folder is no longer on disk.";
+                    changed = true;
+                }
+                continue;
             }
-            else if (serverExists && build.Status == EngineBuildStatus.Missing)
+
+            var (versionBefore, backendBefore) = (build.VersionTag, build.BackendType);
+            handler.RefreshFromDisk(build);
+            changed |= build.VersionTag != versionBefore || build.BackendType != backendBefore;
+
+            // Error rows keep their error until the next install/update attempt.
+            var expected = handler.IsReady(build.InstallPath) ? EngineBuildStatus.Ready : EngineBuildStatus.NeedsSetup;
+            if (build.Status is EngineBuildStatus.Missing or EngineBuildStatus.NeedsSetup or EngineBuildStatus.Ready
+                && build.Status != expected)
             {
-                build.Status = EngineBuildStatus.Ready;
+                build.Status = expected;
                 build.StatusMessage = null;
                 changed = true;
             }
@@ -218,7 +253,7 @@ public class EngineBuildManager : IEngineBuildManager
 
     public async Task<EngineBuildUpdateStatus> GetUpdateStatusAsync(Guid buildId, CancellationToken ct = default)
     {
-        var build = await _context.LlamaCppBuilds.FindAsync(new object?[] { buildId }, ct);
+        var build = await _context.EngineBuilds.FindAsync(new object?[] { buildId }, ct);
         var result = new EngineBuildUpdateStatus { BuildId = buildId };
         if (build is null)
         {
@@ -226,32 +261,47 @@ public class EngineBuildManager : IEngineBuildManager
             return result;
         }
 
-        var installedRef = build.CommitSha ?? build.VersionTag;
+        if (!_handlers.TryGetValue(build.Engine, out var handler))
+        {
+            result.Error = $"Update checks aren't supported for {build.Engine} installs.";
+            return result;
+        }
+        var repo = handler.Repo;
+
+        // A release install is compared tag to tag; anything else by its exact commit.
+        var installedRef = build.Engine == ServerEngine.Strata && build.Source == EngineBuildSource.OfficialRelease
+            ? build.VersionTag ?? build.CommitSha
+            : build.CommitSha ?? build.VersionTag;
         result.InstalledRef = installedRef;
         if (string.IsNullOrWhiteSpace(installedRef))
         {
-            result.Error = "This build has no recorded version to compare against.";
+            result.Error = build.Source == EngineBuildSource.GitCheckout
+                ? "No commit is recorded for this install (is it a git clone?). Press Refresh to re-read it."
+                : "This build has no recorded version to compare against.";
             return result;
         }
 
-        var latest = await _github.GetLatestReleaseAsync(Repo, ct);
-        if (latest is null)
+        var latestRef = await handler.GetLatestRefAsync(build, _github, ct);
+        if (latestRef is null)
         {
             result.Error = "Could not reach GitHub to check for updates.";
             return result;
         }
 
-        result.LatestTag = latest.TagName;
-        if (string.Equals(installedRef, latest.TagName, StringComparison.OrdinalIgnoreCase))
+        result.LatestTag = latestRef;
+        if (string.Equals(installedRef, latestRef, StringComparison.OrdinalIgnoreCase))
         {
             result.UpdateAvailable = false;
             return result;
         }
 
-        var compare = await _github.CompareAsync(Repo, installedRef, latest.TagName, ct);
+        var compare = await _github.CompareAsync(repo, installedRef, latestRef, ct);
         if (compare is null)
         {
-            result.Error = $"GitHub could not compare '{installedRef}' with '{latest.TagName}'.";
+            result.Error = $"GitHub could not compare '{installedRef}' with '{latestRef}'." +
+                (build.Engine == ServerEngine.Strata
+                    ? " Strata rewrote its history on 2026-10-06; a clone from before that is moved over by Strata's own UPDATE.bat / update.sh."
+                    : "");
             return result;
         }
 
@@ -259,9 +309,9 @@ public class EngineBuildManager : IEngineBuildManager
         // base — i.e. how far behind the release we are.
         result.BehindBy = compare.AheadBy;
         result.AheadBy = compare.BehindBy;
-        result.CompareUrl = compare.HtmlUrl ?? $"https://github.com/{Repo}/compare/{installedRef}...{latest.TagName}";
+        result.CompareUrl = compare.HtmlUrl ?? $"https://github.com/{repo}/compare/{installedRef}...{latestRef}";
         result.UpdateAvailable = compare.AheadBy > 0 || compare.Status is "behind" or "diverged";
-        result.Commits = ChangelogParser.ToEntries(compare, Repo);
+        result.Commits = ChangelogParser.ToEntries(compare, repo);
         return result;
     }
 

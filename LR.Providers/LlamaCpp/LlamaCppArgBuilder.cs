@@ -2,7 +2,7 @@ using System.Globalization;
 
 using LR.Core.Models;
 
-namespace LR.Providers;
+namespace LR.Providers.LlamaCpp;
 
 /// <summary>
 /// Builds command-line arguments for the llama.cpp server from a ModelPreset.

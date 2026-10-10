@@ -21,7 +21,7 @@ public interface IBuildStep
 /// <summary>
 /// Mutable state threaded through every <see cref="IBuildStep"/> in a pipeline run. Early steps
 /// resolve the release/commit and fill in the version fields; later steps place files and the
-/// runner reads the resolved values back onto the <see cref="LlamaCppBuild"/> row.
+/// runner reads the resolved values back onto the <see cref="EngineBuild"/> row.
 /// </summary>
 public sealed class BuildContext
 {

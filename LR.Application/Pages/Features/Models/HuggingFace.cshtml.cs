@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 using LR.Core.Interfaces;
+using LR.Core.Services;
 
 namespace LR.Application.Pages.Features.Models;
 
@@ -49,8 +50,22 @@ public class ModelsHuggingFaceModel : PageModel
 
         try
         {
+            // A split model is offered once, as its first shard with the size of all of them; downloading
+            // it fetches every shard (ModelDownloadService).
             var files = await _hfClient.ListGgufFilesAsync(repoId, ct);
-            return new JsonResult(files.Select(f => new { filename = f.Filename, sizeBytes = f.SizeBytes }));
+            var sizes = files.ToDictionary(f => f.Filename, f => f.SizeBytes, StringComparer.OrdinalIgnoreCase);
+            return new JsonResult(files
+                .Where(f => SplitGguf.Parse(f.Filename) is not { Index: > 1 })
+                .Select(f =>
+                {
+                    var shards = SplitGguf.AllShards(f.Filename);
+                    return new
+                    {
+                        filename = f.Filename,
+                        sizeBytes = shards.All(s => sizes.GetValueOrDefault(s) is not null) ? shards.Sum(s => sizes[s]) : f.SizeBytes,
+                        parts = shards.Count,
+                    };
+                }));
         }
         catch (Exception ex)
         {

@@ -64,10 +64,10 @@ public class RequestDispatcherService : BackgroundService
                     // Otherwise a request for model B could be silently answered by a server
                     // currently running model A.
 
-                    if (server.Engine != ServerEngine.LlamaCpp)
+                    if (serverManager.GetProvider(server.Id) is not IServerCapacityProvider)
                     {
-                        // Non-llama engines manage their own parallelism — pass through unbounded
-                        // (one dequeue per tick, as before).
+                        // Engines that don't report slot capacity manage their own parallelism —
+                        // pass through unbounded (one dequeue per tick, as before).
                         if (_queue.TryDequeueMatching(server.ActivePresetId, out var item))
                         {
                             _ = ProcessRequestOnServer(server, item.Request, serverManager,

@@ -105,7 +105,7 @@
     // The manual folder path only applies when no managed build is selected.
     function toggleFolderField() {
         const buildSelect = document.getElementById('ViewModel_EngineBuildId');
-        const folderField = document.getElementById('llamacppFolderField');
+        const folderField = document.getElementById('installFolderField');
         if (buildSelect && folderField) {
             folderField.classList.toggle('hidden', !!buildSelect.value);
         }
@@ -113,17 +113,19 @@
     </script>
 
         <!-- Config section -->
-        @if (Model.Server.Engine == ServerEngine.LlamaCpp)
+        @if (Model.Engine is { } engine)
         {
             <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-5">
-                <h2 class="text-lg font-semibold text-text-primary">llama.cpp Configuration</h2>
+                <h2 class="text-lg font-semibold text-text-primary">@engine.DisplayName Configuration</h2>
 
+                @if (engine.SupportsManagedBuilds)
+                {
                 <!-- Managed build -->
                 <div>
                     <label asp-for="ViewModel.EngineBuildId" class="block text-sm font-medium text-text-secondary mb-1">
                         Engine Build
                     </label>
-                    <p class="text-xs text-gray-500 mb-2">Bind this server to a build from <a href="/Features/Engines/Index" class="text-neon-cyan/70 hover:text-neon-cyan">Engines</a>. Its install folder is used automatically and the path below is ignored. Choose <em>custom folder</em> to manage the build yourself.</p>
+                    <p class="text-xs text-gray-500 mb-2">Bind this server to a build from <a href="/Features/Engines/Index?engine=@engine.Engine" class="text-neon-cyan/70 hover:text-neon-cyan">Engines</a>. Its install folder is used automatically and the path below is ignored. Choose <em>custom folder</em> to manage the build yourself.</p>
                     <select asp-for="ViewModel.EngineBuildId" onchange="toggleFolderField()"
                             class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all text-sm">
                         <option value="">— custom folder (use folder path below) —</option>
@@ -133,16 +135,17 @@
                         }
                     </select>
                 </div>
+                }
 
-                <!-- Executable Folder Path -->
-                <div id="llamacppFolderField">
-                    <label asp-for="ViewModel.LlamaCppExecutableFolderPath" class="block text-sm font-medium text-text-secondary mb-1">
-                        Server Folder Path
+                <!-- Install Folder Path -->
+                <div id="installFolderField" class="@(engine.SupportsManagedBuilds && Model.ViewModel.EngineBuildId.HasValue ? "hidden" : "")">
+                    <label asp-for="ViewModel.InstallFolderPath" class="block text-sm font-medium text-text-secondary mb-1">
+                        @engine.InstallFolderLabel
                     </label>
-                    <p class="text-xs text-gray-500 mb-2">Path to the folder containing your llama.cpp server executable (e.g., <code>llama-server.exe</code>). Each GPU backend build should be in its own folder.</p>
-                    <input asp-for="ViewModel.LlamaCppExecutableFolderPath" placeholder="C:\\llamacpp\\cuda-build"
+                    <p class="text-xs text-gray-500 mb-2">@engine.InstallFolderHelp</p>
+                    <input asp-for="ViewModel.InstallFolderPath" placeholder="@engine.InstallFolderPlaceholder"
                            class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 font-mono text-sm" />
-                    <span asp-validation-for="ViewModel.LlamaCppExecutableFolderPath" class="text-xs text-neon-red mt-1"></span>
+                    <span asp-validation-for="ViewModel.InstallFolderPath" class="text-xs text-neon-red mt-1"></span>
                 </div>
 
                 <!-- Companion App Path -->

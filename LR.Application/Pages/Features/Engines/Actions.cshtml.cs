@@ -29,11 +29,26 @@ public class EngineActionsModel : PageModel
     [BindProperty] public string? GitRef { get; set; }
     [BindProperty] public string? Name { get; set; }
     [BindProperty] public string? RecipeJson { get; set; }
+    [BindProperty] public string? Folder { get; set; }
+    /// <summary>Strata: the release asset holding the engine build to install (e.g. <c>strata-windows-x64.zip</c>).</summary>
+    [BindProperty] public string? Asset { get; set; }
+
+    /// <summary>The engine a release install is for (llama.cpp when not given).</summary>
+    [BindProperty] public ServerEngine? Engine { get; set; }
 
     public async Task<IActionResult> OnPostAsync()
     {
         return Command?.ToLowerInvariant() switch
         {
+            "registerstrata" => await RunAsync(async () =>
+                new { success = true, buildId = await _buildService.RegisterStrataCheckoutAsync(Folder ?? "", Name, HttpContext.RequestAborted), message = "Checkout added." }),
+            "rollbackengine" => await RunAsync(async () =>
+                new { success = true, buildId = await _buildService.StartStrataRollbackAsync(BuildId), message = "Rollback started." }),
+            "refresh" => await RunAsync(async () =>
+            {
+                await _buildService.RefreshStrataAsync(BuildId, HttpContext.RequestAborted);
+                return new { success = true, buildId = BuildId, message = "Refreshed." };
+            }),
             "installrelease" => await InstallReleaseAsync(),
             "update" => await UpdateAsync(),
             "startbuild" => await StartBuildAsync(),
@@ -46,12 +61,27 @@ public class EngineActionsModel : PageModel
         };
     }
 
+    private static async Task<IActionResult> RunAsync<T>(Func<Task<T>> action)
+    {
+        try
+        {
+            return new JsonResult(await action());
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new JsonResult(new { success = false, message = ex.Message });
+        }
+    }
+
     private async Task<IActionResult> InstallReleaseAsync()
     {
         try
         {
             var tag = string.IsNullOrWhiteSpace(ReleaseTag) ? null : ReleaseTag.Trim();
-            var id = await _buildService.StartReleaseInstallAsync(Backend, tag, string.IsNullOrWhiteSpace(Name) ? null : Name);
+            var name = string.IsNullOrWhiteSpace(Name) ? null : Name;
+            var id = Engine == ServerEngine.Strata
+                ? await _buildService.StartStrataReleaseInstallAsync(tag, Asset, name)
+                : await _buildService.StartReleaseInstallAsync(Backend, tag, name);
             return new JsonResult(new { success = true, buildId = id, message = "Install started." });
         }
         catch (Exception ex)
