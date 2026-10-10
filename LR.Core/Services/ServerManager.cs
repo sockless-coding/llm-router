@@ -440,6 +440,15 @@ public class ServerManager : IServerManager
         {
             _context.ServerInstances.Remove(instance);
             await _context.SaveChangesAsync();
+
+            // Drop the server's memory group if nothing else references it any more.
+            if (instance.MemoryGroup is { } groupName
+                && !await _context.ServerInstances.AnyAsync(s => s.MemoryGroup == groupName, cancellationToken)
+                && await _context.MemoryGroups.FindAsync([groupName], cancellationToken) is { } group)
+            {
+                _context.MemoryGroups.Remove(group);
+                await _context.SaveChangesAsync();
+            }
         }
 
         _registry.Remove(instanceId);
