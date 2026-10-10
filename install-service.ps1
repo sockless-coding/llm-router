@@ -13,7 +13,7 @@ param(
     [string]$ServiceName = "LLMRouter",
     [string]$DisplayName = "LLM Router",
     [string]$Description = "Routes and load-balances requests across local LLM inference servers.",
-    [string]$PublishDir = "$PSScriptRoot\LR.Application\bin\Release\net10.0\win-x64\publish",
+    [string]$PublishDir = "$PSScriptRoot",
     [ValidateSet("Automatic", "Manual", "Disabled")]
     [string]$StartupType = "Automatic"
 )
