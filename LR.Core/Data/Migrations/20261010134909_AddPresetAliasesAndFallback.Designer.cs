@@ -3,16 +3,19 @@ using System;
 using LR.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace LR.Core.Migrations
+namespace LR.Core.Data.Migrations
 {
     [DbContext(typeof(LRDbContext))]
-    partial class LRDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261010134909_AddPresetAliasesAndFallback")]
+    partial class AddPresetAliasesAndFallback
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
@@ -478,20 +481,6 @@ namespace LR.Core.Migrations
                     b.ToTable("LocalModels", (string)null);
                 });
 
-            modelBuilder.Entity("LR.Core.Models.MemoryGroup", b =>
-                {
-                    b.Property<string>("Name")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("BudgetMb")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Name");
-
-                    b.ToTable("MemoryGroups");
-                });
-
             modelBuilder.Entity("LR.Core.Models.ModelLibrarySettings", b =>
                 {
                     b.Property<int>("Id")
@@ -718,9 +707,6 @@ namespace LR.Core.Migrations
                     b.Property<bool?>("Jinja")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("KeepLoaded")
-                        .HasColumnType("INTEGER");
-
                     b.Property<int?>("KeepN")
                         .HasColumnType("INTEGER");
 
@@ -781,9 +767,6 @@ namespace LR.Core.Migrations
                     b.Property<string>("MediaPath")
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
-
-                    b.Property<int?>("MemoryEstimateMb")
-                        .HasColumnType("INTEGER");
 
                     b.Property<bool?>("MetricsEndpoint")
                         .HasColumnType("INTEGER");
@@ -1336,9 +1319,6 @@ namespace LR.Core.Migrations
                     b.Property<int>("Engine")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int?>("IdleUnloadMinutes")
-                        .HasColumnType("INTEGER");
-
                     b.Property<bool>("IsHealthy")
                         .HasColumnType("INTEGER");
 
@@ -1351,10 +1331,6 @@ namespace LR.Core.Migrations
 
                     b.Property<int>("MaxRestarts")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("MemoryGroup")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
                         .IsRequired()

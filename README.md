@@ -10,6 +10,9 @@ LLM Router provides a unified interface to route requests across heterogeneous b
 - **Tool / function calling** — Passes OpenAI-style `tools`/`tool_choice` through to llama.cpp backends and translates the resulting tool calls back into Chat Completions or Responses API shapes.
 - **OpenAI Responses API** — Stateful `/v1/responses` support (create, retrieve, delete, cancel) built on top of the same Chat Completions plumbing, with stored conversation state.
 - **Smart routing** — Priority-ordered routing rules, preset/model affinity (auto-start or restart the server that owns a preset), and round-robin fallback across healthy instances.
+- **Model aliases & fallback presets** — Extra names per preset (with `*` wildcards, e.g. `gpt-4o` or `claude-*`) for clients with hardcoded model ids, plus a fallback preset chain. The fallback serves when a preset's server is errored, and takes overflow when the preset is at capacity and the fallback is already loaded.
+- **Memory groups & idle unload** — Servers sharing a GPU form a group with a VRAM budget. Before a model loads, the least-recently-used idle servers in the group are stopped until its estimated footprint fits. Servers can also unload after N idle minutes.
+- **Embeddings** — OpenAI `/v1/embeddings` and Ollama `/api/embed` / `/api/embeddings`, served by presets launched with embeddings enabled.
 - **Health monitoring & auto-restart** — Background health checks detect failed or crashed backends and route around them.
 - **Model library with Hugging Face integration** — A local registry of GGUF models with metadata inspection, folder scanning, and search/download directly from the Hugging Face Hub (with live progress).
 - **Model presets** — Reusable llama.cpp launch configurations (sampling, context, GPU/threading, speculative decoding, LoRA, multimodal, etc.), optionally linked to a model-library entry so paths and metadata stay in sync.
@@ -64,10 +67,10 @@ flowchart TB
 
 | Protocol | Endpoints |
 |---|---|
-| OpenAI | `POST /v1/chat/completions` (streaming + non-streaming, tool calling), `GET /v1/models` |
+| OpenAI | `POST /v1/chat/completions` (streaming + non-streaming, tool calling), `POST /v1/embeddings`, `GET /v1/models` |
 | OpenAI Responses | `POST /v1/responses`, `GET /v1/responses/{id}`, `DELETE /v1/responses/{id}`, `POST /v1/responses/{id}/cancel` |
 | Claude | `POST /v1/messages` |
-| Ollama | `POST /api/chat`, `POST /api/generate`, `GET /api/tags`, `POST /api/show`, `POST /api/embed`, `GET /api/ps`, `GET /api/version` |
+| Ollama | `POST /api/chat`, `POST /api/generate`, `GET /api/tags`, `POST /api/show`, `POST /api/embed`, `POST /api/embeddings`, `GET /api/ps`, `GET /api/version` |
 | Misc | `GET /health`; SignalR hubs `/serverHub` and `/modelDownloadHub` for live UI updates |
 
 Protocols are toggled via `Gateway:EnabledProtocols` in configuration. Only `"function"`-type tools are supported for tool calling and the Responses API — OpenAI's built-in tools (web search, file search, code interpreter, computer use, image generation, MCP) and the Conversations API are not implemented.

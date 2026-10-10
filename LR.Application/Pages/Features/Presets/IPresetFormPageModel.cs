@@ -20,4 +20,7 @@ public interface IPresetFormPageModel
     IReadOnlyList<LocalModel> MmprojCandidates { get; }
 
     IReadOnlyList<ChatTemplateVariable> DetectedTemplateVariables { get; }
+
+    /// <summary>Other presets, offered as this preset's fallback.</summary>
+    IReadOnlyList<ModelPreset> FallbackCandidates { get; }
 }

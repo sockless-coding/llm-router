@@ -17,6 +17,7 @@ public static class OllamaEndpoints
     /// - POST /api/show
     /// - POST /api/generate
     /// - POST /api/embed
+    /// - POST /api/embeddings (legacy)
     /// - GET  /api/ps
     /// - GET  /api/version
     /// </summary>
@@ -78,20 +79,17 @@ public static class OllamaEndpoints
             });
 
         // POST /api/embed — generate embeddings from a model
-        group.MapPost("/api/embed", async (OllamaHandler handler, HttpRequest httpRequest) =>
+        group.MapPost("/api/embed", async (OllamaHandler handler, HttpRequest httpRequest, CancellationToken ct) =>
         {
             using var reader = new StreamReader(httpRequest.Body);
-            var body = await reader.ReadToEndAsync();
-            var request = JsonSerializer.Deserialize<LR.Core.Models.Ollama.EmbedRequest>(body);
+            return await handler.HandleEmbeddingsAsync(await reader.ReadToEndAsync(ct), ct);
+        });
 
-            if (request is null)
-                return Results.BadRequest("Invalid JSON in request body");
-
-            var result = await handler.HandleEmbeddingsAsync(request);
-            if (result is Microsoft.AspNetCore.Http.IResult iResult)
-                return iResult;
-
-            return Results.Json(result!);
+        // POST /api/embeddings — legacy single-prompt embeddings
+        group.MapPost("/api/embeddings", async (OllamaHandler handler, HttpRequest httpRequest, CancellationToken ct) =>
+        {
+            using var reader = new StreamReader(httpRequest.Body);
+            return await handler.HandleLegacyEmbeddingsAsync(await reader.ReadToEndAsync(ct), ct);
         });
 
         // GET /api/ps — list models currently loaded in memory

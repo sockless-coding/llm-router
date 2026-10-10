@@ -72,6 +72,7 @@ public class LlamaSlotCapacityTests
         public Task<bool> TryReconnectAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<bool> HealthCheckAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RouteResponse?> SendRequestAsync(string payload, ApiProtocol protocol = ApiProtocol.OpenAI, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RouteResponse?> SendRawRequestAsync(string endpoint, string payload, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public IAsyncEnumerable<RouteStreamChunk> SendStreamRequestAsync(string payload, ApiProtocol protocol = ApiProtocol.OpenAI, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public void Configure(BackendConfigData configData) => throw new NotImplementedException();
         public void SetServerInstance(ServerInstance? instance) => throw new NotImplementedException();

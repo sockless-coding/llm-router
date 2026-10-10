@@ -17,18 +17,21 @@ public class RoutingEngine : IRoutingEngine
     private readonly IServerManager _serverManager;
     private readonly IServerConcurrencyLimiter _concurrencyLimiter;
     private readonly GatewaySettings _settings;
+    private readonly IApiKeyRequestContext _apiKeyContext;
     private int _roundRobinIndex;
 
     public RoutingEngine(
         LRDbContext context,
         IServerManager serverManager,
         IServerConcurrencyLimiter concurrencyLimiter,
-        GatewaySettings settings)
+        GatewaySettings settings,
+        IApiKeyRequestContext apiKeyContext)
     {
         _context = context;
         _serverManager = serverManager;
         _concurrencyLimiter = concurrencyLimiter;
         _settings = settings;
+        _apiKeyContext = apiKeyContext;
     }
 
     public async Task<RouteDecision?> RouteAsync(RouteRequest request, CancellationToken cancellationToken = default)
@@ -76,6 +79,13 @@ public class RoutingEngine : IRoutingEngine
                         return decision;
                 }
             }
+
+            // 2b. The preset's own server couldn't take it — try its fallback chain. Status is
+            // read after the (re)start attempt above, so a start that just failed counts.
+            bool primaryUnavailable = instance is null || instance.Status == ServerStatus.Error;
+            var (fallbackDecision, waitForFallback) = await TryFallbackChainAsync(request, targetPreset, primaryUnavailable, cancellationToken);
+            if (fallbackDecision is not null || waitForFallback)
+                return fallbackDecision;
         }
 
         // 3. Fallback: round-robin among healthy running servers already serving the requested
@@ -135,6 +145,58 @@ public class RoutingEngine : IRoutingEngine
     }
 
     /// <summary>
+    /// Walks <paramref name="primary"/>'s fallback chain (cycle-guarded, skipping presets the
+    /// caller's API key can't use and presets hosted on the primary's own server instance — that
+    /// instance is already busy with or (re)starting the primary). A fallback that is already
+    /// loaded and has a free slot is always taken (overflow). One that would need starting or a
+    /// model swap is only used when the primary is unavailable: its start is kicked off and the
+    /// request is retargeted at it so the queue waits for the fallback instead of the dead
+    /// primary (<c>WaitForFallback</c>). On success, <see cref="RouteRequest.PresetId"/> is
+    /// retargeted too, so stats and logs are attributed to the preset that actually served it.
+    /// </summary>
+    private async Task<(RouteDecision? Decision, bool WaitForFallback)> TryFallbackChainAsync(
+        RouteRequest request, ModelPreset primary, bool primaryUnavailable, CancellationToken cancellationToken)
+    {
+        var visited = new HashSet<Guid> { primary.Id };
+        var nextId = primary.FallbackPresetId;
+
+        while (nextId is Guid id && visited.Add(id))
+        {
+            var fallback = await _context.ModelPresets.FindAsync([id], cancellationToken);
+            if (fallback is null)
+                break;
+            nextId = fallback.FallbackPresetId;
+
+            if (fallback.ServerInstanceId == primary.ServerInstanceId || !_apiKeyContext.IsModelAllowed(fallback.Id))
+                continue;
+
+            var instance = await GetInstanceAsync(fallback.ServerInstanceId, cancellationToken);
+            if (instance is null)
+                continue;
+
+            if (instance.Status == ServerStatus.Running && instance.IsHealthy && instance.ActivePresetId == fallback.Id)
+            {
+                var decision = TryReserve(instance, fallback);
+                if (decision is not null)
+                {
+                    request.PresetId = fallback.Id;
+                    return (decision, false);
+                }
+                continue;
+            }
+
+            if (!primaryUnavailable || instance.Status == ServerStatus.Error)
+                continue;
+
+            var ready = await EnsureInstanceServesPresetAsync(instance, fallback, cancellationToken);
+            request.PresetId = fallback.Id;
+            return (ready is null ? null : TryReserve(ready, fallback), true);
+        }
+
+        return (null, false);
+    }
+
+    /// <summary>
     /// Resolves the ModelPreset a request targets, preferring an explicit PresetId and
     /// falling back to a case-sensitive model name lookup. Returns null if the request
     /// doesn't map to any known preset.
@@ -149,7 +211,7 @@ public class RoutingEngine : IRoutingEngine
         }
 
         if (!string.IsNullOrWhiteSpace(request.ModelName))
-            return await _context.ModelPresets.FirstOrDefaultAsync(p => p.Name == request.ModelName, cancellationToken);
+            return ModelAliasMatcher.Resolve(await _context.ModelPresets.ToListAsync(cancellationToken), request.ModelName);
 
         return null;
     }

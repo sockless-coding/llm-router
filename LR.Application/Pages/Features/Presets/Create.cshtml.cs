@@ -19,6 +19,7 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
     public IReadOnlyList<ServerInstance> Servers { get; set; } = new List<ServerInstance>();
     public IReadOnlyList<LocalModel> Models { get; set; } = new List<LocalModel>();
     public IReadOnlyList<LocalModel> MmprojCandidates { get; set; } = new List<LocalModel>();
+    public IReadOnlyList<ModelPreset> FallbackCandidates { get; set; } = new List<ModelPreset>();
 
     // A new preset has nothing on disk to extract chat-template variables from yet; the
     // kwargs editor falls back to its client-side AJAX fetch once a model is picked.
@@ -35,6 +36,7 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
     public async Task OnGetAsync()
     {
         Servers = _serverManager.GetAllInstances();
+        FallbackCandidates = _presetManager.GetAllPresets();
         Models = await _modelLibrary.GetAllAsync();
         MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
     }
@@ -75,9 +77,16 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
         if (!ViewModel.ModelId.HasValue && string.IsNullOrWhiteSpace(ViewModel.ModelPath))
             ModelState.AddModelError("ViewModel.ModelPath", "Select a model from the library, or enter a path manually.");
 
+        foreach (var alias in ModelAliasMatcher.ParseAliases(ViewModel.Aliases))
+        {
+            if (_presetManager.GetAllPresets().Any(p => p.Name == alias))
+                ModelState.AddModelError("ViewModel.Aliases", $"'{alias}' is already another preset's name, so the alias would never match.");
+        }
+
         if (!ModelState.IsValid)
         {
             Servers = _serverManager.GetAllInstances();
+            FallbackCandidates = _presetManager.GetAllPresets();
             Models = await _modelLibrary.GetAllAsync();
             MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
             return Page();

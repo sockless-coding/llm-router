@@ -9,6 +9,16 @@ public class PresetViewModel
     [Required, MaxLength(256)]
     public string Name { get; set; } = "";
 
+    [MaxLength(2048)]
+    public string? Aliases { get; set; }
+
+    public Guid? FallbackPresetId { get; set; }
+
+    [Range(0, 4_000_000)]
+    public int? MemoryEstimateMb { get; set; }
+
+    public bool KeepLoaded { get; set; }
+
     /// <summary>
     /// Selected model from the registry. When set, this takes precedence over
     /// <see cref="ModelPath"/> — see <c>PresetManager.ApplyLinkedModelAsync</c>.

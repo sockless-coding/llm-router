@@ -142,18 +142,23 @@ public class RequestDispatcherService : BackgroundService
                 // scope here, not one shared with the dispatch loop: that scope's DbContext
                 // gets disposed as soon as the loop moves on, since this method is invoked
                 // fire-and-forget and typically outlives the loop iteration that started it).
-                try
+                // Generation statistics only — raw passthrough calls (embeddings) produce no
+                // output tokens and would just drag the throughput averages down.
+                if (request.BackendEndpoint is null)
                 {
-                    using var scope = _scopeFactory.CreateScope();
-                    var presetManager = scope.ServiceProvider.GetRequiredService<IPresetManager>();
-                    var statisticsService = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
-                    var presetId = request.PresetId ?? server.ActivePresetId;
-                    var preset = presetId.HasValue ? presetManager.GetById(presetId.Value) : null;
-                    await statisticsService.RecordRequestAsync(server, preset, response, request.ApiKeyId);
-                }
-                catch
-                {
-                    // Stats recording failure shouldn't block the response
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var presetManager = scope.ServiceProvider.GetRequiredService<IPresetManager>();
+                        var statisticsService = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
+                        var presetId = request.PresetId ?? server.ActivePresetId;
+                        var preset = presetId.HasValue ? presetManager.GetById(presetId.Value) : null;
+                        await statisticsService.RecordRequestAsync(server, preset, response, request.ApiKeyId);
+                    }
+                    catch
+                    {
+                        // Stats recording failure shouldn't block the response
+                    }
                 }
 
                 tcs.TrySetResult(response);
@@ -191,6 +196,9 @@ public class RequestDispatcherService : BackgroundService
         var provider = serverManager.GetProvider(server.Id);
         if (provider is null)
             throw new InvalidOperationException($"No backend provider registered for instance {server.Name}.");
+
+        if (request.BackendEndpoint is not null)
+            return await provider.SendRawRequestAsync(request.BackendEndpoint, request.Payload, cancellationToken);
 
         return await provider.SendRequestAsync(request.Payload, request.Protocol, cancellationToken);
     }

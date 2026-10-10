@@ -19,19 +19,22 @@ public class ServerManager : IServerManager
     private readonly ProviderRegistry _registry;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ISignalRProgressPublisher _progressPublisher;
+    private readonly IServerConcurrencyLimiter _limiter;
 
     public ServerManager(
         LRDbContext context,
         IBackendProviderFactory providerFactory,
         ProviderRegistry registry,
         IServiceScopeFactory scopeFactory,
-        ISignalRProgressPublisher progressPublisher)
+        ISignalRProgressPublisher progressPublisher,
+        IServerConcurrencyLimiter limiter)
     {
         _context = context;
         _providerFactory = providerFactory;
         _registry = registry;
         _scopeFactory = scopeFactory;
         _progressPublisher = progressPublisher;
+        _limiter = limiter;
     }
 
     public async Task<ServerInstance> CreateInstanceAsync(string name, ServerEngine engine, BackendConfigData configData, int? port = null)
@@ -120,8 +123,24 @@ public class ServerManager : IServerManager
                 "Cannot start server without a valid model path. Please set an active preset with a ModelPath first.");
         }
 
-        // Set status to Starting and persist immediately — then offload to background task
-        instance.Status = ServerStatus.Starting;
+        // Memory group: stop least-recently-used idle servers sharing this one's device until
+        // the new model fits the group's budget. The lock is held until this server is
+        // persisted as Starting, so a concurrent start in the same group counts it as loaded.
+        using (var room = await new MemoryGroupScheduler(_context, _limiter).MakeRoomAsync(instance, preset, StopAsync, cancellationToken))
+        {
+            foreach (var evicted in room.Evicted)
+                await LogLifecycleEvent(evicted, ServerLogLevel.Info,
+                    $"Unloaded server '{evicted.Name}' to make room in memory group '{instance.MemoryGroup}' for '{instance.Name}'.");
+            if (!room.Fits)
+                await LogLifecycleEvent(instance, ServerLogLevel.Warning,
+                    $"Memory group '{instance.MemoryGroup}' is over budget: '{preset.Name}' needs ~{room.NeededBytes / (1024 * 1024)} MB, " +
+                    $"{room.UsedBytes / (1024 * 1024)} of {room.BudgetBytes / (1024 * 1024)} MB is still held by busy or starting servers after unloading idle ones. Starting anyway.");
+
+            // Set status to Starting and persist immediately — then offload to background task
+            instance.Status = ServerStatus.Starting;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        _limiter.Touch(instance.Id);
         await LogLifecycleEvent(instance, ServerLogLevel.Info,
             $"{(isRestart ? "Restarting" : "Starting")} server '{instance.Name}' on port {instance.Port}...");
 
@@ -136,6 +155,7 @@ public class ServerManager : IServerManager
 
         // Offload the actual startup to a background task so the API returns immediately
         var scopeFactory = _scopeFactory;
+        var limiter = _limiter;
         Func<ModelPreset, int?, Func<StartupProgressEvent, Task>?, CancellationToken, Task<bool>> invokeProvider =
             isRestart ? provider.RestartProcessAsync : provider.StartProcessAsync;
 
@@ -159,6 +179,8 @@ public class ServerManager : IServerManager
                                 inst.Status = ServerStatus.Running;
                                 inst.Url = $"http://localhost:{instance.Port}";
                                 inst.IsHealthy = true;
+                                // Idle-unload clock starts once the model is actually loaded.
+                                limiter.Touch(instance.Id);
                                 await LogLifecycleEvent(inst, ServerLogLevel.Info,
                                     $"Server '{inst.Name}' started successfully on {inst.Url}.");
                             }

@@ -86,7 +86,7 @@ public class ClaudeHandler : IProtocolHandler
         // Reject models this API key isn't scoped to before touching the routing engine —
         // RoutingEngine's round-robin fallback would otherwise happily route an unresolved
         // model name to any healthy server, silently bypassing the scoping.
-        var requestedPreset = _presetManager.GetAllPresets().FirstOrDefault(p => p.Name == request.Model);
+        var requestedPreset = _presetManager.FindByModelName(request.Model);
         if (requestedPreset is not null && !_apiKeyContext.IsModelAllowed(requestedPreset.Id))
         {
             return Microsoft.AspNetCore.Http.Results.Json(new
@@ -450,7 +450,7 @@ public class ClaudeHandler : IProtocolHandler
     {
         // Find preset matching the model name
         var presets = _presetManager.GetAllPresets();
-        var preset = presets.FirstOrDefault(p => p.Name == request.Model);
+        var preset = ModelAliasMatcher.Resolve(presets, request.Model);
 
         return new RouteRequest
         {
