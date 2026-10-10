@@ -1,0 +1,321 @@
+@page
+@model LR.Application.Pages.Features.Playground.HistoryModel
+@{
+    ViewData["Title"] = "Playground — Run History";
+    var fieldClass = "bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-1.5 text-sm";
+    var th = "px-3 py-2 text-text-secondary font-medium whitespace-nowrap";
+    var exportQuery = $"?preset={Uri.EscapeDataString(Model.Preset ?? "")}&label={Uri.EscapeDataString(Model.Label ?? "")}";
+    var best = Model.Configurations.Where(c => c.AvgGenTps.HasValue).MaxBy(c => c.AvgGenTps);
+}
+@functions {
+    static string Ms(double? ms) => ms is null ? "—" : ms >= 1000 ? $"{ms / 1000:F2} s" : $"{ms:F0} ms";
+    static string Tps(double? v) => v is null or <= 0 ? "—" : $"{v:F1}";
+}
+
+<div class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+        <h1 class="text-3xl font-bold text-neon-cyan flex items-center gap-3"><span aria-hidden="true">🧪</span> Run History</h1>
+        <div class="flex items-center gap-2">
+            <a href="/Features/Playground/Index" class="px-3 py-1.5 rounded-lg text-sm border border-gray-600 text-text-secondary hover:text-neon-cyan hover:border-neon-cyan transition-colors">Back to Playground</a>
+            <a href="/api/playground/runs/export@(exportQuery)" hx-boost="false" class="px-3 py-1.5 rounded-lg text-sm border border-neon-cyan text-neon-cyan tint-cyan hover:tint-cyan-20 transition-colors">Export CSV</a>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <form method="get" class="flex flex-wrap items-end gap-3 bg-cyber-card rounded-xl border border-gray-700/30 p-4">
+        <div>
+            <label for="hPreset" class="block text-xs font-medium text-text-secondary mb-1">Preset</label>
+            <select id="hPreset" name="preset" class="@fieldClass" onchange="this.form.requestSubmit()">
+                <option value="">All presets</option>
+                @foreach (var name in Model.PresetNames)
+                {
+                    <option value="@name" selected="@(name == Model.Preset ? "selected" : null)">@name</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label for="hLabel" class="block text-xs font-medium text-text-secondary mb-1">Label</label>
+            <select id="hLabel" name="label" class="@fieldClass" onchange="this.form.requestSubmit()">
+                <option value="">All labels</option>
+                @foreach (var label in Model.Labels)
+                {
+                    <option value="@label" selected="@(label == Model.Label ? "selected" : null)">@label</option>
+                }
+            </select>
+        </div>
+        <label class="flex items-center gap-2 text-sm text-text-primary pb-1.5">
+            <input type="checkbox" name="includeCold" value="true" checked="@(Model.IncludeCold ? "checked" : null)" onchange="this.form.requestSubmit()" class="rounded" />
+            Include cold starts in averages
+        </label>
+        <span class="text-sm text-text-secondary pb-1.5 ml-auto">@Model.TotalMatching run(s)</span>
+    </form>
+
+    @if (Model.TotalMatching == 0)
+    {
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-8 text-center text-text-secondary">
+            No recorded runs yet. Chat in the <a href="/Features/Playground/Index" class="text-neon-cyan underline">Playground</a> with <em>Record runs</em> on.
+        </div>
+    }
+    else
+    {
+        <!-- Configuration comparison -->
+        <section class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden" aria-labelledby="cfgHeading">
+            <div class="px-5 py-3 border-b border-gray-700/30">
+                <h2 id="cfgHeading" class="text-lg font-semibold text-neon-cyan">Configurations</h2>
+                <p class="text-xs text-text-secondary mt-0.5">
+                    Runs grouped by preset, launch settings (<span class="font-mono">#hash</span> changes whenever the preset's generated command line does) and run label.
+                    Averages leave out failed runs@(Model.IncludeCold ? "" : " and cold starts").
+                </p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                            <th class="@th text-left">Preset</th>
+                            <th class="@th text-left">Label</th>
+                            <th class="@th text-left">Settings</th>
+                            <th class="@th text-right">Runs</th>
+                            <th class="@th text-right" title="Median time to first token">TTFT (median)</th>
+                            <th class="@th text-right">PP tok/s</th>
+                            <th class="@th text-right">TG tok/s</th>
+                            <th class="@th text-right">Avg total</th>
+                            <th class="@th text-right">Avg output</th>
+                            <th class="@th text-right" title="Speculative decoding: accepted / proposed draft tokens">Draft accept</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in Model.Configurations)
+                        {
+                            <tr class="border-b border-gray-700/20 align-top">
+                                <td class="px-3 py-2 text-text-primary">@c.PresetName</td>
+                                <td class="px-3 py-2 text-text-secondary">@(c.Label ?? "—")</td>
+                                <td class="px-3 py-2">
+                                    @if (c.SettingsSnapshot is not null)
+                                    {
+                                        <details>
+                                            <summary class="cursor-pointer font-mono text-xs text-neon-cyan">#@c.SettingsHash</summary>
+                                            <pre class="mt-2 max-w-xl whitespace-pre-wrap break-all text-xs text-text-secondary font-mono">@c.SettingsSnapshot</pre>
+                                        </details>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-text-secondary">—</span>
+                                    }
+                                </td>
+                                <td class="px-3 py-2 text-right font-mono">
+                                    @c.Runs
+                                    @if (c.Excluded > 0)
+                                    {
+                                        <span class="text-xs text-text-secondary" title="Runs left out of the averages (failed@(Model.IncludeCold ? "" : " or cold start"))">+@c.Excluded</span>
+                                    }
+                                </td>
+                                <td class="px-3 py-2 text-right font-mono">@Ms(c.MedianTtftMs)</td>
+                                <td class="px-3 py-2 text-right font-mono">@Tps(c.AvgPromptTps)</td>
+                                <td class="px-3 py-2 text-right font-mono @(c == best && Model.Configurations.Count > 1 ? "text-neon-green font-semibold" : "")">@Tps(c.AvgGenTps)</td>
+                                <td class="px-3 py-2 text-right font-mono">@Ms(c.AvgTotalMs)</td>
+                                <td class="px-3 py-2 text-right font-mono">@(c.AvgOutputTokens is null ? "—" : $"{c.AvgOutputTokens:F0}")</td>
+                                <td class="px-3 py-2 text-right font-mono">@(c.DraftAcceptance is null ? "—" : $"{c.DraftAcceptance:P0}")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        @if (Model.Configurations.Count(c => c.AvgGenTps.HasValue || c.AvgPromptTps.HasValue) > 1)
+        {
+            <!-- Two charts rather than one dual-axis chart: prompt and generation speeds differ by an order of magnitude. -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <section class="bg-cyber-card rounded-xl border border-gray-700/30 p-5">
+                    <h2 class="text-base font-semibold text-text-primary mb-3">Generation speed by configuration <span class="text-text-secondary font-normal text-sm">(tok/s)</span></h2>
+                    <div id="hGenWrap"><canvas id="hGenChart" aria-label="Bar chart of average generation tokens per second per configuration; values are in the table above" role="img"></canvas></div>
+                </section>
+                <section class="bg-cyber-card rounded-xl border border-gray-700/30 p-5">
+                    <h2 class="text-base font-semibold text-text-primary mb-3">Prompt processing speed by configuration <span class="text-text-secondary font-normal text-sm">(tok/s)</span></h2>
+                    <div id="hPromptWrap"><canvas id="hPromptChart" aria-label="Bar chart of average prompt processing tokens per second per configuration; values are in the table above" role="img"></canvas></div>
+                </section>
+            </div>
+        }
+
+        <!-- Individual runs -->
+        <section class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden" aria-labelledby="runsHeading">
+            <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-gray-700/30">
+                <h2 id="runsHeading" class="text-lg font-semibold text-neon-cyan">
+                    Runs
+                    @if (Model.TotalMatching > Model.Runs.Count)
+                    {
+                        <span class="text-xs font-normal text-text-secondary">(latest @Model.Runs.Count of @Model.TotalMatching — export CSV for all)</span>
+                    }
+                </h2>
+                <button type="button" id="hDelete" disabled class="px-3 py-1.5 rounded-lg text-sm border border-gray-600 text-text-secondary hover:text-neon-red hover:border-neon-red transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Delete selected</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                            <th class="@th text-left"><input type="checkbox" id="hSelectAll" aria-label="Select all runs" class="rounded" /></th>
+                            <th class="@th text-left">Time</th>
+                            <th class="@th text-left">Preset</th>
+                            <th class="@th text-left">Label</th>
+                            <th class="@th text-left">Settings</th>
+                            <th class="@th text-right">TTFT</th>
+                            <th class="@th text-right" title="Prompt tokens (cached)">Prompt</th>
+                            <th class="@th text-right">PP tok/s</th>
+                            <th class="@th text-right">Output</th>
+                            <th class="@th text-right">TG tok/s</th>
+                            <th class="@th text-right">Total</th>
+                            <th class="@th text-left">Status</th>
+                            <th class="@th"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in Model.Runs)
+                        {
+                            <tr class="border-b border-gray-700/20 hover:tint-cyan-5 transition-colors">
+                                <td class="px-3 py-2"><input type="checkbox" class="h-run rounded" value="@r.Id" aria-label="Select run" /></td>
+                                <td class="px-3 py-2 text-text-secondary whitespace-nowrap">
+                                    @Html.Timestamp(r.Timestamp, "time")
+                                    <span class="text-xs opacity-60">@Html.Timestamp(r.Timestamp, "date")</span>
+                                </td>
+                                <td class="px-3 py-2 text-text-primary max-w-[160px] truncate" title="@r.PresetName@(r.ServerName is null ? "" : " on " + r.ServerName)">@r.PresetName</td>
+                                <td class="px-3 py-2 text-text-secondary max-w-[140px] truncate" title="@r.Label">@(r.Label ?? "—")</td>
+                                <td class="px-3 py-2 font-mono text-xs text-text-secondary">@(r.SettingsHash is null ? "—" : "#" + r.SettingsHash)</td>
+                                <td class="px-3 py-2 text-right font-mono">@Ms(r.TimeToFirstTokenMs)</td>
+                                <td class="px-3 py-2 text-right font-mono">@r.PromptTokens@(r.CachedTokens > 0 ? $" ({r.CachedTokens})" : "")</td>
+                                <td class="px-3 py-2 text-right font-mono">@Tps(r.PromptTokensPerSec)</td>
+                                <td class="px-3 py-2 text-right font-mono">@r.CompletionTokens</td>
+                                <td class="px-3 py-2 text-right font-mono">@Tps(r.GenTokensPerSec)</td>
+                                <td class="px-3 py-2 text-right font-mono">@Ms(r.TotalMs)</td>
+                                <td class="px-3 py-2 whitespace-nowrap text-xs">
+                                    @if (r.Error is not null)
+                                    {
+                                        <span class="text-neon-red" title="@r.Error">✕ @(r.Error.Length > 24 ? r.Error[..24] + "…" : r.Error)</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-neon-green">✓ @(r.FinishReason ?? "stop")</span>
+                                    }
+                                    @if (r.ColdStart)
+                                    {
+                                        <span class="ml-1 text-neon-magenta" title="Model was loaded for this run — latency includes the load">cold</span>
+                                    }
+                                </td>
+                                <td class="px-3 py-2 text-right">
+                                    <button type="button" class="h-toggle text-xs text-neon-cyan hover:underline" aria-expanded="false" aria-controls="run-@r.Id">Details</button>
+                                </td>
+                            </tr>
+                            <tr id="run-@r.Id" class="hidden border-b border-gray-700/20 bg-gray-800/10">
+                                <td colspan="13" class="px-5 py-4">
+                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+                                        <div class="space-y-3">
+                                            <div>
+                                                <p class="font-semibold text-text-secondary mb-1">Prompt <span class="font-normal">(turn of @r.MessageCount message(s))</span></p>
+                                                <pre class="whitespace-pre-wrap break-words text-text-primary font-sans">@r.Prompt</pre>
+                                            </div>
+                                            <div>
+                                                <p class="font-semibold text-text-secondary mb-1">Response</p>
+                                                <pre class="whitespace-pre-wrap break-words text-text-primary font-sans max-h-64 overflow-y-auto">@r.Response</pre>
+                                            </div>
+                                            @if (r.Reasoning is not null)
+                                            {
+                                                <details>
+                                                    <summary class="cursor-pointer font-semibold text-text-secondary">Reasoning</summary>
+                                                    <pre class="mt-1 whitespace-pre-wrap break-words text-text-secondary font-sans max-h-64 overflow-y-auto">@r.Reasoning</pre>
+                                                </details>
+                                            }
+                                        </div>
+                                        <div class="space-y-3">
+                                            <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+                                                <dt class="text-text-secondary">Server</dt><dd>@(r.ServerName ?? "—") @(r.Engine is null ? "" : $"({r.Engine})")</dd>
+                                                <dt class="text-text-secondary">Model file</dt><dd class="font-mono break-all">@(r.ModelFile ?? "—")</dd>
+                                                <dt class="text-text-secondary">Prompt time</dt><dd class="font-mono">@Ms(r.PromptMs)</dd>
+                                                <dt class="text-text-secondary">Generation time</dt><dd class="font-mono">@Ms(r.GenerationMs)</dd>
+                                                @if (r.DraftGenerated > 0)
+                                                {
+                                                    <dt class="text-text-secondary">Draft accepted</dt><dd class="font-mono">@r.DraftAccepted / @r.DraftGenerated (@(((double)(r.DraftAccepted ?? 0) / r.DraftGenerated!.Value).ToString("P0")))</dd>
+                                                }
+                                                <dt class="text-text-secondary">Request params</dt><dd class="font-mono break-all">@(r.RequestParams ?? "preset defaults")</dd>
+                                                <dt class="text-text-secondary">Session</dt><dd class="font-mono">@(r.SessionId.ToString()[..8])</dd>
+                                            </dl>
+                                            @if (r.SettingsSnapshot is not null)
+                                            {
+                                                <div>
+                                                    <p class="font-semibold text-text-secondary mb-1">Launch settings at the time</p>
+                                                    <pre class="whitespace-pre-wrap break-all text-text-secondary font-mono">@r.SettingsSnapshot</pre>
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+</div>
+
+<script>
+// IIFE: this script re-runs on every htmx-boosted navigation to this page.
+(function () {
+// ── Details toggles ──
+document.querySelectorAll('.h-toggle').forEach(btn => btn.addEventListener('click', () => {
+    const row = document.getElementById(btn.getAttribute('aria-controls'));
+    const open = row.classList.toggle('hidden') === false;
+    btn.setAttribute('aria-expanded', open);
+    btn.textContent = open ? 'Hide' : 'Details';
+}));
+
+// ── Selection + bulk delete ──
+const boxes = Array.from(document.querySelectorAll('.h-run'));
+const deleteBtn = document.getElementById('hDelete');
+const selectAll = document.getElementById('hSelectAll');
+const syncDelete = () => {
+    const n = boxes.filter(b => b.checked).length;
+    if (deleteBtn) { deleteBtn.disabled = n === 0; deleteBtn.textContent = n ? `Delete selected (${n})` : 'Delete selected'; }
+};
+boxes.forEach(b => b.addEventListener('change', syncDelete));
+selectAll?.addEventListener('change', () => { boxes.forEach(b => b.checked = selectAll.checked); syncDelete(); });
+deleteBtn?.addEventListener('click', async () => {
+    const ids = boxes.filter(b => b.checked).map(b => b.value);
+    if (!ids.length || !confirm(`Delete ${ids.length} recorded run(s)? This can't be undone.`)) return;
+    const resp = await fetch('/api/playground/runs/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
+    if (resp.ok) location.reload(); else alert('Delete failed.');
+});
+
+// ── Comparison charts: one series each, so a single theme color and no legend ──
+const configs = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Configurations.Select(c => new { key = c.Key, gen = c.AvgGenTps, prompt = c.AvgPromptTps, runs = c.Runs })));
+const rootStyle = getComputedStyle(document.documentElement);
+const cssVar = name => rootStyle.getPropertyValue(name).trim();
+
+function barChart(canvasId, wrapId, field, color) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const rows = configs.filter(c => c[field] != null).sort((a, b) => b[field] - a[field]);
+    // Horizontal bars with a fixed per-bar height, so long configuration names stay readable.
+    document.getElementById(wrapId).style.height = `${Math.max(120, rows.length * 34 + 40)}px`;
+    new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: rows.map(r => r.key),
+            datasets: [{ data: rows.map(r => r[field]), backgroundColor: color, borderRadius: 4, borderSkipped: 'start', maxBarThickness: 22 }],
+        },
+        options: {
+            indexAxis: 'y',
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: ctx => `${ctx.parsed.x.toFixed(1)} tok/s · ${rows[ctx.dataIndex].runs} run(s)` } },
+            },
+            scales: {
+                x: { beginAtZero: true, grid: { color: 'rgba(128,128,128,0.15)' }, ticks: { color: cssVar('--text-secondary') } },
+                y: { grid: { display: false }, ticks: { color: cssVar('--text-primary') } },
+            },
+        },
+    });
+}
+barChart('hGenChart', 'hGenWrap', 'gen', cssVar('--neon-green'));
+barChart('hPromptChart', 'hPromptWrap', 'prompt', cssVar('--neon-cyan'));
+})();
+</script>

@@ -67,6 +67,7 @@
     bool isDevices = path.StartsWith("/Features/Devices");
     bool isRequestLog = path.StartsWith("/Features/RequestLog");
     bool isStats = path.StartsWith("/Features/Stats");
+    bool isPlayground = path.StartsWith("/Features/Playground");
     bool isApiKeys = path.StartsWith("/Features/ApiKeys");
     bool isSettings = path.StartsWith("/Features/Settings");
     string activeStyle = @"color: var(--neon-cyan); background-color: color-mix(in srgb, var(--neon-cyan) 10%, transparent); border-left-color: var(--neon-cyan)";
@@ -104,6 +105,11 @@
                 <a href="/Features/Devices/Index" aria-current="@(isDevices ? "page" : null)" class="@(isDevices ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isDevices ? activeStyle : inactiveStyle)">
                     <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859M12 3v8.25m0 0l-3-3m3 3l3-3" /></svg>
                     <span class="text-sm font-medium">Devices</span>
+                </a>
+
+                <a href="/Features/Playground/Index" aria-current="@(isPlayground ? "page" : null)" class="@(isPlayground ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isPlayground ? activeStyle : inactiveStyle)">
+                    <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                    <span class="text-sm font-medium">Playground</span>
                 </a>
 
                 <a href="/Features/RequestLog/Index" aria-current="@(isRequestLog ? "page" : null)" class="@(isRequestLog ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isRequestLog ? activeStyle : inactiveStyle)">

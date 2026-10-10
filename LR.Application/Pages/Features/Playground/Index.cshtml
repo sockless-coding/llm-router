@@ -1,0 +1,772 @@
+@page
+@model LR.Application.Pages.Features.Playground.IndexModel
+@{
+    ViewData["Title"] = "Playground";
+    var fieldClass = "w-full bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-1.5 text-sm";
+    var labelClass = "block text-xs font-medium text-text-secondary mb-1";
+    var ghostBtn = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-600 text-text-secondary hover:text-neon-cyan hover:border-neon-cyan transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-text-secondary disabled:hover:border-gray-600";
+}
+
+<form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+<!-- Fills the scroll region exactly (viewport minus the h-16 header and the p-6 padding) so the
+     transcript scrolls on its own while the header, composer and settings stay put. -->
+<div class="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-7rem)]">
+
+    <!-- Chat column -->
+    <section class="flex-1 min-w-0 flex flex-col bg-cyber-card rounded-xl border border-gray-700/30 min-h-[70vh]" aria-label="Chat">
+
+        <!-- Header: what you're talking to, and how this session is going -->
+        <div class="flex items-start gap-4 px-4 py-3 border-b border-gray-700/30">
+            <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+                <label for="pgPreset" class="sr-only">Preset</label>
+                <select id="pgPreset" class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg pl-3 pr-8 py-1.5 text-sm font-medium max-w-[16rem]">
+                    @foreach (var preset in Model.Presets)
+                    {
+                        <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
+                    }
+                </select>
+                <span id="pgPresetStatus" class="inline-flex items-center gap-1.5 text-xs whitespace-nowrap"></span>
+                <button type="button" id="pgLoad" class="hidden text-xs px-2.5 py-1 rounded-md border border-tint-magenta text-neon-magenta hover:tint-magenta transition-colors disabled:opacity-50"
+                        title="Load this preset's model now, so the first measured reply isn't a cold start">Load model</button>
+            </div>
+            <p id="pgPresetDetails" class="text-xs text-text-secondary truncate mt-1"></p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                <a href="/Features/Playground/History" class="@ghostBtn">History</a>
+                <button type="button" id="pgClear" class="@ghostBtn" title="Start a new conversation">New chat</button>
+            </div>
+        </div>
+
+        <!-- Session summary: always visible, so you can watch averages settle as runs come in -->
+        <dl id="pgSummary" class="flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-2 text-xs border-b border-gray-700/30 bg-gray-800/10"
+            title="Averages for this chat, leaving out failed replies and ones that included a model load">
+            <div class="flex gap-1.5"><dt class="text-text-secondary">Replies</dt><dd class="font-mono text-text-primary" data-sum="count">0</dd></div>
+            <div class="flex gap-1.5"><dt class="text-text-secondary">Avg TTFT</dt><dd class="font-mono text-text-primary" data-sum="ttft">—</dd></div>
+            <div class="flex gap-1.5"><dt class="text-text-secondary">Avg prompt</dt><dd class="font-mono text-text-primary" data-sum="ptps">—</dd></div>
+            <div class="flex gap-1.5"><dt class="text-text-secondary">Avg generation</dt><dd class="font-mono text-text-primary" data-sum="gtps">—</dd></div>
+        </dl>
+
+        <div id="pgTranscript" class="flex-1 overflow-y-auto px-5 py-5 space-y-5" aria-live="polite">
+            @if (!Model.Presets.Any())
+            {
+                <div class="h-full flex flex-col items-center justify-center text-center gap-2 text-text-secondary">
+                    <span class="text-4xl" aria-hidden="true">💬</span>
+                    <p class="text-sm">No presets yet. <a href="/Features/Presets/Create" class="text-neon-cyan underline">Create one</a> to start chatting.</p>
+                </div>
+            }
+        </div>
+
+        <!-- Composer -->
+        <form id="pgForm" class="p-4 border-t border-gray-700/30">
+            <div class="flex items-end gap-2 bg-cyber-surface border border-gray-600 rounded-xl px-3 py-2 focus-within:border-tint-cyan transition-colors">
+                <label for="pgInput" class="sr-only">Message</label>
+                <textarea id="pgInput" rows="1" placeholder="Message…"
+                          class="flex-1 bg-transparent text-text-primary text-sm resize-none outline-none focus-visible:!outline-none py-1.5 max-h-60 overflow-y-auto"></textarea>
+                <button type="button" id="pgRerun" class="@ghostBtn !px-2" disabled title="Re-run the last message (replaces the last reply)" aria-label="Re-run last message">
+                    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                </button>
+                <button type="submit" id="pgSend" class="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium tint-cyan-20 text-neon-cyan border border-neon-cyan hover:tint-cyan-30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    <span id="pgSendLabel">Send</span>
+                </button>
+            </div>
+            <p class="mt-1.5 text-[11px] text-text-secondary">
+                <kbd class="font-mono">Enter</kbd> to send · <kbd class="font-mono">Shift+Enter</kbd> for a new line · <kbd class="font-mono">Esc</kbd> to stop
+                <span id="pgRepeatHint" class="hidden text-neon-magenta"></span>
+            </p>
+        </form>
+    </section>
+
+    <!-- Settings column -->
+    <aside class="w-full lg:w-80 shrink-0 flex flex-col gap-4 lg:overflow-y-auto" aria-label="Playground settings">
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3">
+            <h2 class="text-sm font-semibold text-neon-cyan uppercase tracking-wider">Benchmark</h2>
+            <label class="flex items-center justify-between gap-2 text-sm text-text-primary">
+                <span>Record runs to history</span>
+                <input id="pgRecord" type="checkbox" checked class="rounded" />
+            </label>
+            <div>
+                <label for="pgLabel" class="@labelClass">Run label</label>
+                <input id="pgLabel" type="text" maxlength="256" placeholder="e.g. fa=on ub=1024" class="@fieldClass" />
+                <p class="text-xs mt-1 text-text-secondary">Groups recorded runs in the history, alongside the preset's settings.</p>
+            </div>
+            <div>
+                <label for="pgRepeat" class="@labelClass">Repeat each message</label>
+                <div class="flex items-center gap-2">
+                    <input id="pgRepeat" type="number" min="1" max="50" value="1" class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-2 py-1.5 w-20 text-sm text-center" />
+                    <span class="text-xs text-text-secondary">times — only the first reply stays in the chat</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-2">
+            <h2 class="text-sm font-semibold text-neon-cyan uppercase tracking-wider"><label for="pgSystem">System prompt</label></h2>
+            <textarea id="pgSystem" rows="3" placeholder="None" class="@fieldClass resize-y"></textarea>
+        </div>
+
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3">
+            <div class="flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-neon-cyan uppercase tracking-wider">Sampling</h2>
+                <button type="button" id="pgResetParams" class="hidden text-xs text-text-secondary hover:text-neon-cyan underline">Reset to preset</button>
+            </div>
+            <p class="text-xs text-text-secondary -mt-1">Placeholders show the preset's own value; type to override it for this chat.</p>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label for="pgTemperature" class="@labelClass">Temperature</label><input id="pgTemperature" data-param="temperature" type="number" step="0.05" min="0" class="@fieldClass" /></div>
+                <div><label for="pgTopP" class="@labelClass">Top P</label><input id="pgTopP" data-param="top_p" type="number" step="0.01" min="0" max="1" class="@fieldClass" /></div>
+                <div><label for="pgTopK" class="@labelClass">Top K</label><input id="pgTopK" data-param="top_k" data-int="true" type="number" step="1" min="0" class="@fieldClass" /></div>
+                <div><label for="pgMinP" class="@labelClass">Min P</label><input id="pgMinP" data-param="min_p" type="number" step="0.01" min="0" max="1" class="@fieldClass" /></div>
+                <div><label for="pgMaxTokens" class="@labelClass">Max tokens</label><input id="pgMaxTokens" data-param="max_tokens" data-int="true" type="number" step="1" min="1" class="@fieldClass" /></div>
+                <div><label for="pgSeed" class="@labelClass">Seed</label><input id="pgSeed" data-param="seed" data-int="true" type="number" step="1" class="@fieldClass" /></div>
+            </div>
+            <div id="pgReasoningWrap">
+                <label for="pgReasoning" class="@labelClass">Reasoning effort</label>
+                <select id="pgReasoning" data-param="reasoning_effort" class="@fieldClass">
+                    <option value="">Preset default</option>
+                </select>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<script>
+// IIFE: this script re-runs on every htmx-boosted navigation to this page.
+(function () {
+const $ = id => document.getElementById(id);
+const transcript = $('pgTranscript');
+const input = $('pgInput');
+const presetSelect = $('pgPreset');
+const sendBtn = $('pgSend');
+const rerunBtn = $('pgRerun');
+const paramInputs = Array.from(document.querySelectorAll('[data-param]'));
+const reasoningSelect = $('pgReasoning');
+
+const SETTINGS_KEY = 'playground.settings';
+const OVERRIDE_CLASSES = ['!border-neon-cyan', 'ring-tint-cyan'];
+
+// crypto.randomUUID only exists in secure contexts (https/localhost) — the dashboard is often
+// opened over plain http on the LAN, so fall back to a hand-rolled v4 UUID there.
+const newId = () => crypto.randomUUID?.() ??
+    '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+
+let sessionId = newId();
+let history = [];        // [{ role, content }] — what gets sent as context on the next turn
+let sessionResults = []; // per-reply metrics, for the session summary
+let abortController = null;
+let busy = false;
+let presetState = null;  // the selected preset's entry from /api/playground/presets
+let loadPoll = null;
+
+// ── Benchmark prompts for the empty state. Each one stresses a different phase. ──
+const FILLER = 'The history of computing spans centuries, from mechanical calculators and punched-card tabulators to stored-program electronic machines, transistors, integrated circuits, and the microprocessors that now sit inside nearly every device. Each step traded size and power for speed and reliability, and each opened new kinds of software. ';
+const QUICK_PROMPTS = [
+    { title: 'Quick check', hint: 'Short reply — sanity check and TTFT', text: 'Reply with one short sentence confirming you are working.' },
+    { title: 'Long generation', hint: '~600 words — generation speed', text: 'Write a detailed explanation, about 600 words, of how CPU caches work: cache lines, associativity, write policies, and why cache misses are expensive.' },
+    { title: 'Long prompt', hint: '~4k-token input — prompt processing speed', text: () => FILLER.repeat(64) + '\n\nSummarise the text above in three bullet points.' },
+    { title: 'Code', hint: 'Structured output — typical coding use', text: 'Write a Python function that merges overlapping intervals, with type hints, a docstring, and a few pytest tests.' },
+];
+
+// ── Settings persistence (per browser) ──
+function saveSettings() {
+    const s = { preset: presetSelect.value, label: $('pgLabel').value, record: $('pgRecord').checked, system: $('pgSystem').value, repeat: $('pgRepeat').value, params: {} };
+    paramInputs.forEach(el => s.params[el.id] = el.value);
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { }
+}
+function loadSettings() {
+    let s;
+    try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch { }
+    if (!s) return;
+    // An explicit ?presetId= wins over the remembered preset.
+    if (s.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${s.preset}"]`))
+        presetSelect.value = s.preset;
+    $('pgLabel').value = s.label ?? '';
+    $('pgRecord').checked = s.record ?? true;
+    $('pgSystem').value = s.system ?? '';
+    $('pgRepeat').value = s.repeat || 1;
+    paramInputs.forEach(el => { if (el !== reasoningSelect && s.params?.[el.id] !== undefined) el.value = s.params[el.id]; });
+    reasoningSelect.dataset.saved = s.params?.[reasoningSelect.id] ?? '';
+}
+
+// Overridden fields get a highlighted border, and the reset link appears when there are any.
+function syncOverrides() {
+    let count = 0;
+    paramInputs.forEach(el => {
+        const on = el.value.trim() !== '';
+        if (on) count++;
+        OVERRIDE_CLASSES.forEach(c => el.classList.toggle(c, on));
+    });
+    $('pgResetParams').classList.toggle('hidden', count === 0);
+}
+
+function syncRepeatHint() {
+    const n = parseInt($('pgRepeat').value, 10) || 1;
+    const hint = $('pgRepeatHint');
+    hint.classList.toggle('hidden', n <= 1);
+    hint.textContent = n > 1 ? ` · each message is sent ${n}×` : '';
+}
+
+// ── Preset state: load status, its own sampling values, reasoning options ──
+async function fetchPresetState() {
+    try {
+        const resp = await fetch('/api/playground/presets');
+        const presets = await resp.json();
+        return presets.find(p => p.id === presetSelect.value) ?? null;
+    } catch { return null; }
+}
+
+function applyPresetState(p) {
+    presetState = p;
+    const status = $('pgPresetStatus');
+    const loadBtn = $('pgLoad');
+    if (!p) { status.textContent = ''; loadBtn.classList.add('hidden'); $('pgPresetDetails').textContent = ''; return; }
+
+    if (p.loaded) {
+        status.innerHTML = '<span class="w-2 h-2 rounded-full bg-neon-green"></span><span class="text-neon-green">Loaded</span>';
+        loadBtn.classList.add('hidden');
+    } else if (p.serverStatus === 'Starting') {
+        status.innerHTML = '<span class="w-2 h-2 rounded-full bg-neon-magenta animate-pulse"></span><span class="text-neon-magenta">Loading…</span>';
+        loadBtn.classList.add('hidden');
+    } else {
+        status.innerHTML = '<span class="w-2 h-2 rounded-full border border-neon-magenta"></span><span class="text-text-secondary">Not loaded</span>';
+        loadBtn.classList.remove('hidden');
+        loadBtn.disabled = busy;
+    }
+    status.title = p.loaded ? `Running on ${p.serverName}` : `The first reply will include loading the model on ${p.serverName}`;
+    $('pgPresetDetails').textContent = [p.serverName, p.parameterSize, p.quantization, p.contextSize ? `${p.contextSize.toLocaleString()} ctx` : null].filter(Boolean).join(' · ');
+
+    // Placeholders show what a blank override falls back to.
+    paramInputs.forEach(el => {
+        if (el === reasoningSelect) return;
+        const v = p.defaults?.[el.dataset.param];
+        el.placeholder = v == null ? 'default' : `${v} (preset)`;
+    });
+
+    // Reasoning effort: only offered when the model's chat template takes it, with its own options.
+    const options = p.reasoningEffortOptions;
+    $('pgReasoningWrap').classList.toggle('hidden', !options?.length);
+    const keep = reasoningSelect.value || reasoningSelect.dataset.saved || '';
+    const presetDefault = p.defaults?.reasoning_effort;
+    reasoningSelect.innerHTML = `<option value="">Preset default${presetDefault ? ` (${esc(presetDefault)})` : ''}</option>` +
+        (options ?? []).map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('');
+    reasoningSelect.value = (options ?? []).includes(keep) ? keep : '';
+    delete reasoningSelect.dataset.saved;
+    syncOverrides();
+}
+
+async function refreshPresetState() {
+    if (!presetSelect.value) { applyPresetState(null); return null; }
+    const p = await fetchPresetState();
+    applyPresetState(p);
+    return p;
+}
+
+async function loadModel() {
+    const loadBtn = $('pgLoad');
+    loadBtn.disabled = true;
+    const form = new FormData();
+    form.append('PresetId', presetSelect.value);
+    form.append('Command', 'Start');
+    form.append('__RequestVerificationToken', document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '');
+    try {
+        const resp = await fetch('/Features/Presets/Actions', { method: 'POST', body: form });
+        const result = await resp.json();
+        if (!resp.ok || !result.success) { alert(result.message || 'Failed to load the model.'); loadBtn.disabled = false; return; }
+    } catch (e) { alert('Failed to load the model: ' + e.message); loadBtn.disabled = false; return; }
+
+    // Poll until the server reports the preset loaded (or gives up starting).
+    clearInterval(loadPoll);
+    const presetId = presetSelect.value;
+    const started = Date.now();
+    applyPresetState({ ...presetState, serverStatus: 'Starting', loaded: false });
+    loadPoll = setInterval(async () => {
+        if (presetSelect.value !== presetId || !document.body.contains(loadBtn)) { clearInterval(loadPoll); return; }
+        const p = await fetchPresetState();
+        if (!p) return;
+        if (p.loaded || p.serverStatus === 'Error' || Date.now() - started > 10 * 60 * 1000) {
+            clearInterval(loadPoll);
+            applyPresetState(p);
+            if (p.serverStatus === 'Error') alert('The server failed to start — check its logs on the Servers page.');
+        } else {
+            applyPresetState({ ...p, serverStatus: 'Starting' });
+        }
+    }, 2000);
+}
+
+// ── Formatting helpers ──
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+const fmtMs = ms => ms == null ? '—' : ms >= 10000 ? `${(ms / 1000).toFixed(1)} s` : ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${Math.round(ms)} ms`;
+const fmtTps = v => v == null || !isFinite(v) ? '—' : `${v.toFixed(v >= 100 ? 0 : 1)} tok/s`;
+const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+
+// Minimal, escape-first markdown: fenced code, inline code, headings, lists, quotes, bold,
+// italics, links. Enough to make model replies readable without pulling in a library.
+function renderMarkdown(src) {
+    const blocks = [];
+    // Fenced code first (an unterminated fence — still streaming — runs to the end).
+    src = src.replace(/```([^\n`]*)\n([\s\S]*?)(?:```|$)/g, (_, lang, code) => {
+        blocks.push(`<div class="pg-code relative my-2"><div class="flex items-center justify-between px-3 py-1 text-[11px] text-text-secondary bg-gray-800/40 rounded-t-lg border border-gray-700/40 border-b-0"><span>${esc(lang.trim() || 'code')}</span><button type="button" class="pg-copy-code hover:text-neon-cyan">Copy</button></div>` +
+                    `<pre class="overflow-x-auto text-xs font-mono p-3 bg-black/30 rounded-b-lg border border-gray-700/40"><code>${esc(code.replace(/\n$/, ''))}</code></pre></div>`);
+        return `\u0000${blocks.length - 1}\u0000`;
+    });
+
+    const inline = s => esc(s)
+        .replace(/`([^`]+)`/g, '<code class="font-mono text-[0.85em] px-1 py-0.5 rounded bg-gray-800/50">$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-neon-cyan underline">$1</a>');
+
+    const out = [];
+    let list = null; // { tag, items }
+    let para = [];
+    const flushPara = () => { if (para.length) { out.push(`<p class="my-2">${para.map(inline).join('<br>')}</p>`); para = []; } };
+    const flushList = () => { if (list) { out.push(`<${list.tag} class="my-2 pl-5 ${list.tag === 'ul' ? 'list-disc' : 'list-decimal'} space-y-0.5">${list.items.map(i => `<li>${inline(i)}</li>`).join('')}</${list.tag}>`); list = null; } };
+
+    for (const line of src.split('\n')) {
+        const code = line.match(/^\u0000(\d+)\u0000$/);
+        const heading = line.match(/^(#{1,4})\s+(.*)$/);
+        const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+        const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+        const quote = line.match(/^>\s?(.*)$/);
+        if (code) { flushPara(); flushList(); out.push(blocks[+code[1]]); }
+        else if (heading) { flushPara(); flushList(); out.push(`<p class="mt-3 mb-1 font-semibold ${heading[1].length <= 2 ? 'text-base' : ''}">${inline(heading[2])}</p>`); }
+        else if (ul || ol) {
+            flushPara();
+            const tag = ul ? 'ul' : 'ol';
+            if (list && list.tag !== tag) flushList();
+            list ??= { tag, items: [] };
+            list.items.push((ul ?? ol)[1]);
+        }
+        else if (quote) { flushPara(); flushList(); out.push(`<blockquote class="my-2 pl-3 border-l-2 border-gray-600 text-text-secondary">${inline(quote[1])}</blockquote>`); }
+        else if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { flushPara(); flushList(); out.push('<hr class="my-3 border-gray-700/50">'); }
+        else if (line.trim() === '') { flushPara(); flushList(); }
+        else { flushList(); para.push(line); }
+    }
+    flushPara(); flushList();
+    return out.join('');
+}
+
+function chip(label, value, title) {
+    return `<span class="inline-flex items-baseline gap-1 px-2 py-0.5 rounded-md bg-gray-800/30 border border-gray-700/40"${title ? ` title="${esc(title)}"` : ''}>` +
+           `<span class="text-text-secondary">${esc(label)}</span><span class="font-mono text-text-primary">${esc(value)}</span></span>`;
+}
+
+function renderStats(m) {
+    const chips = [];
+    chips.push(chip('TTFT', fmtMs(m.ttftMs), 'Time to first token, measured in the browser (includes queueing, any model load, and prompt processing)'));
+    if (m.promptTps != null) chips.push(chip('PP', fmtTps(m.promptTps), `Prompt processing speed reported by the backend${m.promptMs != null ? ` — ${fmtMs(m.promptMs)}` : ''}`));
+    if (m.genTps != null) chips.push(chip('TG', fmtTps(m.genTps), `Token generation speed reported by the backend${m.genMs != null ? ` — ${fmtMs(m.genMs)}` : ''}`));
+    if (m.promptTokens != null || m.completionTokens != null) {
+        const cached = m.cachedTokens ? ` (${m.cachedTokens} cached)` : '';
+        chips.push(chip('Tokens', `${m.promptTokens ?? '?'}${cached} → ${m.completionTokens ?? '?'}`, 'Prompt tokens (of which reused from the KV cache) → generated tokens'));
+    }
+    if (m.draftGenerated) chips.push(chip('Draft', `${Math.round(100 * m.draftAccepted / m.draftGenerated)}%`, `Speculative decoding: ${m.draftAccepted} of ${m.draftGenerated} draft tokens accepted`));
+    chips.push(chip('Total', fmtMs(m.totalMs), 'Wall time from sending the request to the end of the stream'));
+    if (m.finishReason && m.finishReason !== 'stop') chips.push(chip('Finish', m.finishReason, m.finishReason === 'length' ? 'Stopped at the max-tokens limit' : null));
+    if (m.coldStart) chips.push(`<span class="px-2 py-0.5 rounded-md border border-tint-magenta text-neon-magenta" title="The model wasn't loaded when this was sent — latency includes the load, and it's left out of the averages">cold start</span>`);
+    if (m.recorded) chips.push(`<span class="px-1 py-0.5 text-neon-green" title="Saved to run history">✓ recorded</span>`);
+    return chips.join(' ');
+}
+
+function updateSummary() {
+    const ok = sessionResults.filter(r => !r.error && !r.coldStart);
+    const set = (k, v) => document.querySelector(`#pgSummary [data-sum="${k}"]`).textContent = v;
+    set('count', sessionResults.length);
+    set('ttft', fmtMs(avg(ok.map(r => r.ttftMs).filter(v => v != null))));
+    set('ptps', fmtTps(avg(ok.map(r => r.promptTps).filter(v => v != null))));
+    set('gtps', fmtTps(avg(ok.map(r => r.genTps).filter(v => v != null))));
+}
+
+// ── Transcript rendering ──
+function nearBottom() { return transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 80; }
+function scrollToEnd(force) { if (force || nearBottom()) transcript.scrollTop = transcript.scrollHeight; }
+
+function renderEmptyState() {
+    if (!presetSelect.options.length) return;
+    transcript.innerHTML =
+        `<div id="pgEmpty" class="h-full flex flex-col items-center justify-center text-center gap-5 py-8">` +
+            `<div><p class="text-lg font-semibold text-text-primary">Chat with <span class="text-neon-cyan">${esc(presetSelect.selectedOptions[0]?.dataset.name ?? '')}</span></p>` +
+            `<p class="text-sm text-text-secondary mt-1 max-w-md">Each reply shows its latency and speed. Turn on <em>Record runs</em> to save them with the preset's settings, so you can compare configurations in History.</p></div>` +
+            `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-xl">` +
+            QUICK_PROMPTS.map((q, i) =>
+                `<button type="button" data-quick="${i}" class="text-left p-3 rounded-xl border border-gray-700/50 hover:border-neon-cyan hover:tint-cyan-5 transition-colors">` +
+                `<span class="block text-sm font-medium text-text-primary">${esc(q.title)}</span><span class="block text-xs text-text-secondary mt-0.5">${esc(q.hint)}</span></button>`).join('') +
+            `</div></div>`;
+}
+
+function addUserBubble(text) {
+    $('pgEmpty')?.remove();
+    const el = document.createElement('div');
+    el.className = 'flex justify-end';
+    const long = text.length > 1200;
+    el.innerHTML = `<div class="max-w-[85%] rounded-2xl rounded-br-md px-4 py-2 tint-cyan border border-tint-cyan text-text-primary text-sm">` +
+        `<div class="pg-user-text whitespace-pre-wrap break-words ${long ? 'max-h-40 overflow-hidden' : ''}"></div>` +
+        (long ? `<button type="button" class="pg-expand mt-1 text-xs text-neon-cyan hover:underline">Show all (${text.length.toLocaleString()} characters)</button>` : '') +
+        `</div>`;
+    el.querySelector('.pg-user-text').textContent = text;
+    el.querySelector('.pg-expand')?.addEventListener('click', e => {
+        el.querySelector('.pg-user-text').classList.remove('max-h-40', 'overflow-hidden');
+        e.target.remove();
+    });
+    transcript.appendChild(el);
+    scrollToEnd(true);
+}
+
+function addAssistantBubble(caption) {
+    $('pgEmpty')?.remove();
+    const el = document.createElement('div');
+    el.className = 'group max-w-[92%]';
+    el.innerHTML =
+        `<div class="flex items-center gap-2 text-xs text-text-secondary mb-1"><span>${esc(caption)}</span>` +
+            `<button type="button" class="pg-copy opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-neon-cyan transition-opacity">Copy</button></div>` +
+        `<div class="rounded-2xl rounded-tl-md px-4 py-2 bg-gray-800/20 border border-gray-700/40 text-sm">` +
+            `<details class="pg-reasoning hidden my-1"><summary class="cursor-pointer text-xs text-text-secondary select-none">Thinking…</summary>` +
+            `<div class="pg-reasoning-text mt-1 text-xs text-text-secondary whitespace-pre-wrap break-words border-l-2 border-gray-600 pl-3 max-h-72 overflow-y-auto"></div></details>` +
+            `<div class="pg-content text-text-primary break-words leading-relaxed"><span class="inline-flex gap-1 py-2" aria-label="Waiting for the first token"><span class="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse"></span><span class="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse [animation-delay:150ms]"></span><span class="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse [animation-delay:300ms]"></span></span></div>` +
+            `<div class="pg-error hidden mt-2 text-neon-red text-sm"></div>` +
+        `</div>` +
+        `<div class="pg-stats flex flex-wrap gap-1.5 mt-1.5 text-xs"></div>`;
+    transcript.appendChild(el);
+    scrollToEnd(true);
+
+    let text = '';
+    let pending = false;
+    el.querySelector('.pg-copy').addEventListener('click', e => copyText(text, e.target));
+    return {
+        // Markdown re-rendering is batched to one pass per frame while tokens stream in.
+        setContent(t) {
+            text = t;
+            if (pending) return;
+            pending = true;
+            requestAnimationFrame(() => {
+                pending = false;
+                const stick = nearBottom();
+                el.querySelector('.pg-content').innerHTML = renderMarkdown(text);
+                if (stick) scrollToEnd(true);
+            });
+        },
+        setReasoning(t, done) {
+            const d = el.querySelector('.pg-reasoning');
+            d.classList.remove('hidden');
+            el.querySelector('.pg-reasoning-text').textContent = t;
+            if (done) d.querySelector('summary').textContent = `Thought for ${t.length.toLocaleString()} characters`;
+        },
+        setError(msg) { const e = el.querySelector('.pg-error'); e.textContent = msg; e.classList.remove('hidden'); },
+        setStats(html) { el.querySelector('.pg-stats').innerHTML = html; },
+    };
+}
+
+async function copyText(text, button) {
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch {
+        // navigator.clipboard needs a secure context; fall back for plain-http LAN access.
+        const ta = Object.assign(document.createElement('textarea'), { value: text });
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    }
+    const old = button.textContent;
+    button.textContent = 'Copied';
+    setTimeout(() => button.textContent = old, 1200);
+}
+
+transcript.addEventListener('click', e => {
+    const quick = e.target.closest('[data-quick]');
+    if (quick) {
+        const q = QUICK_PROMPTS[+quick.dataset.quick];
+        submitMessage(typeof q.text === 'function' ? q.text() : q.text);
+        return;
+    }
+    const copyCode = e.target.closest('.pg-copy-code');
+    if (copyCode) copyText(copyCode.closest('.pg-code').querySelector('code').textContent, copyCode);
+});
+
+// ── Request ──
+function buildParams() {
+    const params = {};
+    paramInputs.forEach(el => {
+        const v = el.value.trim();
+        if (v === '') return;
+        if (el.tagName === 'SELECT') params[el.dataset.param] = v;
+        else params[el.dataset.param] = el.dataset.int ? parseInt(v, 10) : parseFloat(v);
+    });
+    return params;
+}
+
+function textOf(content) {
+    if (content == null) return '';
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) return content.map(p => p.text ?? '').join('');
+    return '';
+}
+
+// Streams one reply into a new bubble and returns its measured metrics.
+async function runTurn(messages, caption, coldStart) {
+    const bubble = addAssistantBubble(caption);
+    const presetName = presetSelect.selectedOptions[0]?.dataset.name;
+    const params = buildParams();
+    const m = { content: '', reasoning: '', coldStart, params };
+
+    const started = performance.now();
+    let firstTokenAt = null;
+    let deltaCount = 0;
+    let usage = null, timings = null;
+
+    // Live elapsed/speed estimate while the reply streams (deltas ≈ tokens for llama.cpp).
+    const ticker = setInterval(() => {
+        const now = performance.now();
+        let html = chip(firstTokenAt ? 'TTFT' : (coldStart ? 'Loading model' : 'Waiting'), fmtMs(firstTokenAt ? firstTokenAt - started : now - started));
+        if (firstTokenAt && now - firstTokenAt > 250) html += ' ' + chip('≈ TG', fmtTps(deltaCount / ((now - firstTokenAt) / 1000)), 'Live estimate from streamed chunks; the backend-reported figure replaces it when the reply finishes');
+        bubble.setStats(html);
+    }, 200);
+
+    try {
+        abortController = new AbortController();
+        const resp = await fetch('/api/playground/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: presetName, messages, stream: true, ...params }),
+            signal: abortController.signal,
+        });
+
+        const contentType = resp.headers.get('content-type') ?? '';
+        if (!resp.ok || !contentType.includes('text/event-stream')) {
+            // Errors, and replies that had to wait in the router's queue, come back as plain JSON.
+            const raw = await resp.text();
+            let body = null;
+            try { body = JSON.parse(raw); } catch { }
+            if (!resp.ok || body?.error) throw new Error(body?.error?.message ?? body?.detail ?? (raw || `HTTP ${resp.status}`));
+            firstTokenAt = performance.now();
+            const msg = body?.choices?.[0]?.message ?? {};
+            m.content = textOf(msg.content);
+            m.reasoning = msg.reasoning_content ?? '';
+            m.finishReason = body?.choices?.[0]?.finish_reason;
+            usage = body?.usage;
+            bubble.setContent(m.content);
+        } else {
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let done = false;
+            while (!done) {
+                const { value, done: streamDone } = await reader.read();
+                if (streamDone) break;
+                buffer += decoder.decode(value, { stream: true });
+                const events = buffer.split(/\r?\n\r?\n/);
+                buffer = events.pop();
+                for (const evt of events) {
+                    for (const line of evt.split(/\r?\n/)) {
+                        if (!line.startsWith('data:')) continue;
+                        const data = line.slice(5).trim();
+                        if (data === '[DONE]') { done = true; break; }
+                        let obj;
+                        try { obj = JSON.parse(data); } catch { continue; }
+                        if (obj.error) throw new Error(obj.error.message ?? 'Backend error');
+                        const choice = obj.choices?.[0];
+                        const delta = choice?.delta ?? {};
+                        const text = textOf(delta.content);
+                        if (text || delta.reasoning_content) {
+                            firstTokenAt ??= performance.now();
+                            deltaCount++;
+                        }
+                        if (text) { m.content += text; bubble.setContent(m.content); }
+                        if (delta.reasoning_content) { m.reasoning += delta.reasoning_content; bubble.setReasoning(m.reasoning); }
+                        if (delta.tool_calls) m.finishReason = 'tool_calls';
+                        if (choice?.finish_reason) m.finishReason = choice.finish_reason;
+                        if (obj.usage) usage = obj.usage;
+                        if (obj.timings) timings = obj.timings;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        m.error = e.name === 'AbortError' ? 'Stopped' : (e.message || String(e));
+    } finally {
+        clearInterval(ticker);
+        abortController = null;
+    }
+
+    m.totalMs = performance.now() - started;
+    m.ttftMs = firstTokenAt ? firstTokenAt - started : null;
+
+    if (usage) {
+        m.promptTokens = usage.prompt_tokens ?? null;
+        m.completionTokens = usage.completion_tokens ?? null;
+    }
+    if (timings) {
+        // llama.cpp names the generation phase predicted_*; the router's own fallback uses generation_*.
+        m.cachedTokens = timings.cache_n ?? null;
+        m.promptMs = timings.prompt_ms ?? null;
+        m.promptTps = timings.prompt_per_second ?? null;
+        m.genMs = timings.generation_ms ?? timings.predicted_ms ?? null;
+        m.genTps = timings.generation_per_second ?? timings.predicted_per_second ?? null;
+        m.draftGenerated = timings.draft_n ?? null;
+        m.draftAccepted = timings.draft_n_accepted ?? null;
+    }
+    if (m.genTps == null && m.genMs && m.completionTokens) m.genTps = m.completionTokens / (m.genMs / 1000);
+
+    bubble.setContent(m.content);
+    if (m.reasoning) bubble.setReasoning(m.reasoning, true);
+    if (m.error) bubble.setError(m.error === 'Stopped' ? 'Stopped.' : m.error);
+    bubble.setStats(renderStats(m));
+
+    m.bubble = bubble;
+    return m;
+}
+
+async function recordRun(m, prompt, messageCount) {
+    if (!$('pgRecord').checked) return;
+    try {
+        const resp = await fetch('/api/playground/runs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                presetId: presetSelect.value,
+                sessionId,
+                label: $('pgLabel').value,
+                coldStart: m.coldStart,
+                messageCount,
+                requestParams: Object.keys(m.params).length ? JSON.stringify(m.params) : null,
+                prompt,
+                response: m.content,
+                reasoning: m.reasoning,
+                finishReason: m.finishReason ?? null,
+                error: m.error ?? null,
+                timeToFirstTokenMs: m.ttftMs,
+                totalMs: m.totalMs,
+                promptTokens: m.promptTokens ?? 0,
+                cachedTokens: m.cachedTokens ?? null,
+                completionTokens: m.completionTokens ?? 0,
+                promptMs: m.promptMs ?? null,
+                promptTokensPerSec: m.promptTps ?? null,
+                generationMs: m.genMs ?? null,
+                genTokensPerSec: m.genTps ?? null,
+                draftAccepted: m.draftAccepted ?? null,
+                draftGenerated: m.draftGenerated ?? null,
+            }),
+        });
+        if (resp.ok) { m.recorded = true; m.bubble.setStats(renderStats(m)); }
+    } catch (e) { console.error('Failed to record run:', e); }
+}
+
+// While busy, the send button becomes the stop button.
+function setBusy(value) {
+    busy = value;
+    $('pgSendLabel').textContent = busy ? 'Stop' : 'Send';
+    sendBtn.classList.toggle('!text-neon-red', busy);
+    sendBtn.classList.toggle('!border-neon-red', busy);
+    sendBtn.classList.toggle('!tint-red', busy);
+    sendBtn.type = busy ? 'button' : 'submit';
+    syncSendState();
+    rerunBtn.disabled = busy || !history.some(h => h.role === 'user');
+    presetSelect.disabled = busy;
+    $('pgLoad').disabled = busy;
+}
+function syncSendState() { sendBtn.disabled = !busy && (!input.value.trim() || !presetSelect.value); }
+
+// Sends the conversation (ending in a user turn) `repeat` times. The first reply becomes
+// part of the history; the extra runs are measurements only.
+async function sendTurn(userText) {
+    const repeat = Math.max(1, Math.min(50, parseInt($('pgRepeat').value, 10) || 1));
+    const system = $('pgSystem').value.trim();
+    const messages = [...(system ? [{ role: 'system', content: system }] : []), ...history];
+    const presetName = presetSelect.selectedOptions[0]?.dataset.name;
+    let stopped = false;
+
+    setBusy(true);
+    for (let i = 0; i < repeat && !stopped; i++) {
+        const state = await refreshPresetState();
+        const coldStart = state ? !state.loaded : false;
+        const caption = presetName + (repeat > 1 ? ` · run ${i + 1} of ${repeat}` : '');
+        const m = await runTurn(messages, caption, coldStart);
+
+        if (i === 0 && m.content) history.push({ role: 'assistant', content: m.content });
+        sessionResults.push(m);
+        updateSummary();
+        await recordRun(m, userText, messages.length);
+        if (m.error === 'Stopped') stopped = true;
+    }
+    setBusy(false);
+    refreshPresetState();
+    input.focus();
+}
+
+function submitMessage(text) {
+    text = text.trim();
+    if (!text || busy || !presetSelect.value) return;
+    history.push({ role: 'user', content: text });
+    addUserBubble(text);
+    sendTurn(text);
+}
+
+// ── Wiring ──
+loadSettings();
+syncOverrides();
+syncRepeatHint();
+renderEmptyState();
+refreshPresetState();
+setBusy(false);
+
+document.querySelectorAll('aside input, aside select, aside textarea').forEach(el => {
+    el.addEventListener('change', saveSettings);
+    el.addEventListener('input', () => { syncOverrides(); syncRepeatHint(); });
+});
+presetSelect.addEventListener('change', () => {
+    clearInterval(loadPoll);
+    saveSettings();
+    syncSendState();
+    refreshPresetState();
+    if ($('pgEmpty')) renderEmptyState();
+});
+$('pgLoad').addEventListener('click', loadModel);
+$('pgResetParams').addEventListener('click', () => {
+    paramInputs.forEach(el => el.value = '');
+    syncOverrides();
+    saveSettings();
+});
+
+$('pgForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const text = input.value;
+    if (!text.trim() || busy) return;
+    input.value = '';
+    autoGrow();
+    submitMessage(text);
+});
+sendBtn.addEventListener('click', () => { if (busy) abortController?.abort(); });
+
+// Auto-growing composer (capped by max-h-60, after which it scrolls).
+function autoGrow() { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; syncSendState(); }
+input.addEventListener('input', autoGrow);
+input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        $('pgForm').requestSubmit();
+    }
+});
+document.addEventListener('keydown', function onEsc(e) {
+    if (!document.body.contains(transcript)) { document.removeEventListener('keydown', onEsc); return; }
+    if (e.key === 'Escape' && busy) abortController?.abort();
+});
+
+rerunBtn.addEventListener('click', () => {
+    const lastUser = history.map(h => h.role).lastIndexOf('user');
+    if (lastUser < 0 || busy) return;
+    const text = history[lastUser].content;
+    history = history.slice(0, lastUser + 1);
+    addUserBubble(text);
+    sendTurn(text);
+});
+
+$('pgClear').addEventListener('click', () => {
+    abortController?.abort();
+    history = [];
+    sessionResults = [];
+    sessionId = newId();
+    renderEmptyState();
+    updateSummary();
+    setBusy(false);
+    input.focus();
+});
+
+input.focus();
+})();
+</script>

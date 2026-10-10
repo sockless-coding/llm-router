@@ -294,6 +294,9 @@ app.MapGet("/health", async (IServerManager serverManager) =>
     });
 });
 
+// Playground (dashboard chat + benchmark history) — admin-only, independent of EnabledProtocols
+app.MapPlaygroundEndpoints();
+
 // Map stats API endpoints (Razor Pages return JSON via JsonResult)
 // These are accessible at /api/stats/* routes
 
