@@ -184,3 +184,19 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
     left: 1rem;
     top: 1rem;
 }
+
+/* ── Theme-aware tints ──
+   Tailwind can't apply its "/<opacity>" modifier to the neon colors (they're CSS variables, not
+   literal colors), so e.g. bg-neon-cyan/10 generates nothing. These mix the variable with
+   transparent instead, and live in @layer utilities so hover:/! variants work on them. */
+@layer utilities {
+    .tint-cyan-5 { background-color: color-mix(in srgb, var(--neon-cyan) 5%, transparent); }
+    .tint-cyan { background-color: color-mix(in srgb, var(--neon-cyan) 10%, transparent); }
+    .tint-cyan-20 { background-color: color-mix(in srgb, var(--neon-cyan) 20%, transparent); }
+    .tint-cyan-30 { background-color: color-mix(in srgb, var(--neon-cyan) 30%, transparent); }
+    .tint-magenta { background-color: color-mix(in srgb, var(--neon-magenta) 10%, transparent); }
+    .tint-red { background-color: color-mix(in srgb, var(--neon-red) 10%, transparent); }
+    .border-tint-cyan { border-color: color-mix(in srgb, var(--neon-cyan) 35%, transparent); }
+    .border-tint-magenta { border-color: color-mix(in srgb, var(--neon-magenta) 55%, transparent); }
+    .ring-tint-cyan { box-shadow: 0 0 0 1px color-mix(in srgb, var(--neon-cyan) 40%, transparent); }
+}

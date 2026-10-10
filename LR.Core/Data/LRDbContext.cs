@@ -23,6 +23,7 @@ public class LRDbContext : DbContext
     public DbSet<Models.EngineBuild> EngineBuilds => Set<Models.EngineBuild>();
     public DbSet<Models.LlamaCppBuildRecipe> LlamaCppBuildRecipes => Set<Models.LlamaCppBuildRecipe>();
     public DbSet<Models.EngineBuildSettings> EngineBuildSettings => Set<Models.EngineBuildSettings>();
+    public DbSet<Models.PlaygroundRun> PlaygroundRuns => Set<Models.PlaygroundRun>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -253,6 +254,26 @@ public class LRDbContext : DbContext
 
             // Composite index for filtering by protocol + time range
             entity.HasIndex(e => new { e.Protocol, e.Timestamp });
+        });
+
+        // PlaygroundRun configurations (benchmark record of Playground chat turns)
+        modelBuilder.Entity<Models.PlaygroundRun>(entity =>
+        {
+            entity.ToTable("PlaygroundRuns");
+
+            // Round-trip UTC TEXT, matching ModelStatistics/ApiRequestLog so ORDER BY works in SQL.
+            entity.Property(r => r.Timestamp).HasConversion(
+                v => v.UtcDateTime.ToString("O"),
+                v => DateTimeOffset.Parse(v));
+
+            // Runs outlive their preset — the name and settings snapshot are copied onto the row.
+            entity.HasOne(r => r.Preset)
+                .WithMany()
+                .HasForeignKey(r => r.PresetId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.Timestamp);
+            entity.HasIndex(e => new { e.PresetId, e.Timestamp });
         });
 
         // StoredResponse configurations (OpenAI Responses API conversation state)

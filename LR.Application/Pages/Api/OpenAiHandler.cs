@@ -505,9 +505,18 @@ public class OpenAiHandler : IProtocolHandler
 
     private LlamaCppTimings? BuildTimings(RouteResponse response)
     {
-        // Prefer the rich timings object from the backend if available
+        // Prefer the rich timings object from the backend if available. Speculative-decoding
+        // counts may only be known from the server's stdout (see LlamaCppTimingCoordinator), so
+        // fill them in from the response when the timings object didn't carry them itself.
         if (response.BackendTimings != null)
+        {
+            if (response.DraftGenerated > 0)
+            {
+                response.BackendTimings.DraftN ??= response.DraftGenerated;
+                response.BackendTimings.DraftNAccepted ??= response.DraftAccepted;
+            }
             return response.BackendTimings;
+        }
 
         // Fallback: construct from scalar properties on RouteResponse
         var timing = new LlamaCppTimings
@@ -536,6 +545,11 @@ public class OpenAiHandler : IProtocolHandler
         if (response.DraftAccepted > 0)
         {
             timing.PredictedN = response.DraftAccepted;
+        }
+        if (response.DraftGenerated > 0)
+        {
+            timing.DraftN = response.DraftGenerated;
+            timing.DraftNAccepted = response.DraftAccepted;
         }
 
         return timing;

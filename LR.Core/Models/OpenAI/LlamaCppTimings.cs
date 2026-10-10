@@ -62,4 +62,14 @@ public class LlamaCppTimings
     /// <summary>Predicted/draft token throughput (tokens/sec).</summary>
     [JsonPropertyName("predicted_per_second")]
     public double? PredictedPerSecond { get; set; }
+
+    /// <summary>Draft tokens proposed by the draft model (llama.cpp speculative decoding).</summary>
+    [JsonPropertyName("draft_n")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? DraftN { get; set; }
+
+    /// <summary>Draft tokens accepted by the target model (llama.cpp speculative decoding).</summary>
+    [JsonPropertyName("draft_n_accepted")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? DraftNAccepted { get; set; }
 }

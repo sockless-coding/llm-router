@@ -42,7 +42,10 @@ public static class PresetPreview
         }
     }
 
-    public static object Build(ModelPreset preset, ServerEngine engine = ServerEngine.LlamaCpp)
+    /// <summary>The generated command line, plus the raw argument list it was built from.</summary>
+    public sealed record Result(string CommandLine, IReadOnlyList<string> Args);
+
+    public static Result Build(ModelPreset preset, ServerEngine engine = ServerEngine.LlamaCpp)
     {
         if (string.IsNullOrWhiteSpace(preset.ModelPath))
             preset.ModelPath = "<no model selected>";
@@ -53,7 +56,7 @@ public static class PresetPreview
         var args = new LlamaCppArgBuilder { Port = 8080 }.Build(preset);
         var commandLine = "llama-server " + string.Join(' ', args.Select(QuoteIfNeeded));
 
-        return new { commandLine, args };
+        return new Result(commandLine, args);
     }
 
     /// <summary>
@@ -61,12 +64,12 @@ public static class PresetPreview
     /// existing-GGUF mode; the family/size and the engine build are filled in at start), then the
     /// server launch from the prepared run config.
     /// </summary>
-    private static object BuildStrata(ModelPreset preset)
+    private static Result BuildStrata(ModelPreset preset)
     {
         if (preset.ModelPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
         {
             var own = $"python serve/server.py --engine strata --config {QuoteIfNeeded(preset.ModelPath)} --host 127.0.0.1 --port <port>";
-            return new { commandLine = own, args = Array.Empty<string>() };
+            return new Result(own, Array.Empty<string>());
         }
 
         List<string> setupArgs;
@@ -76,7 +79,7 @@ public static class PresetPreview
         }
         catch (InvalidOperationException ex)
         {
-            return new { commandLine = ex.Message, args = Array.Empty<string>() };
+            return new Result(ex.Message, Array.Empty<string>());
         }
 
         var dir = Path.GetDirectoryName(preset.ModelPath) ?? preset.ModelPath;
@@ -86,7 +89,7 @@ public static class PresetPreview
             string.Join(' ', setupArgs.Select(QuoteIfNeeded)) + "\n" +
             "# every start\n" +
             "python serve/server.py --engine strata --config <prepared config> --host 127.0.0.1 --port <port>";
-        return new { commandLine, args = setupArgs };
+        return new Result(commandLine, setupArgs);
     }
 
     private static string QuoteIfNeeded(string arg)

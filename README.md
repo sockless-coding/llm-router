@@ -15,6 +15,7 @@ LLM Router provides a unified interface to route requests across heterogeneous b
 - **Model presets** — Reusable llama.cpp launch configurations (sampling, context, GPU/threading, speculative decoding, LoRA, multimodal, etc.), optionally linked to a model-library entry so paths and metadata stay in sync.
 - **Resilient backend supervision** — A separate wrapper process supervises each `llama-server` child process, so the router can restart without killing (or losing track of) running backends, and can live-swap models.
 - **Request logging & stats dashboard** — Per-request API log with filtering, plus charts for throughput, latency, and context usage.
+- **Playground** — Chat with any preset from the dashboard, with per-reply time to first token, prompt/generation speed, cache hits and speculative-decoding acceptance; every reply can be recorded with a snapshot of the preset's launch settings, so runs under different settings can be compared side by side and exported as CSV.
 - **Razor Pages UI** — Web dashboard for managing servers, presets, the model library, request logs, and stats.
 
 ## Screenshots
@@ -140,6 +141,7 @@ launched and adapts automatically (no separate build or flag required).
 - **Presets** — define launch configurations (model path, context size, sampling parameters, GPU/threading, speculative decoding, LoRA, multimodal settings, etc.), optionally linked to a model-library entry so the model path and GGUF metadata stay in sync automatically.
 - **Model Library** — import existing `.gguf` files, scan a folder for unregistered models, or search and download models from the Hugging Face Hub with live progress; inspect GGUF metadata per model.
 - **Stats** — throughput, latency, and context-usage charts.
+- **Playground** — chat with a preset and see per-reply performance stats (TTFT, prompt/generation tok/s, cached tokens, draft acceptance). Tag runs with a label (e.g. `fa=on ub=1024`), use *Repeat ×N* to average out noise, and compare configurations on the **Run history** page — runs are grouped by preset, label and a hash of the preset's generated command line, so editing a preset automatically starts a new group. Runs aren't subject to request-log retention.
 - **Request Log** — browse and filter logged API requests by protocol and time range.
 - **Settings** — app-level configuration, including the model library's root folder and Hugging Face API token.
 

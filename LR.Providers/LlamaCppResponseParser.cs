@@ -204,6 +204,8 @@ public static class LlamaCppResponseParser
         if (element.TryGetProperty("predicted_ms", out JsonElement predm)) result.PredictedMs = predm.GetDouble();
         if (element.TryGetProperty("predicted_per_token_ms", out JsonElement preptm)) result.PredictedPerTokenMs = preptm.GetDouble();
         if (element.TryGetProperty("predicted_per_second", out JsonElement prepps)) result.PredictedPerSecond = prepps.GetDouble();
+        if (element.TryGetProperty("draft_n", out JsonElement dn) && dn.ValueKind == JsonValueKind.Number) result.DraftN = dn.GetInt32();
+        if (element.TryGetProperty("draft_n_accepted", out JsonElement dna) && dna.ValueKind == JsonValueKind.Number) result.DraftNAccepted = dna.GetInt32();
 
         return result;
     }
