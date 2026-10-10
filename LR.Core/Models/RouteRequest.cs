@@ -36,6 +36,14 @@ public class RouteRequest
     public string Payload { get; set; } = string.Empty;
 
     /// <summary>
+    /// When set, <see cref="Payload"/> is posted verbatim to this backend path (e.g.
+    /// <c>/v1/embeddings</c>) instead of the chat endpoint, and the backend's raw JSON response
+    /// body comes back in <see cref="RouteResponse.Payload"/> without any chat parsing. Used for
+    /// non-generative calls that every protocol handler can forward as-is.
+    /// </summary>
+    public string? BackendEndpoint { get; set; }
+
+    /// <summary>
     /// The API key that authenticated the client for this request, if any. Carried through the
     /// routing/queue pipeline so statistics can be attributed per key even when the request is
     /// recorded from a background dispatch scope that never saw the HTTP auth context. Null when

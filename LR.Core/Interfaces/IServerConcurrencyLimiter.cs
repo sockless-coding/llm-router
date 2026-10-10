@@ -27,4 +27,14 @@ public interface IServerConcurrencyLimiter
     /// Servers with no reservations are omitted. Used by the live slot-usage broadcast.
     /// </summary>
     IReadOnlyDictionary<Guid, int> Snapshot();
+
+    /// <summary>
+    /// When <paramref name="serverId"/> last admitted or finished a request, or was last
+    /// <see cref="Touch"/>ed; null if never since the router started. Drives LRU eviction and
+    /// idle unloading.
+    /// </summary>
+    DateTimeOffset? LastActivity(Guid serverId);
+
+    /// <summary>Marks <paramref name="serverId"/> as active now (e.g. when it starts a model).</summary>
+    void Touch(Guid serverId);
 }

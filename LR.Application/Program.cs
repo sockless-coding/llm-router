@@ -186,6 +186,7 @@ builder.Services.AddSingleton<IRequestQueueService, RequestQueueService>();
 builder.Services.AddSingleton<IServerConcurrencyLimiter, ServerConcurrencyLimiter>();
 
 // Protocol handlers (scoped — need DbContext access via preset manager)
+builder.Services.AddScoped<LR.Application.Pages.Api.EmbeddingsGateway>();
 builder.Services.AddScoped<LR.Application.Pages.Api.OpenAiHandler>();
 builder.Services.AddScoped<LR.Application.Pages.Api.ClaudeHandler>();
 builder.Services.AddScoped<LR.Application.Pages.Api.OllamaHandler>();
@@ -195,6 +196,7 @@ builder.Services.AddScoped<LR.Application.Pages.Api.ResponsesHandler>();
 builder.Services.AddHostedService<ServerHealthMonitorService>();
 builder.Services.AddHostedService<LR.Application.Services.RequestDispatcherService>();
 builder.Services.AddHostedService<LR.Application.Services.ServerLoadBroadcastService>();
+builder.Services.AddHostedService<LR.Application.Services.IdleUnloadService>();
 
 // Retention cleanup for request logs (runs hourly)
 builder.Services.AddHostedService<RetentionCleanupService>();

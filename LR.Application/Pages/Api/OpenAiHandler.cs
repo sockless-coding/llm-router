@@ -31,6 +31,7 @@ public class OpenAiHandler : IProtocolHandler
     private readonly IApiRequestLogger _requestLogger;
     private readonly GatewaySettings _gatewaySettings;
     private readonly IApiKeyRequestContext _apiKeyContext;
+    private readonly EmbeddingsGateway _embeddings;
 
     public ApiProtocol Protocol => ApiProtocol.OpenAI;
     public string PathPrefix => "/v1";
@@ -45,7 +46,8 @@ public class OpenAiHandler : IProtocolHandler
         IChatTemplateVariableExtractor templateVariableExtractor,
         IApiRequestLogger requestLogger,
         GatewaySettings gatewaySettings,
-        IApiKeyRequestContext apiKeyContext)
+        IApiKeyRequestContext apiKeyContext,
+        EmbeddingsGateway embeddings)
     {
         _logger = logger;
         _serverManager = serverManager;
@@ -57,6 +59,7 @@ public class OpenAiHandler : IProtocolHandler
         _requestLogger = requestLogger;
         _gatewaySettings = gatewaySettings;
         _apiKeyContext = apiKeyContext;
+        _embeddings = embeddings;
     }
 
     public async Task<object> HandleListModelsAsync()
@@ -137,7 +140,7 @@ public class OpenAiHandler : IProtocolHandler
         // Reject models this API key isn't scoped to before touching the routing engine —
         // RoutingEngine's round-robin fallback would otherwise happily route an unresolved
         // model name to any healthy server, silently bypassing the scoping.
-        var requestedPreset = _presetManager.GetAllPresets().FirstOrDefault(p => p.Name == request.Model);
+        var requestedPreset = _presetManager.FindByModelName(request.Model);
         if (requestedPreset is not null && !_apiKeyContext.IsModelAllowed(requestedPreset.Id))
         {
             return Microsoft.AspNetCore.Http.Results.Json(new
@@ -463,6 +466,40 @@ public class OpenAiHandler : IProtocolHandler
         return Microsoft.AspNetCore.Http.Results.Json(BuildCompletionResponse(request.Model, response));
     }
 
+    /// <summary>
+    /// <c>POST /v1/embeddings</c> — the client's body is already in the backend's shape, so it
+    /// is forwarded unchanged and llama.cpp's response (data/model/usage) is returned verbatim.
+    /// </summary>
+    public async Task<IResult> HandleEmbeddingsAsync(HttpRequest httpRequest, CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(httpRequest.Body);
+        var body = await reader.ReadToEndAsync(cancellationToken);
+
+        string? model;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("input", out _))
+                return EmbeddingsError(400, "Missing 'input' in request body.");
+            model = doc.RootElement.TryGetProperty("model", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return EmbeddingsError(400, "Invalid JSON in request body.");
+        }
+
+        var result = await _embeddings.CreateAsync(ApiProtocol.OpenAI, "/v1/embeddings", body, model, body, cancellationToken);
+        return result.IsSuccess
+            ? Microsoft.AspNetCore.Http.Results.Content(result.Response!.Payload, "application/json")
+            : EmbeddingsError(result.StatusCode, result.Error!);
+    }
+
+    private static IResult EmbeddingsError(int statusCode, string message) =>
+        Microsoft.AspNetCore.Http.Results.Json(new
+        {
+            error = new { message, type = statusCode == 404 ? "not_found_error" : "invalid_request_error" }
+        }, statusCode: statusCode);
+
     private async Task<object> ProcessOnServer(
         ServerInstance server,
         ChatCompletionRequest chatRequest,
@@ -559,7 +596,7 @@ public class OpenAiHandler : IProtocolHandler
     {
         // Find preset matching the model name
         var presets = _presetManager.GetAllPresets();
-        var preset = presets.FirstOrDefault(p => p.Name == request.Model);
+        var preset = ModelAliasMatcher.Resolve(presets, request.Model);
 
         // llama.cpp (like OpenAI) only includes token usage in the SSE stream when
         // stream_options.include_usage is set. Force it on so usage/stats are always

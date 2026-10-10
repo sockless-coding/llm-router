@@ -170,6 +170,54 @@
                     <span asp-validation-for="ViewModel.EnvironmentSetupCommand" class="text-xs text-neon-red mt-1"></span>
                 </div>
 
+                <!-- Memory group & idle unload -->
+                <div class="pt-2 border-t border-gray-600/20 space-y-5">
+                    <h3 class="text-sm font-semibold text-text-primary pt-3">Memory &amp; unloading</h3>
+
+                    <div>
+                        <label asp-for="ViewModel.MemoryGroup" class="block text-sm font-medium text-text-secondary mb-1">
+                            Memory group <span class="text-gray-500">(optional)</span>
+                        </label>
+                        <p class="text-xs text-gray-500 mb-2">Give servers that share a GPU the same group name. Before one of them loads a model, the least-recently-used idle servers in the group are stopped until it fits the group's budget.</p>
+                        <input asp-for="ViewModel.MemoryGroup" list="memory-groups" placeholder="e.g. gpu0" class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 text-sm font-mono" />
+                        <datalist id="memory-groups">
+                            @foreach (var g in Model.ExistingGroups)
+                            {
+                                <option value="@g.Name">@(g.BudgetMb > 0 ? $"{g.BudgetMb / 1024.0:0.#} GB" : "no budget")</option>
+                            }
+                        </datalist>
+                        <span asp-validation-for="ViewModel.MemoryGroup" class="text-xs text-neon-red mt-1"></span>
+                    </div>
+
+                    <div>
+                        <label asp-for="ViewModel.GroupBudgetGb" class="block text-sm font-medium text-text-secondary mb-1">Group memory budget (GB)</label>
+                        <p class="text-xs text-gray-500 mb-2">Usable device memory for the whole group. It's shared, so changing it here changes it for every server in the group. Leave a little headroom below the card's total. Empty means no limit.</p>
+                        <input asp-for="ViewModel.GroupBudgetGb" type="number" step="0.5" min="0" placeholder="e.g. 22" class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 text-sm" />
+                        <span asp-validation-for="ViewModel.GroupBudgetGb" class="text-xs text-neon-red mt-1"></span>
+                    </div>
+
+                    @if (Model.PresetEstimates.Count > 0)
+                    {
+                        <div>
+                            <p class="text-sm font-medium text-text-secondary mb-1">Estimated footprint per preset</p>
+                            <p class="text-xs text-gray-500 mb-2">This comes from file sizes and the KV cache. If it's off, set <em>Memory estimate</em> on the preset.</p>
+                            <ul class="text-xs font-mono text-text-primary space-y-0.5">
+                                @foreach (var (name, mb, overridden) in Model.PresetEstimates)
+                                {
+                                    <li>@name — @(mb >= 1024 ? $"{mb / 1024.0:0.0} GB" : $"{mb} MB")@(overridden ? " (override)" : "")</li>
+                                }
+                            </ul>
+                        </div>
+                    }
+
+                    <div>
+                        <label asp-for="ViewModel.IdleUnloadMinutes" class="block text-sm font-medium text-text-secondary mb-1">Unload after idle (minutes)</label>
+                        <p class="text-xs text-gray-500 mb-2">Stop this server after this many minutes without requests. The next request starts it again. Empty or 0 means never. Presets marked <em>Keep loaded</em> are exempt.</p>
+                        <input asp-for="ViewModel.IdleUnloadMinutes" type="number" min="0" placeholder="e.g. 30" class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 text-sm" />
+                        <span asp-validation-for="ViewModel.IdleUnloadMinutes" class="text-xs text-neon-red mt-1"></span>
+                    </div>
+                </div>
+
                 <!-- Actions -->
                 <div class="flex items-center gap-3 pt-2">
                     <button type="submit"

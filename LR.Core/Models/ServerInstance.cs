@@ -60,6 +60,17 @@ public class ServerInstance
     public int MaxRestarts { get; set; } = 3;
 
     /// <summary>
+    /// Servers sharing a GPU set the same group name (e.g. <c>gpu0</c>). Before one of them
+    /// starts a model, least-recently-used idle servers in the group are stopped until the
+    /// estimated footprints fit the group's <see cref="Models.MemoryGroup.BudgetMb"/>. Null = unmanaged.
+    /// </summary>
+    [MaxLength(64)]
+    public string? MemoryGroup { get; set; }
+
+    /// <summary>Stop the server after this many minutes without requests. Null/0 = never.</summary>
+    public int? IdleUnloadMinutes { get; set; }
+
+    /// <summary>
     /// Whether an auto-restart is currently in progress (prevents concurrent restart attempts).
     /// </summary>
     [NotMapped]

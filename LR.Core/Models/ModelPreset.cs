@@ -22,6 +22,36 @@ public class ModelPreset
     [Required, MaxLength(256)]
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Extra model names clients may request this preset by, one per line or comma-separated
+    /// (e.g. <c>gpt-4o</c> for a client with a hardcoded model id). <c>*</c> matches any run of
+    /// characters (<c>claude-*</c>). Matching is case-insensitive; a preset's own
+    /// <see cref="Name"/> always wins over another preset's alias — see <see cref="LR.Core.Services.ModelAliasMatcher"/>.
+    /// </summary>
+    [MaxLength(2048)]
+    public string? Aliases { get; set; }
+
+    /// <summary>
+    /// Preset to serve this preset's requests when its server is errored or gone, or when it is
+    /// at capacity and the fallback is already loaded with a free slot. Fallbacks chain (the
+    /// fallback's own fallback is tried next). Deliberately not a foreign key: deleting the
+    /// target just leaves a dangling id that resolves to "no fallback".
+    /// </summary>
+    public Guid? FallbackPresetId { get; set; }
+
+    /// <summary>
+    /// Device memory this preset needs once loaded, in MB, overriding the estimate from
+    /// <see cref="LR.Core.Services.PresetMemoryEstimator"/>. Used for memory-group budgeting.
+    /// </summary>
+    public int? MemoryEstimateMb { get; set; }
+
+    /// <summary>
+    /// While this is a server's active preset, the server is never stopped automatically —
+    /// neither by idle unload (<see cref="ServerInstance.IdleUnloadMinutes"/>) nor to make room
+    /// in its memory group. A request for another preset on the same server still swaps it out.
+    /// </summary>
+    public bool KeepLoaded { get; set; }
+
     // ==================== CORE (Always Visible) ====================
 
     /// <summary>

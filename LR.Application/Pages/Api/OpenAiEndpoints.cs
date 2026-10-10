@@ -11,6 +11,7 @@ public static class OpenAiEndpoints
     /// <summary>
     /// Maps OpenAI-compatible endpoints:
     /// - POST /v1/chat/completions
+    /// - POST /v1/embeddings
     /// - GET  /v1/models
     /// </summary>
     public static IEndpointRouteBuilder MapOpenAiEndpoints(this IEndpointRouteBuilder app)
@@ -24,6 +25,14 @@ public static class OpenAiEndpoints
                 CancellationToken ct) =>
             {
                 return await handler.HandleChatCompletionAsync(httpRequest, httpResponse, ct);
+            });
+
+        group.MapPost("/v1/embeddings", async (
+                OpenAiHandler handler,
+                HttpRequest httpRequest,
+                CancellationToken ct) =>
+            {
+                return await handler.HandleEmbeddingsAsync(httpRequest, ct);
             });
 
         group.MapGet("/v1/models", async (

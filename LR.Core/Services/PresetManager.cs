@@ -28,6 +28,9 @@ public class PresetManager : IPresetManager
         return _context.ModelPresets.ToList().AsReadOnly();
     }
 
+    public ModelPreset? FindByModelName(string? modelName) =>
+        ModelAliasMatcher.Resolve(GetAllPresets(), modelName);
+
     /// <summary>
     /// Gets all presets across all server instances (async).
     /// </summary>

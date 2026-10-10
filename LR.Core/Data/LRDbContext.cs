@@ -24,6 +24,7 @@ public class LRDbContext : DbContext
     public DbSet<Models.LlamaCppBuildRecipe> LlamaCppBuildRecipes => Set<Models.LlamaCppBuildRecipe>();
     public DbSet<Models.EngineBuildSettings> EngineBuildSettings => Set<Models.EngineBuildSettings>();
     public DbSet<Models.PlaygroundRun> PlaygroundRuns => Set<Models.PlaygroundRun>();
+    public DbSet<Models.MemoryGroup> MemoryGroups => Set<Models.MemoryGroup>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {

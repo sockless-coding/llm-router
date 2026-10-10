@@ -51,4 +51,10 @@ public interface IPresetManager
     /// Gets all presets across all server instances.
     /// </summary>
     IReadOnlyList<ModelPreset> GetAllPresets();
+
+    /// <summary>
+    /// Resolves a client-requested model name to a preset by name or alias
+    /// (see <see cref="LR.Core.Services.ModelAliasMatcher"/>). Null if nothing matches.
+    /// </summary>
+    ModelPreset? FindByModelName(string? modelName);
 }

@@ -115,7 +115,7 @@ public class ResponsesHandler
         if (messages.Count == 0)
             return Results.BadRequest(new { error = new { message = "`input` (or a valid `previous_response_id` conversation) is required." } });
 
-        var preset = _presetManager.GetAllPresets().FirstOrDefault(p => p.Name == request.Model);
+        var preset = _presetManager.FindByModelName(request.Model);
 
         // Reject models this API key isn't scoped to before touching the routing engine —
         // RoutingEngine's round-robin fallback would otherwise happily route an unresolved

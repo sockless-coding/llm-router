@@ -19,6 +19,7 @@ public class PresetEditModel : PageModel, IPresetFormPageModel
     public IReadOnlyList<ServerInstance> Servers { get; set; } = new List<ServerInstance>();
     public IReadOnlyList<LocalModel> Models { get; set; } = new List<LocalModel>();
     public IReadOnlyList<LocalModel> MmprojCandidates { get; set; } = new List<LocalModel>();
+    public IReadOnlyList<ModelPreset> FallbackCandidates { get; set; } = new List<ModelPreset>();
     public IReadOnlyList<ChatTemplateVariable> DetectedTemplateVariables { get; set; } = Array.Empty<ChatTemplateVariable>();
 
     public PresetEditModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary, IChatTemplateVariableExtractor templateVariableExtractor)
@@ -36,6 +37,8 @@ public class PresetEditModel : PageModel, IPresetFormPageModel
             return BadRequest($"Preset with id {Id} not found.");
 
         Servers = _serverManager.GetAllInstances();
+
+        FallbackCandidates = _presetManager.GetAllPresets().Where(p => p.Id != Id).ToList();
         Models = await _modelLibrary.GetAllAsync();
         MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
         PresetViewModelMapper.ToViewModel(preset, ViewModel);
@@ -77,9 +80,16 @@ public class PresetEditModel : PageModel, IPresetFormPageModel
         if (!ViewModel.ModelId.HasValue && string.IsNullOrWhiteSpace(ViewModel.ModelPath))
             ModelState.AddModelError("ViewModel.ModelPath", "Select a model from the library, or enter a path manually.");
 
+        foreach (var alias in ModelAliasMatcher.ParseAliases(ViewModel.Aliases))
+        {
+            if (_presetManager.GetAllPresets().Any(p => p.Id != Id && p.Name == alias))
+                ModelState.AddModelError("ViewModel.Aliases", $"'{alias}' is already another preset's name, so the alias would never match.");
+        }
+
         if (!ModelState.IsValid)
         {
             Servers = _serverManager.GetAllInstances();
+            FallbackCandidates = _presetManager.GetAllPresets().Where(p => p.Id != Id).ToList();
             Models = await _modelLibrary.GetAllAsync();
             MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
             return Page();

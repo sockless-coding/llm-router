@@ -30,6 +30,7 @@ public class OllamaHandler : IProtocolHandler
     private readonly GatewaySettings _gatewaySettings;
     private readonly IApiKeyRequestContext _apiKeyContext;
     private readonly ILogger<OllamaHandler> _logger;
+    private readonly EmbeddingsGateway _embeddings;
 
     public ApiProtocol Protocol => ApiProtocol.Ollama;
     public string PathPrefix => "/api";
@@ -45,7 +46,8 @@ public class OllamaHandler : IProtocolHandler
         IApiRequestLogger requestLogger,
         GatewaySettings gatewaySettings,
         IApiKeyRequestContext apiKeyContext,
-        ILogger<OllamaHandler> logger)
+        ILogger<OllamaHandler> logger,
+        EmbeddingsGateway embeddings)
     {
         _serverManager = serverManager;
         _presetManager = presetManager;
@@ -58,6 +60,7 @@ public class OllamaHandler : IProtocolHandler
         _gatewaySettings = gatewaySettings;
         _apiKeyContext = apiKeyContext;
         _logger = logger;
+        _embeddings = embeddings;
     }
 
     public async Task<object> HandleListModelsAsync()
@@ -121,7 +124,7 @@ public class OllamaHandler : IProtocolHandler
     public async Task<object> HandleShowModelAsync(string modelName)
     {
         var presets = await _presetManager.GetAllPresetsAsync();
-        var preset = presets.FirstOrDefault(p => p.Name == modelName);
+        var preset = ModelAliasMatcher.Resolve(presets, modelName);
         if (preset is null || !_apiKeyContext.IsModelAllowed(preset.Id))
             return Microsoft.AspNetCore.Http.Results.NotFound($"Model '{modelName}' not found");
 
@@ -253,7 +256,7 @@ public class OllamaHandler : IProtocolHandler
         // Reject models this API key isn't scoped to before touching the routing engine —
         // RoutingEngine's round-robin fallback would otherwise happily route an unresolved
         // model name to any healthy server, silently bypassing the scoping.
-        var requestedPreset = _presetManager.GetAllPresets().FirstOrDefault(p => p.Name == request.Model);
+        var requestedPreset = _presetManager.FindByModelName(request.Model);
         if (requestedPreset is not null && !_apiKeyContext.IsModelAllowed(requestedPreset.Id))
         {
             return Microsoft.AspNetCore.Http.Results.Json(new { error = $"Model '{request.Model}' is not accessible with this API key." }, statusCode: 403);
@@ -473,7 +476,7 @@ public class OllamaHandler : IProtocolHandler
         // Reject models this API key isn't scoped to before touching the routing engine —
         // RoutingEngine's round-robin fallback would otherwise happily route an unresolved
         // model name to any healthy server, silently bypassing the scoping.
-        var requestedPreset = _presetManager.GetAllPresets().FirstOrDefault(p => p.Name == request.Model);
+        var requestedPreset = _presetManager.FindByModelName(request.Model);
         if (requestedPreset is not null && !_apiKeyContext.IsModelAllowed(requestedPreset.Id))
         {
             return Microsoft.AspNetCore.Http.Results.Json(new { error = $"Model '{request.Model}' is not accessible with this API key." }, statusCode: 403);
@@ -622,40 +625,90 @@ public class OllamaHandler : IProtocolHandler
     }
 
     /// <summary>
-    /// Handle /api/embed endpoint — generate embeddings from a model.
+    /// Handle /api/embed endpoint — generate embeddings from a model. Translated to an OpenAI
+    /// <c>/v1/embeddings</c> call on the backend; llama.cpp's default normalization (L2) matches
+    /// Ollama's, so the vectors are returned unchanged.
     /// </summary>
-    public async Task<object> HandleEmbeddingsAsync(EmbedRequest request)
+    public async Task<IResult> HandleEmbeddingsAsync(string body, CancellationToken cancellationToken)
     {
-        // Normalize input to a list of strings
+        EmbedRequest? request;
+        try { request = JsonSerializer.Deserialize<EmbedRequest>(body); }
+        catch (JsonException) { request = null; }
+        if (request is null)
+            return OllamaError(400, "Invalid JSON in request body");
+
+        // "input" is a string or an array of strings; System.Text.Json surfaces an object-typed
+        // property as a JsonElement either way.
         var inputs = new List<string>();
-        if (request.Input is string singleInput)
-            inputs.Add(singleInput);
-        else if (request.Input is JsonElement jsonElem && jsonElem.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in jsonElem.EnumerateArray())
-                inputs.Add(item.GetString() ?? string.Empty);
-        }
+        if (request.Input is JsonElement { ValueKind: JsonValueKind.String } single)
+            inputs.Add(single.GetString() ?? string.Empty);
+        else if (request.Input is JsonElement { ValueKind: JsonValueKind.Array } array)
+            inputs.AddRange(array.EnumerateArray().Select(item => item.GetString() ?? string.Empty));
+        if (inputs.Count == 0)
+            return OllamaError(400, "Missing 'input' in request body");
 
-        // Find a running server for the requested model
-        var presets = await _presetManager.GetAllPresetsAsync();
-        var preset = presets.FirstOrDefault(p => p.Name == request.Model);
-        if (preset is null || !_apiKeyContext.IsModelAllowed(preset.Id))
-            return Microsoft.AspNetCore.Http.Results.NotFound($"Model '{request.Model}' not found");
-
-        // For now, return a placeholder embedding response.
-        // A real implementation would send the embeddings request to the backend provider.
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var dummyEmbeddings = inputs.Select(_ => Enumerable.Range(0, 384).Select(_ => (double)(new Random().NextDouble() * 2 - 1)).ToList()).ToList();
+        var result = await CreateEmbeddingsAsync("/api/embed", body, request.Model, inputs, cancellationToken);
         sw.Stop();
+        if (result.Error is not null)
+            return result.Error;
 
-        return new EmbedResponse
+        return Microsoft.AspNetCore.Http.Results.Json(new EmbedResponse
         {
             Model = request.Model,
-            Embeddings = dummyEmbeddings,
-            TotalDuration = (long)sw.Elapsed.TotalMilliseconds * 1_000_000L,
-            PromptEvalCount = inputs.Sum(s => s.Length / 4)
-        };
+            Embeddings = result.Vectors!,
+            TotalDuration = (long)(sw.Elapsed.TotalMilliseconds * 1_000_000L),
+            PromptEvalCount = result.PromptTokens
+        });
     }
+
+    /// <summary>
+    /// Handle the legacy /api/embeddings endpoint — a single "prompt" in, a single "embedding" out.
+    /// Still used by older Ollama clients and RAG libraries.
+    /// </summary>
+    public async Task<IResult> HandleLegacyEmbeddingsAsync(string body, CancellationToken cancellationToken)
+    {
+        string? model, prompt;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            model = doc.RootElement.TryGetProperty("model", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null;
+            prompt = doc.RootElement.TryGetProperty("prompt", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return OllamaError(400, "Invalid JSON in request body");
+        }
+        if (prompt is null)
+            return OllamaError(400, "Missing 'prompt' in request body");
+
+        var result = await CreateEmbeddingsAsync("/api/embeddings", body, model, [prompt], cancellationToken);
+        if (result.Error is not null)
+            return result.Error;
+
+        return Microsoft.AspNetCore.Http.Results.Json(new { embedding = result.Vectors![0] });
+    }
+
+    private async Task<(List<List<double>>? Vectors, int PromptTokens, IResult? Error)> CreateEmbeddingsAsync(
+        string endpointPath, string body, string? model, List<string> inputs, CancellationToken cancellationToken)
+    {
+        var backendPayload = JsonSerializer.Serialize(new { model, input = inputs });
+        var result = await _embeddings.CreateAsync(ApiProtocol.Ollama, endpointPath, body, model, backendPayload, cancellationToken);
+        if (!result.IsSuccess)
+            return (null, 0, OllamaError(result.StatusCode, result.Error!));
+
+        // OpenAI shape: { data: [ { index, embedding: [...] }, ... ], usage: { prompt_tokens } }
+        using var doc = JsonDocument.Parse(result.Response!.Payload);
+        var vectors = doc.RootElement.GetProperty("data").EnumerateArray()
+            .OrderBy(item => item.TryGetProperty("index", out var i) ? i.GetInt32() : 0)
+            .Select(item => item.GetProperty("embedding").EnumerateArray().Select(v => v.GetDouble()).ToList())
+            .ToList();
+
+        return (vectors, result.Response.PromptTokensProcessed, null);
+    }
+
+    private static IResult OllamaError(int statusCode, string message) =>
+        Microsoft.AspNetCore.Http.Results.Json(new { error = message }, statusCode: statusCode);
 
     /// <summary>
     /// Handle /api/ps endpoint — list models currently loaded in memory.
@@ -719,7 +772,7 @@ public class OllamaHandler : IProtocolHandler
     {
         // Find preset matching the model name
         var presets = _presetManager.GetAllPresets();
-        var preset = presets.FirstOrDefault(p => p.Name == ollamaRequest.Model);
+        var preset = ModelAliasMatcher.Resolve(presets, ollamaRequest.Model);
 
         // Convert Ollama ChatRequest to OpenAI-compatible format for backend providers
         var openAiRequest = new ChatCompletionRequest
@@ -876,7 +929,7 @@ public class OllamaHandler : IProtocolHandler
     {
         // Find preset matching the model name
         var presets = _presetManager.GetAllPresets();
-        var preset = presets.FirstOrDefault(p => p.Name == generateRequest.Model);
+        var preset = ModelAliasMatcher.Resolve(presets, generateRequest.Model);
 
         // Convert generate request to OpenAI chat format (single user message with prompt)
         var messages = new List<LR.Core.Models.OpenAI.ChatMessage>();

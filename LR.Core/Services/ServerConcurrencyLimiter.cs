@@ -20,6 +20,7 @@ public sealed class ServerConcurrencyLimiter : IServerConcurrencyLimiter
 
     private readonly object _gate = new();
     private readonly Dictionary<Guid, int> _inFlight = new();
+    private readonly ConcurrentDictionary<Guid, DateTimeOffset> _lastActivity = new();
 
     public IDisposable? TryAcquire(Guid serverId, int capacity)
     {
@@ -35,6 +36,7 @@ public sealed class ServerConcurrencyLimiter : IServerConcurrencyLimiter
             _inFlight[serverId] = current + 1;
         }
 
+        Touch(serverId);
         return new Lease(this, serverId);
     }
 
@@ -55,8 +57,14 @@ public sealed class ServerConcurrencyLimiter : IServerConcurrencyLimiter
         }
     }
 
+    public DateTimeOffset? LastActivity(Guid serverId) =>
+        _lastActivity.TryGetValue(serverId, out var at) ? at : null;
+
+    public void Touch(Guid serverId) => _lastActivity[serverId] = DateTimeOffset.UtcNow;
+
     private void Release(Guid serverId)
     {
+        Touch(serverId);
         lock (_gate)
         {
             if (!_inFlight.TryGetValue(serverId, out var current))

@@ -493,6 +493,44 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
         return null;
     }
 
+    public async Task<RouteResponse?> SendRawRequestAsync(string endpoint, string payload, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(ServerUrl)) return null;
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        using var httpRequest = CreateRequest(HttpMethod.Post, endpoint);
+        httpRequest.Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+        using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        sw.Stop();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            await LogProviderMessage(ServerLogLevel.Warning, $"Request to {endpoint} failed: {(int)response.StatusCode} - {body}");
+            throw new HttpRequestException($"Request to {endpoint} failed: {response.StatusCode} - {body}", null, response.StatusCode);
+        }
+
+        var routeResponse = new RouteResponse { Payload = body, TotalLatencyMs = sw.Elapsed.TotalMilliseconds };
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("usage", out var usage)
+                && usage.ValueKind == JsonValueKind.Object
+                && usage.TryGetProperty("prompt_tokens", out var promptTokens)
+                && promptTokens.TryGetInt32(out var n))
+            {
+                routeResponse.PromptTokensProcessed = n;
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON (or not the shape we expected) — the caller still gets the raw body.
+        }
+
+        return routeResponse;
+    }
+
     /// <summary>
     /// Logs a message to both the console (via ILogger) and the database (via IServerLogService).
     /// Uses IServiceScopeFactory to resolve IServerLogService in a new scope, avoiding

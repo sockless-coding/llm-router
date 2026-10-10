@@ -40,6 +40,58 @@
                 <span asp-validation-for="ViewModel.Name" class="text-xs text-red-400"></span>
             </div>
 
+            <!-- Aliases -->
+            <div>
+                <label asp-for="ViewModel.Aliases" class="block text-sm font-medium text-text-secondary mb-1">Aliases</label>
+                <textarea asp-for="ViewModel.Aliases" rows="2" placeholder="e.g. gpt-4o, claude-*"
+                          class="@inpCls font-mono text-sm @Html.Raw(ViewData.ModelState["ViewModel.Aliases"]?.Errors?.Any() == true ? "border-red-500/60" : "")"></textarea>
+                <p class="text-xs text-text-secondary mt-1">
+                    Other model names that route to this preset, comma-separated or one per line — for clients with a hardcoded model id.
+                    <code>*</code> matches anything (<code>claude-*</code>). Case-insensitive; a preset's own name always takes precedence.
+                </p>
+                <span asp-validation-for="ViewModel.Aliases" class="text-xs text-red-400"></span>
+            </div>
+
+            <!-- Fallback -->
+            <div>
+                <label asp-for="ViewModel.FallbackPresetId" class="block text-sm font-medium text-text-secondary mb-1">Fallback preset</label>
+                <select asp-for="ViewModel.FallbackPresetId" class="@selCls">
+                    <option value="">— None —</option>
+                    @foreach (var p in Model.FallbackCandidates.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        var server = Model.Servers.FirstOrDefault(s => s.Id == p.ServerInstanceId)?.Name ?? "unknown server";
+                        <option value="@p.Id" selected="@(Model.ViewModel.FallbackPresetId == p.Id)">@p.Name (@server)</option>
+                    }
+                </select>
+                <p class="text-xs text-text-secondary mt-1">
+                    Serves this preset's requests when its server is errored, or overflows to it when this one is at capacity and the fallback is already loaded.
+                    Must be on a different server to take effect. Fallbacks chain.
+                </p>
+            </div>
+
+            <!-- Keep loaded -->
+            <div>
+                <label class="flex items-center gap-2 text-sm font-medium text-text-secondary">
+                    <input asp-for="ViewModel.KeepLoaded" type="checkbox" class="rounded border-gray-600/30 bg-cyber-bg-dark text-neon-magenta focus:ring-neon-magenta/30" />
+                    Keep loaded
+                </label>
+                <p class="text-xs text-text-secondary mt-1">
+                    While this preset is loaded, its server is never stopped automatically: not by the server's idle unload, and not to make room in its memory group.
+                    A request for a different preset on the same server still swaps it out.
+                </p>
+            </div>
+
+            <!-- Memory estimate override -->
+            <div>
+                <label asp-for="ViewModel.MemoryEstimateMb" class="block text-sm font-medium text-text-secondary mb-1">Memory estimate (MB)</label>
+                <input asp-for="ViewModel.MemoryEstimateMb" type="number" min="0" placeholder="Estimated automatically" class="@inpCls" />
+                <p class="text-xs text-text-secondary mt-1">
+                    Device memory this preset uses once loaded, for the server's memory-group budget. Leave empty to estimate it from the model files and KV cache.
+                    The server's edit page shows the current estimate.
+                </p>
+                <span asp-validation-for="ViewModel.MemoryEstimateMb" class="text-xs text-red-400"></span>
+            </div>
+
             <!-- Model -->
             <div>
                 <label asp-for="ViewModel.ModelId" class="block text-sm font-medium text-text-secondary mb-1">Model</label>

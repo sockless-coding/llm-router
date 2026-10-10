@@ -13,6 +13,10 @@ public static class PresetViewModelMapper
     {
         viewModel.ServerInstanceId = preset.ServerInstanceId;
         viewModel.Name = preset.Name;
+        viewModel.Aliases = preset.Aliases;
+        viewModel.FallbackPresetId = preset.FallbackPresetId;
+        viewModel.MemoryEstimateMb = preset.MemoryEstimateMb;
+        viewModel.KeepLoaded = preset.KeepLoaded;
         viewModel.ModelId = preset.ModelId;
         viewModel.EngineSettings = new Dictionary<string, string>(preset.EngineSettings);
         // Only show the raw path in the manual-override field when there's no registry link —
@@ -181,6 +185,12 @@ public static class PresetViewModelMapper
     {
         entity.ServerInstanceId = viewModel.ServerInstanceId;
         entity.Name = viewModel.Name;
+        entity.Aliases = string.IsNullOrWhiteSpace(viewModel.Aliases)
+            ? null
+            : string.Join(", ", LR.Core.Services.ModelAliasMatcher.ParseAliases(viewModel.Aliases));
+        entity.FallbackPresetId = viewModel.FallbackPresetId;
+        entity.MemoryEstimateMb = viewModel.MemoryEstimateMb is > 0 ? viewModel.MemoryEstimateMb : null;
+        entity.KeepLoaded = viewModel.KeepLoaded;
         // Blank means "the engine's default": only settings actually set are stored.
         entity.EngineSettings = viewModel.EngineSettings
             .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))

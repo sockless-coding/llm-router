@@ -57,6 +57,14 @@ public interface IBackendProvider
     Task<RouteResponse?> SendRequestAsync(string payload, ApiProtocol protocol = ApiProtocol.OpenAI, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Posts <paramref name="payload"/> unchanged to <paramref name="endpoint"/> on the running
+    /// server (e.g. <c>/v1/embeddings</c>) and returns the raw JSON response body in
+    /// <see cref="RouteResponse.Payload"/>, with <see cref="RouteResponse.PromptTokensProcessed"/>
+    /// taken from the body's <c>usage.prompt_tokens</c> when present. Throws on a non-success status.
+    /// </summary>
+    Task<RouteResponse?> SendRawRequestAsync(string endpoint, string payload, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Sends a streaming inference request. Returns token chunks as they are generated.
     /// Each yielded string is a single text delta/token from the model.
     /// After all tokens are yielded, the final yield contains the RouteResponse metadata.
