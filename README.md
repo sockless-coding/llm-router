@@ -25,10 +25,14 @@ LLM Router provides a unified interface to route requests across heterogeneous b
 
 | | |
 |---|---|
-| **Dashboard** — fleet overview, recent activity | **Servers** — instance registry, start/stop/edit |
+| **Dashboard** — live server status, slot usage, 24h traffic | **Servers** — llama.cpp and Strata instances, status, port |
 | ![Dashboard](docs/screenshots/dashboard-home.png) | ![Servers](docs/screenshots/servers.png) |
-| **Presets** — launch configurations per server | **Model Library** — GGUF registry with size/status |
+| **Engines** — installed llama.cpp builds and source recipes | **Strata** — installs, prepared models, update/rollback |
+| ![Engines](docs/screenshots/engines.png) | ![Strata](docs/screenshots/strata.png) |
+| **Presets** — launch configurations per server | **Model Library** — local and Hugging Face GGUFs with quant/size/status |
 | ![Presets](docs/screenshots/presets.png) | ![Model Library](docs/screenshots/model-library.png) |
+| **Playground** — run history comparing TTFT and speeds per configuration | **API Keys** — model-scoped keys, enable/disable, regenerate |
+| ![Playground](docs/screenshots/playground.png) | ![API Keys](docs/screenshots/api-keys.png) |
 | **Statistics** — throughput, latency, context usage | **Request Log** — per-request history with filtering |
 | ![Statistics](docs/screenshots/stats.png) | ![Request Log](docs/screenshots/request-log.png) |
 
@@ -107,21 +111,26 @@ The application will start, apply any pending SQLite migrations (`data/lr.db`), 
 The same executable can run under the Service Control Manager — it detects how it was
 launched and adapts automatically (no separate build or flag required).
 
-1. Publish the app:
+1. Download a release from the
+   [GitHub Releases](https://github.com/sockless-coding/llm-router/releases) page and
+   extract it to the folder the service should run from:
 
-   ```powershell
-   dotnet publish LR.Application -c Release -r win-x64 --self-contained false -o publish
-   ```
+   - `llm-router-<version>-win-x64.zip` — framework-dependent; requires the
+     [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0) (ASP.NET Core).
+   - `llm-router-<version>-win-x64-self-contained.zip` — includes the runtime.
 
-2. Install the service (run PowerShell as Administrator):
+2. Install the service from the extracted folder (run PowerShell as Administrator):
 
    ```powershell
    .\install-service.ps1
    ```
 
-   By default this creates a service named `LLMRouter` pointing at
-   `LR.Application\bin\Release\net10.0\win-x64\publish\LR.Application.exe`. Pass
-   `-PublishDir` if you published elsewhere.
+   By default this creates a service named `LLMRouter` pointing at the
+   `LR.Application.exe` in the same folder as the script. Pass `-PublishDir` to point
+   at a different folder.
+
+   To test a local build as a service, run `publish.bat` from the repo root (it
+   publishes to `publish\`), then install with `.\install-service.ps1 -PublishDir .\publish`.
 
 3. Start it:
 

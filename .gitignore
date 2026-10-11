@@ -77,5 +77,9 @@ Thumbs.db
 # Prompt and local config
 prompt.md
 run.bat
+publish.bat
 appsettings.Development.json
 
+
+# Publish output (publish.bat)
+/publish/

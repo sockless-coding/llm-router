@@ -2,8 +2,8 @@
 <#
     Installs LLM Router as a Windows Service.
 
-    The app must be published first, e.g.:
-        dotnet publish LR.Application -c Release -r win-x64 --self-contained false -o publish
+    Run it from the extracted GitHub release folder, next to LR.Application.exe.
+    For a local test build, run publish.bat first and pass -PublishDir .\publish.
 
     Usage:
         .\install-service.ps1
@@ -23,7 +23,7 @@ $ErrorActionPreference = "Stop"
 $exePath = Join-Path $PublishDir "LR.Application.exe"
 
 if (-not (Test-Path $exePath)) {
-    Write-Error "Executable not found at '$exePath'.`nPublish the app first, e.g.:`n  dotnet publish LR.Application -c Release -r win-x64 --self-contained false -o `"$PublishDir`""
+    Write-Error "Executable not found at '$exePath'.`nRun this script from the extracted release folder, or pass -PublishDir to point at the folder containing LR.Application.exe."
     exit 1
 }
 
