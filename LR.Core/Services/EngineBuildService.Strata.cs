@@ -30,7 +30,8 @@ public partial class EngineBuildService
     /// Installs Strata release <paramref name="releaseTag"/> (null = latest) with the engine build in
     /// release asset <paramref name="assetName"/> into <c>&lt;install root&gt;/strata-&lt;tag&gt;-&lt;engine&gt;</c>
     /// on a background task: clones the release, creates its <c>.venv</c> with Strata's pinned Python
-    /// packages, and installs the engine (checked against GitHub's SHA-256). Returns the new row's ID.
+    /// packages, and installs the engine (checked against GitHub's SHA-256). Refuses up front if this PC
+    /// lacks a tool it needs (<see cref="CheckStrataPrerequisitesAsync"/>). Returns the new row's ID.
     /// </summary>
     public async Task<Guid> StartStrataReleaseInstallAsync(string? releaseTag, string? assetName, string? name)
     {
@@ -42,6 +43,9 @@ public partial class EngineBuildService
         var tag = release.TagName;
         var asset = PickStrataEngineAsset(release, assetName);
         var variant = asset is null ? (StrataEngineVariant?)null : StrataLayout.VariantOfAsset(asset.Name);
+
+        if (StrataPrerequisites.MissingMessage(await CheckStrataPrerequisitesAsync(compilesEngine: asset is null)) is { } missing)
+            throw new InvalidOperationException(missing);
 
         var folderName = variant is { } v ? $"strata-{tag}-{v.ToString().ToLowerInvariant()}" : $"strata-{tag}";
         var folder = Path.GetFullPath(Path.Combine(settings.InstallRootFolder, folderName));
@@ -203,13 +207,45 @@ public partial class EngineBuildService
             ["-m", "pip", "install", "--disable-pip-version-check", "-r", "requirements.txt"], checkout, ct);
     }
 
-    private sealed record PythonCommand(string Executable, IReadOnlyList<string> PrefixArgs);
+    private sealed record PythonCommand(string Executable, IReadOnlyList<string> PrefixArgs, string? Version = null);
+
+    /// <summary>
+    /// Checks this PC has what a Strata install needs: git and Python 3.10+ always, and a C++ toolchain
+    /// when <paramref name="compilesEngine"/> (no ready-made engine: Strata compiles one when a model is
+    /// first prepared). With a ready-made engine the toolchain is reported, but not required.
+    /// </summary>
+    public async Task<IReadOnlyList<StrataPrerequisite>> CheckStrataPrerequisitesAsync(bool compilesEngine, CancellationToken ct = default)
+    {
+        var git = StrataPrerequisites.FindGitAsync(ct);
+        var python = FindBasePythonAsync(null, ct);
+        var compiler = StrataPrerequisites.FindCompilerAsync(ct);
+        await Task.WhenAll(git, python, compiler);
+
+        return
+        [
+            new("Git", git.Result is not null, Required: true,
+                git.Result ?? "Not found on PATH. Needed to clone Strata and to update it.",
+                StrataPrerequisites.GitUrl),
+            new("Python 3.10+", python.Result is not null, Required: true,
+                python.Result is { } p
+                    ? $"Python {p.Version ?? "3.10+"} ({string.Join(' ', [p.Executable, .. p.PrefixArgs])})"
+                    : "Not found (neither 'py -3' nor 'python' on PATH). Needed for Strata's Python environment.",
+                StrataPrerequisites.PythonUrl),
+            new(StrataPrerequisites.CompilerName, compiler.Result is not null, Required: compilesEngine,
+                compiler.Result is { } c
+                    ? c
+                    : compilesEngine
+                        ? "Not found. Needed to compile Strata's engine for this PC."
+                        : "Not found. Only needed if Strata has to compile its engine (no ready-made one fits this PC); the ready-made engines don't need it.",
+                StrataPrerequisites.BuildToolsUrl),
+        ];
+    }
 
     /// <summary>
     /// A Python 3.10+ to create a new install's <c>.venv</c> with: another tracked Strata install's
     /// (known to work for Strata), else the <c>py</c> launcher or <c>python</c> on PATH.
     /// </summary>
-    private async Task<PythonCommand?> FindBasePythonAsync(string excludingFolder, CancellationToken ct)
+    private async Task<PythonCommand?> FindBasePythonAsync(string? excludingFolder, CancellationToken ct)
     {
         var candidates = new List<PythonCommand>();
         using (var scope = _scopeFactory.CreateScope())
@@ -235,11 +271,13 @@ public partial class EngineBuildService
         {
             try
             {
+                string? version = null;
                 var result = await ProcessRunner.RunAsync(candidate.Executable,
-                    [.. candidate.PrefixArgs, "-c", "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"],
-                    excludingFolder, null, _ => Task.CompletedTask, ct);
+                    [.. candidate.PrefixArgs, "-c", "import sys; print('%d.%d.%d' % sys.version_info[:3]); sys.exit(0 if sys.version_info >= (3, 10) else 1)"],
+                    Path.GetTempPath(), null,
+                    line => { if (!string.IsNullOrWhiteSpace(line)) version ??= line.Trim(); return Task.CompletedTask; }, ct);
                 if (result.ExitCode == 0)
-                    return candidate;
+                    return candidate with { Version = version };
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

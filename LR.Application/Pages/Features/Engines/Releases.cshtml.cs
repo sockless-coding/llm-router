@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
+using LR.Core.Services;
 using LR.Core.Services.EngineBuilds;
 
 namespace LR.Application.Pages.Features.Engines;
@@ -18,6 +19,7 @@ public partial class EngineReleasesModel : PageModel
     private readonly IGitHubClient _github;
     private readonly IEngineBuildManager _manager;
     private readonly IEngineBuildSettingsService _settings;
+    private readonly EngineBuildService _buildService;
 
     [BindProperty(SupportsGet = true)]
     public ServerEngine Engine { get; set; } = ServerEngine.LlamaCpp;
@@ -32,11 +34,15 @@ public partial class EngineReleasesModel : PageModel
     /// <summary>Strata: release tags already installed as a tracked release install.</summary>
     public HashSet<string> InstalledTags { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public EngineReleasesModel(IGitHubClient github, IEngineBuildManager manager, IEngineBuildSettingsService settings)
+    /// <summary>Strata: the tools an install needs, and whether this PC has them.</summary>
+    public IReadOnlyList<StrataPrerequisite> Prerequisites { get; private set; } = [];
+
+    public EngineReleasesModel(IGitHubClient github, IEngineBuildManager manager, IEngineBuildSettingsService settings, EngineBuildService buildService)
     {
         _github = github;
         _manager = manager;
         _settings = settings;
+        _buildService = buildService;
     }
 
     public async Task OnGetAsync()
@@ -69,6 +75,15 @@ public partial class EngineReleasesModel : PageModel
         catch (Exception ex)
         {
             LoadError = $"Could not load releases from GitHub: {ex.Message}";
+        }
+
+        if (Engine == ServerEngine.Strata)
+        {
+            // Without a ready-made engine for this OS (Linux), Strata compiles one, so it needs a C++ toolchain.
+            var hasReadyMadeEngine = Releases.Count > 0
+                ? Releases.Any(r => r.Assets.Any(a => StrataLayout.VariantOfAsset(a.Name) is not null))
+                : OperatingSystem.IsWindows();
+            Prerequisites = await _buildService.CheckStrataPrerequisitesAsync(compilesEngine: !hasReadyMadeEngine, HttpContext.RequestAborted);
         }
     }
 

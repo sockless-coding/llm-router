@@ -86,7 +86,7 @@ Protocols are toggled via `Gateway:EnabledProtocols` in configuration. Only `"fu
 - .NET 10.0 SDK or later
 - Node.js/npm (to build the Tailwind CSS bundle — see below)
 - For llama.cpp servers: `llama-server`/`llama-server.exe` binaries for whichever backend(s) you plan to run (CPU/CUDA/Vulkan/SYCL) — downloaded/compiled from the Engines page or your own builds
-- For Strata servers: Git and Python 3.10+ (installed from the Engines page — see [Strata servers](#strata-servers))
+- For Strata servers: Git and Python 3.10+, plus a C++ toolchain (Visual Studio Build Tools on Windows, `build-essential` on Linux) when Strata has to compile its engine — always on Linux, and on Windows only if no ready-made engine fits the PC. The Strata releases page checks these and refuses an install until they're found (installed from the Engines page — see [Strata servers](#strata-servers))
 
 ### Building the frontend assets
 

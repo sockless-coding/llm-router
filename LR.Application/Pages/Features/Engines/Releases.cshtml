@@ -39,6 +39,32 @@
         download one on the <a href="/Features/Models/HuggingFace?repoId=ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF" class="text-neon-cyan/80 hover:text-neon-cyan">Models page</a>,
         then use it in a preset on a Strata server.
     </p>
+
+    var blocked = Model.Prerequisites.Any(p => p.Blocks);
+    <div class="bg-cyber-card rounded-xl border @(blocked ? "border-yellow-500/30" : "border-gray-700/30") p-4 mb-6">
+        <p class="text-sm font-semibold text-text-primary mb-2">Requirements on this PC</p>
+        <ul class="space-y-1.5">
+            @foreach (var p in Model.Prerequisites)
+            {
+                var (icon, color) = p.Found ? ("✔", "text-neon-green") : p.Required ? ("✘", "text-neon-red") : ("–", "text-yellow-300");
+                <li class="flex items-start gap-2 text-sm">
+                    <span class="@color w-4 shrink-0">@icon</span>
+                    <span class="text-text-primary shrink-0">@p.Name</span>
+                    <span class="text-xs text-text-secondary mt-0.5 break-all">
+                        @p.Detail
+                        @if (!p.Found)
+                        {
+                            <a href="@p.InstallUrl" target="_blank" rel="noopener" class="text-neon-cyan/80 hover:text-neon-cyan ml-1">Get it</a>
+                        }
+                    </span>
+                </li>
+            }
+        </ul>
+        @if (blocked)
+        {
+            <p class="text-xs text-yellow-300 mt-3">Install what's missing, then restart LLM Router so it picks up the new PATH. Installs are refused until then.</p>
+        }
+    </div>
 }
 
 @if (Model.LoadError is not null)
