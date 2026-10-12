@@ -22,6 +22,13 @@ using LR.Application.Pages.Api;
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 
+// Launched from a staged release by AppUpdateService to swap in the new files and restart the
+// service — runs instead of the web host.
+if (OperatingSystem.IsWindows() && args.Length > 0 && args[0] == UpdateApplyCommand.Flag)
+{
+    return UpdateApplyCommand.Run(args);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Windows Service support — no-ops when launched standalone (console/dotnet run);
@@ -29,7 +36,7 @@ var builder = WebApplication.CreateBuilder(args);
 // otherwise default to C:\Windows\System32) and swaps in a service-aware lifetime.
 builder.Host.UseWindowsService(options =>
 {
-    options.ServiceName = "LLMRouter";
+    options.ServiceName = AppUpdateService.DefaultServiceName;
 });
 
 if (OperatingSystem.IsWindows())
@@ -198,6 +205,9 @@ builder.Services.AddHostedService<LR.Application.Services.RequestDispatcherServi
 builder.Services.AddHostedService<LR.Application.Services.ServerLoadBroadcastService>();
 builder.Services.AddHostedService<LR.Application.Services.IdleUnloadService>();
 
+// Self-update from the router's GitHub releases (Singleton — holds check/download state)
+builder.Services.AddSingleton<AppUpdateService>();
+
 // Retention cleanup for request logs (runs hourly)
 builder.Services.AddHostedService<RetentionCleanupService>();
 
@@ -324,6 +334,7 @@ if (enabledProtocols.Contains(ApiProtocol.Ollama))
 }
 
 app.Run();
+return 0;
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
 static void AddEventLogging(ILoggingBuilder logging)
