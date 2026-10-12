@@ -15,6 +15,41 @@
         </div>
     }
 
+    <!-- Updates — talks to /Features/Settings/Update (JSON), separate from the settings form below -->
+    <form id="update-csrf-form" hidden>@Html.AntiForgeryToken()</form>
+    <div id="update-card" class="bg-cyber-card rounded-xl p-6 border border-gray-700/30 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-neon-green"><span aria-hidden="true">🔄</span> Updates</h2>
+            <button type="button" id="update-check-btn"
+class="bg-gray-700/50 hover:bg-neon-cyan/20 text-text-secondary hover:text-neon-cyan border border-gray-600 hover:border-neon-cyan/40 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors">
+                Check now
+            </button>
+        </div>
+
+        <dl class="grid grid-cols-2 gap-y-2 text-sm">
+            <dt class="text-text-secondary">Installed version</dt>
+            <dd id="update-current" class="text-text-primary font-mono">…</dd>
+            <dt class="text-text-secondary">Latest release</dt>
+            <dd class="text-text-primary font-mono"><span id="update-latest">…</span> <a id="update-latest-link" href="#" target="_blank" rel="noopener" class="hidden text-neon-cyan hover:underline font-sans text-xs ml-1">release notes</a></dd>
+        </dl>
+
+        <div id="update-progress" class="hidden mt-4">
+            <div class="h-2 rounded-full bg-gray-700/50 overflow-hidden" role="progressbar" aria-label="Update progress" aria-valuemin="0" aria-valuemax="100">
+                <div id="update-progress-bar" class="h-full bg-neon-cyan/60 transition-all" style="width: 0%"></div>
+            </div>
+        </div>
+        <p id="update-message" class="text-sm text-text-secondary mt-3 hidden" role="status" aria-live="polite"></p>
+        <p id="update-unavailable" class="text-xs text-text-secondary mt-3 hidden"></p>
+        <p id="update-last-result" class="text-xs mt-3 hidden"></p>
+
+        <div class="mt-4">
+            <button type="button" id="update-install-btn"
+class="hidden bg-neon-green/20 hover:bg-neon-green/30 text-neon-green border border-neon-green px-6 py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                <span aria-hidden="true">⬇️</span> Install <span id="update-install-version"></span> and restart
+            </button>
+        </div>
+    </div>
+
     <form method="post" hx-boost="false">
         <!-- Request Logging Section -->
         <div class="bg-cyber-card rounded-xl p-6 border border-gray-700/30 mb-6">
@@ -189,3 +224,140 @@ class="bg-gray-700/50 hover:bg-red-500/20 text-text-secondary hover:text-red-400
         </div>
     </form>
 </div>
+
+@section Scripts {
+    <script>
+        (function () {
+            const card = document.getElementById('update-card');
+            if (!card) return;
+
+            const el = (id) => document.getElementById(id);
+            const token = () => document.querySelector('#update-csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+            const show = (node, visible) => node.classList.toggle('hidden', !visible);
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            // hx-boost re-runs this script on each visit; stop any loop once the card is gone.
+            const onPage = () => document.body.contains(card);
+
+            async function post(fields) {
+                const formData = new FormData();
+                for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+                formData.append('__RequestVerificationToken', token());
+                const resp = await fetch('/Features/Settings/Update', { method: 'POST', body: formData });
+                return resp.json();
+            }
+
+            async function getStatus() {
+                const resp = await fetch('/Features/Settings/Update', { cache: 'no-store' });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                return resp.json();
+            }
+
+            function setMessage(text, isError) {
+                const msg = el('update-message');
+                msg.textContent = text || '';
+                msg.className = 'text-sm mt-3 ' + (isError ? 'text-red-700 dark:text-red-400' : 'text-text-secondary');
+                show(msg, !!text);
+            }
+
+            function render(s) {
+                const busy = s.state === 'Checking' || s.state === 'Downloading' || s.state === 'Restarting';
+                el('update-current').textContent = s.currentVersion;
+                el('update-latest').textContent = s.latestVersion
+                    ? s.latestVersion + (s.updateAvailable ? '' : ' (up to date)')
+                    : (s.lastCheckedUtc ? 'none found' : '…');
+                const link = el('update-latest-link');
+                if (s.latestReleaseUrl) link.href = s.latestReleaseUrl;
+                show(link, !!s.latestReleaseUrl);
+
+                setMessage(s.message, s.state === 'Failed');
+                const progress = s.state === 'Downloading' && s.percent != null;
+                show(el('update-progress'), progress);
+                if (progress) el('update-progress-bar').style.width = s.percent + '%';
+
+                el('update-install-version').textContent = s.latestVersion || '';
+                const installBtn = el('update-install-btn');
+                show(installBtn, s.updateAvailable && s.canInstall);
+                installBtn.disabled = busy;
+                el('update-check-btn').disabled = busy;
+
+                const unavailable = el('update-unavailable');
+                unavailable.textContent = s.installUnavailableReason || '';
+                show(unavailable, s.updateAvailable && !s.canInstall);
+
+                const last = el('update-last-result');
+                if (s.lastResult) {
+                    const when = new Date(s.lastResult.completedAtUtc).toLocaleString();
+                    last.textContent = 'Last update (' + when + '): ' + s.lastResult.message;
+                    last.className = 'text-xs mt-3 ' + (s.lastResult.success ? 'text-text-secondary' : 'text-red-700 dark:text-red-400');
+                }
+                show(last, !!s.lastResult);
+            }
+
+            // Follows a download, then waits out the restart: the router counts as back once it
+            // answers with a new version or a newer update result (a failed update restarts the
+            // old version).
+            async function follow(before) {
+                const previousResult = before.lastResult?.completedAtUtc;
+                const deadline = Date.now() + 5 * 60 * 1000;
+                let restarting = false;
+                while (onPage() && Date.now() < deadline) {
+                    await sleep(restarting ? 2000 : 1000);
+                    let s;
+                    try {
+                        s = await getStatus();
+                    } catch {
+                        restarting = true; // router is down mid-restart
+                        setMessage('Waiting for the router to come back…');
+                        continue;
+                    }
+                    const finished = s.currentVersion !== before.currentVersion
+                        || (s.lastResult && s.lastResult.completedAtUtc !== previousResult);
+                    if (restarting && finished) {
+                        render(s);
+                        if (s.lastResult?.success) {
+                            setMessage('Updated to ' + s.currentVersion + '. Reloading…');
+                            setTimeout(() => location.reload(), 1500);
+                        } else {
+                            setMessage(s.lastResult?.message || 'The update failed; the previous version was restarted.', true);
+                        }
+                        return;
+                    }
+                    if (s.state === 'Restarting') restarting = true;
+                    if (s.state === 'Failed' && !restarting) { render(s); return; }
+                    if (!restarting || s.state === 'Restarting') render(s);
+                }
+                if (onPage()) setMessage('The router has not come back after 5 minutes. Check data\\updates\\update.log in the install folder.', true);
+            }
+
+            el('update-check-btn').addEventListener('click', async () => {
+                el('update-check-btn').disabled = true;
+                try {
+                    render((await post({ command: 'check', force: 'true' })).status);
+                } catch (e) {
+                    setMessage('Update check failed: ' + e.message, true);
+                    el('update-check-btn').disabled = false;
+                }
+            });
+
+            el('update-install-btn').addEventListener('click', async () => {
+                const version = el('update-install-version').textContent;
+                if (!confirm('Install ' + version + ' and restart the router? Requests in flight are cut off; running model servers keep running.')) return;
+                el('update-install-btn').disabled = true;
+                try {
+                    const before = await getStatus();
+                    const result = await post({ command: 'install' });
+                    render(result.status);
+                    if (!result.success) { setMessage(result.message, true); return; }
+                    await follow(before);
+                } catch (e) {
+                    setMessage('Install failed: ' + e.message, true);
+                    el('update-install-btn').disabled = false;
+                }
+            });
+
+            post({ command: 'check', force: 'false' })
+                .then((r) => render(r.status))
+                .catch((e) => setMessage('Update check failed: ' + e.message, true));
+        })();
+    </script>
+}

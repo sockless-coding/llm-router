@@ -19,6 +19,10 @@ public class GitHubRelease
     [JsonPropertyName("prerelease")]
     public bool Prerelease { get; set; }
 
+    /// <summary>Unpublished draft — only listed when the API token has push access to the repo.</summary>
+    [JsonPropertyName("draft")]
+    public bool Draft { get; set; }
+
     [JsonPropertyName("published_at")]
     public DateTimeOffset? PublishedAt { get; set; }
 

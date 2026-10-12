@@ -147,6 +147,27 @@ launched and adapts automatically (no separate build or flag required).
    .\uninstall-service.ps1
    ```
 
+#### Updating
+
+**Settings → Updates** shows the installed version and the latest
+[release](https://github.com/sockless-coding/llm-router/releases). When the router runs as a
+Windows Service, **Install and restart** updates it in place:
+
+1. The router downloads the release archive matching the install (framework-dependent or
+   self-contained), checks its SHA-256 digest and extracts it to `data\updates\`.
+2. It launches the new version's `LR.Application.exe` in updater mode. That process stops the
+   service, copies the new files over the install folder and starts the service again.
+3. If any file can't be replaced, everything is rolled back and the old version is restarted.
+
+`data\` (database, wrapper state, engine builds) and an existing `appsettings.json` are never
+overwritten. Requests in flight when the service stops are cut off. Running model servers keep
+running, and the restarted router reconnects to them. Their wrapper processes keep the old
+`LR.Wrapper.exe` until they're next restarted. The outcome is shown on the Settings page, and
+`data\updates\update.log` has the details.
+
+When the router isn't running as a service (console or `dotnet run`), the page still checks for
+updates, but you install them by replacing the files yourself.
+
 ## Using the dashboard
 
 - **Servers** — register backend server instances, pick their engine (llama.cpp or Strata), point them at a llama.cpp build / Strata folder, start/stop/restart them, and view live logs and status.
