@@ -50,6 +50,7 @@
             <input id="textToImageOnly" type="checkbox" checked class="rounded border-gray-600/30 bg-cyber-bg-dark text-neon-cyan focus:ring-neon-cyan/30" />
             Text-to-image models only
         </label>
+        <p class="text-xs text-text-secondary mt-1">Most models beyond SD 1.x/SDXL come as separate parts — a diffusion model, a VAE and text encoders, often from different repos. Show Files on a repo of a known model family lists what it needs, what you already have, and where to get the rest.</p>
         <p class="text-xs text-text-secondary mt-1">Untick to find standalone VAEs and text encoders, which are often untagged. Diffusers-layout repos list each component's files under their subfolders (<span class="font-mono">vae/</span>, <span class="font-mono">text_encoder/</span>, …); stable-diffusion.cpp needs single-file checkpoints or components, not sharded <span class="font-mono">-0000N-of-0000N</span> files.</p>
     }
 </div>
@@ -145,27 +146,128 @@
             container.innerHTML = '<p class="text-xs text-text-secondary">Loading files…</p>';
 
             const resp = await fetch('?handler=Files&format=' + format + '&repoId=' + encodeURIComponent(repoId));
-            const files = await resp.json();
+            const data = await resp.json();
 
-            if (!Array.isArray(files) || files.length === 0) {
-                container.innerHTML = `<p class="text-xs text-text-secondary">No ${extension} files found in this repo.</p>`;
+            container.innerHTML = '';
+            if (!resp.ok || data.error) {
+                const p = document.createElement('p');
+                p.className = 'text-xs text-text-secondary';
+                p.textContent = data.error || 'Failed to load files.';
+                container.appendChild(p);
+                return;
+            }
+            if (data.guide) container.appendChild(buildGuide(data.guide));
+
+            const files = data.files || [];
+            if (files.length === 0) {
+                const p = document.createElement('p');
+                p.className = 'text-xs text-text-secondary';
+                p.textContent = `No ${extension} files found in this repo.`;
+                container.appendChild(p);
                 return;
             }
 
-            container.innerHTML = '';
-            for (const file of files) {
+            // Diffusion repos mix the model with its VAE/encoders: group the files by what they are.
+            const roles = [...new Set(files.map(f => f.role).filter(Boolean))];
+            const grouped = roles.length > 1;
+            const sorted = grouped
+                ? [...files].sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role))
+                : files;
+            let lastRole;
+            for (const file of sorted) {
+                if (grouped && file.role !== lastRole) {
+                    lastRole = file.role;
+                    const heading = document.createElement('p');
+                    heading.className = 'text-xs font-semibold text-text-secondary uppercase tracking-wide pt-3';
+                    heading.textContent = file.role;
+                    container.appendChild(heading);
+                }
                 const row = document.createElement('div');
-                row.className = 'flex items-center justify-between text-sm border-t border-gray-700/30 pt-2';
+                row.className = 'flex items-center justify-between gap-3 text-sm border-t border-gray-700/30 pt-2';
                 row.innerHTML = `
-                    <span class="text-text-primary filename-label"></span>
-                    <button type="button" class="download-btn text-xs px-3 py-1 rounded-md bg-neon-green/10 text-neon-green hover:bg-neon-green/20 transition-all font-medium">Download</button>
+                    <span class="flex items-center gap-2 min-w-0">
+                        <span class="role-badge hidden shrink-0 text-[10px] px-1.5 py-0.5 rounded border bg-purple-500/10 text-purple-300 border-purple-500/20"></span>
+                        <span class="text-text-primary filename-label break-all"></span>
+                    </span>
+                    <span class="in-library hidden shrink-0 text-xs px-3 py-1 rounded-md bg-gray-700/30 text-text-secondary">In library</span>
+                    <button type="button" class="download-btn shrink-0 text-xs px-3 py-1 rounded-md bg-neon-green/10 text-neon-green hover:bg-neon-green/20 transition-all font-medium">Download</button>
                 `;
                 row.querySelector('.filename-label').textContent = file.parts > 1
                     ? `${file.filename} (${file.parts} parts, ${formatBytes(file.sizeBytes)} — all downloaded together)`
                     : `${file.filename} (${formatBytes(file.sizeBytes)})`;
-                row.querySelector('.download-btn').addEventListener('click', () => downloadFile(repoId, file.filename));
+                if (file.role && !grouped) {
+                    const badge = row.querySelector('.role-badge');
+                    badge.textContent = file.role;
+                    badge.classList.remove('hidden');
+                }
+                if (file.inLibrary) {
+                    row.querySelector('.in-library').classList.remove('hidden');
+                    row.querySelector('.download-btn').remove();
+                } else {
+                    row.querySelector('.download-btn').addEventListener('click', () => downloadFile(repoId, file.filename));
+                }
                 container.appendChild(row);
             }
+        }
+
+        const ROLE_ORDER = ['Model', 'VAE', 'CLIP-L', 'CLIP-G', 'T5-XXL', 'LLM text encoder', 'Text encoder', 'TAESD', 'LoRA', 'Not loadable on its own'];
+
+        // The checklist of parts this repo's model family needs: each one already in the library,
+        // in this repo (listed below, or on the other format's tab), or to get from another repo.
+        function buildGuide(guide) {
+            const box = document.createElement('div');
+            box.className = 'rounded-lg border border-neon-cyan/20 bg-neon-cyan/5 p-3 mb-2 space-y-2';
+            box.innerHTML = `
+                <p class="text-sm text-text-primary"><span class="font-medium family-name"></span> <span class="text-text-secondary">— the files a stable-diffusion.cpp preset needs</span></p>
+                <ul class="space-y-2 parts"></ul>
+            `;
+            box.querySelector('.family-name').textContent = guide.family;
+            const list = box.querySelector('.parts');
+            for (const part of guide.parts) {
+                const li = document.createElement('li');
+                li.className = 'flex gap-2 text-sm';
+                li.innerHTML = `
+                    <span class="status shrink-0 w-4 text-center font-bold"></span>
+                    <div class="min-w-0">
+                        <span class="text-text-primary part-label"></span>
+                        <span class="optional hidden text-xs text-text-secondary">(optional)</span>
+                        <p class="detail text-xs text-text-secondary break-words"></p>
+                    </div>
+                `;
+                li.querySelector('.part-label').textContent = part.label;
+                if (!part.required) li.querySelector('.optional').classList.remove('hidden');
+                const status = li.querySelector('.status');
+                const detail = li.querySelector('.detail');
+
+                if (part.inLibrary) {
+                    status.textContent = '✓';
+                    status.classList.add('text-neon-green');
+                    detail.textContent = `In your library: ${part.inLibrary}`;
+                } else if (part.repoFiles.length) {
+                    status.textContent = '↓';
+                    status.classList.add('text-neon-cyan');
+                    const otherTab = part.repoFiles.every(f => !f.toLowerCase().endsWith(extension));
+                    const files = part.repoFiles.length === 1 ? part.repoFiles[0] : `${part.repoFiles.length} files, pick one`;
+                    detail.textContent = `In this repo${otherTab ? ' (on the other format tab)' : ''}: ${files}. ${part.hint}`;
+                } else {
+                    status.textContent = '○';
+                    status.classList.add(part.required ? 'text-amber-400' : 'text-text-secondary');
+                    detail.append('Get it from ');
+                    const link = document.createElement('a');
+                    link.className = 'text-neon-cyan hover:underline font-mono';
+                    link.href = part.sourceUrl;
+                    link.textContent = part.sourceRepo;
+                    detail.append(link, `: ${part.hint}`);
+                }
+                list.appendChild(li);
+            }
+            if (guide.note) {
+                const note = document.createElement('p');
+                note.className = 'text-xs text-text-secondary';
+                note.textContent = guide.note;
+                box.appendChild(note);
+            }
+            return box;
         }
 
         function formatDate(iso) {

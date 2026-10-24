@@ -4,16 +4,19 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Services;
+using LR.Core.Services.EngineBuilds;
 
 namespace LR.Application.Pages.Features.Models;
 
 public class ModelsHuggingFaceModel : PageModel
 {
     private readonly IHuggingFaceClient _hfClient;
+    private readonly IModelLibrary _modelLibrary;
 
-    public ModelsHuggingFaceModel(IHuggingFaceClient hfClient)
+    public ModelsHuggingFaceModel(IHuggingFaceClient hfClient, IModelLibrary modelLibrary)
     {
         _hfClient = hfClient;
+        _modelLibrary = modelLibrary;
     }
 
     /// <summary>
@@ -36,12 +39,16 @@ public class ModelsHuggingFaceModel : PageModel
     /// Link to this page for another file from <paramref name="repoId"/>, opened on the tab matching
     /// the format of <paramref name="filePath"/> (a model already downloaded from that repo).
     /// </summary>
-    public static string BrowseRepoUrl(string repoId, string? filePath)
+    public static string BrowseRepoUrl(string repoId, string? filePath) =>
+        BrowseRepoUrl(repoId, filePath?.EndsWith(HfModelFormat.Safetensors.FileExtension(), StringComparison.OrdinalIgnoreCase) == true
+            ? HfModelFormat.Safetensors
+            : HfModelFormat.Gguf);
+
+    /// <summary>Link to this page listing <paramref name="repoId"/>'s files on the <paramref name="format"/> tab.</summary>
+    public static string BrowseRepoUrl(string repoId, HfModelFormat format)
     {
         var url = $"/Features/Models/HuggingFace?repoId={Uri.EscapeDataString(repoId)}";
-        return filePath?.EndsWith(HfModelFormat.Safetensors.FileExtension(), StringComparison.OrdinalIgnoreCase) == true
-            ? url + $"&format={HfModelFormat.Safetensors}"
-            : url;
+        return format == HfModelFormat.Safetensors ? url + $"&format={format}" : url;
     }
 
     public async Task<IActionResult> OnGetSearchAsync(string q, HfModelFormat format, bool textToImage, CancellationToken ct)
@@ -67,22 +74,67 @@ public class ModelsHuggingFaceModel : PageModel
 
         try
         {
+            var detail = await _hfClient.GetRepoDetailAsync(repoId, ct);
+            if (detail is null)
+                return new JsonResult(new { files = Array.Empty<object>(), guide = (object?)null });
+
+            var library = await _modelLibrary.GetAllAsync();
+            var downloaded = library
+                .Where(m => string.Equals(m.HfRepoId, repoId, StringComparison.OrdinalIgnoreCase) && m.HfFilename is not null)
+                .Select(m => m.HfFilename!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             // A split GGUF model is offered once, as its first shard with the size of all of them; downloading
             // it fetches every shard (ModelDownloadService). Safetensors files never match the shard pattern.
-            var files = await _hfClient.ListModelFilesAsync(repoId, format, ct);
+            var files = detail.Siblings
+                .Where(f => f.Filename.EndsWith(format.FileExtension(), StringComparison.OrdinalIgnoreCase))
+                .OrderBy(f => f.Filename)
+                .ToList();
             var sizes = files.ToDictionary(f => f.Filename, f => f.SizeBytes, StringComparer.OrdinalIgnoreCase);
-            return new JsonResult(files
-                .Where(f => SplitGguf.Parse(f.Filename) is not { Index: > 1 })
-                .Select(f =>
-                {
-                    var shards = SplitGguf.AllShards(f.Filename);
-                    return new
+
+            // Diffusion repos often hold only some of the parts a model needs; the guide says which,
+            // looking at both formats since e.g. a GGUF diffusion model pairs with safetensors VAEs.
+            var modelFiles = detail.Siblings
+                .Select(f => f.Filename)
+                .Where(f => Enum.GetValues<HfModelFormat>().Any(x => f.EndsWith(x.FileExtension(), StringComparison.OrdinalIgnoreCase)))
+                .Where(f => SplitGguf.Parse(f) is not { Index: > 1 })
+                .ToList();
+            var guide = DiffusionModelGuide.ForRepo(repoId, modelFiles, library);
+
+            return new JsonResult(new
+            {
+                files = files
+                    .Where(f => SplitGguf.Parse(f.Filename) is not { Index: > 1 })
+                    .Select(f =>
                     {
-                        filename = f.Filename,
-                        sizeBytes = shards.All(s => sizes.GetValueOrDefault(s) is not null) ? shards.Sum(s => sizes[s]) : f.SizeBytes,
-                        parts = shards.Count,
-                    };
-                }));
+                        var shards = SplitGguf.AllShards(f.Filename);
+                        return new
+                        {
+                            filename = f.Filename,
+                            sizeBytes = shards.All(s => sizes.GetValueOrDefault(s) is not null) ? shards.Sum(s => sizes[s]) : f.SizeBytes,
+                            parts = shards.Count,
+                            role = guide is not null || format == HfModelFormat.Safetensors
+                                ? DiffusionModelGuide.Label(DiffusionModelGuide.ClassifyFile(repoId, f.Filename))
+                                : null,
+                            inLibrary = downloaded.Contains(f.Filename),
+                        };
+                    }),
+                guide = guide is not { } g ? null : new
+                {
+                    family = g.Family.Name,
+                    note = g.Family.Note,
+                    parts = g.Parts.Select(p => new
+                    {
+                        label = p.Part.Label,
+                        required = p.Part.Required,
+                        repoFiles = p.RepoFiles,
+                        inLibrary = p.InLibrary?.Name,
+                        sourceRepo = p.Part.SourceRepo,
+                        sourceUrl = BrowseRepoUrl(p.Part.SourceRepo, p.Part.SourceFormat),
+                        hint = p.Part.Hint,
+                    }),
+                },
+            });
         }
         catch (Exception ex)
         {
