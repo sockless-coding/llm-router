@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
+using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Services.EngineBuilds;
 
@@ -16,9 +17,11 @@ namespace LR.Providers.StableDiffusionCpp;
 /// OpenAI-compatible <c>/v1/images/generations</c> (plus <c>/sdapi/v1/*</c> and its native
 /// <c>/sdcpp/v1/*</c>). Launch arguments come from <see cref="StableDiffusionPresetSettings"/>. It has
 /// no llama.cpp-style <c>/health</c>, <c>/props</c> or <c>/slots</c>; health is its <c>/v1/models</c>,
-/// and it generates one image job at a time, so the router sends it one request at a time.
+/// and it generates one image job at a time, so the router sends it one request at a time. The native
+/// async job API (image and video jobs with progress previews) is exposed through
+/// <see cref="IGenerationJobProvider"/> for the Playground.
 /// </summary>
-public partial class StableDiffusionCppProvider : ManagedServerProviderBase
+public partial class StableDiffusionCppProvider : ManagedServerProviderBase, IGenerationJobProvider
 {
     public override ServerEngine Engine => ServerEngine.StableDiffusionCpp;
 
@@ -91,6 +94,67 @@ public partial class StableDiffusionCppProvider : ManagedServerProviderBase
 
     protected override string PrepareRawRequestPayload(string endpoint, string payload) =>
         endpoint == ImageGenerationsEndpoint ? ToSdCppImageRequest(payload) : payload;
+
+    public async Task<string?> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var (status, body) = await SendServerRequestAsync(HttpMethod.Get, "/sdcpp/v1/capabilities", null, cancellationToken);
+            return IsSuccess(status) ? body : null;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<string> SubmitJobAsync(GenerationJobKind kind, string payload, CancellationToken cancellationToken = default)
+    {
+        var path = kind == GenerationJobKind.Video ? "/sdcpp/v1/vid_gen" : "/sdcpp/v1/img_gen";
+        var body = await SendJobRequestAsync(HttpMethod.Post, path, payload, cancellationToken);
+        return JsonNode.Parse(body)?["id"]?.GetValue<string>()
+            ?? throw new InvalidOperationException($"sd-server accepted the job but returned no id: {body}");
+    }
+
+    public Task<string> GetJobAsync(string jobId, CancellationToken cancellationToken = default) =>
+        SendJobRequestAsync(HttpMethod.Get, $"/sdcpp/v1/jobs/{Uri.EscapeDataString(jobId)}", null, cancellationToken);
+
+    public Task CancelJobAsync(string jobId, CancellationToken cancellationToken = default) =>
+        SendJobRequestAsync(HttpMethod.Post, $"/sdcpp/v1/jobs/{Uri.EscapeDataString(jobId)}/cancel", "{}", cancellationToken);
+
+    /// <summary>
+    /// A native-API call whose failure surfaces sd-server's own reason (<c>{"error": "..."}</c>, e.g.
+    /// "loaded model does not support vid_gen") rather than the raw response.
+    /// </summary>
+    private async Task<string> SendJobRequestAsync(HttpMethod method, string path, string? payload, CancellationToken cancellationToken)
+    {
+        var (status, body) = await SendServerRequestAsync(method, path, payload, cancellationToken);
+        if (IsSuccess(status))
+            return body;
+
+        await LogProviderMessage(ServerLogLevel.Warning, $"Request to {path} failed: {(int)status} - {body}");
+        throw new HttpRequestException(NativeErrorMessage(body) ?? $"sd-server returned {(int)status} for {path}.", null, status);
+    }
+
+    /// <summary>The <c>error</c> text of an sd-server error body (a string, or an object with a <c>message</c>).</summary>
+    public static string? NativeErrorMessage(string body)
+    {
+        try
+        {
+            return JsonNode.Parse(body)?["error"] switch
+            {
+                JsonValue v when v.TryGetValue<string>(out var text) => text,
+                JsonObject o => o["message"]?.GetValue<string>(),
+                _ => null,
+            };
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsSuccess(System.Net.HttpStatusCode status) => (int)status is >= 200 and < 300;
 
     /// <summary>
     /// Turns an OpenAI <c>/v1/images/generations</c> body into what sd-server takes: drops fields it

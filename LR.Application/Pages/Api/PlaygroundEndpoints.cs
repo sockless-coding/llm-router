@@ -120,6 +120,9 @@ public static class PlaygroundEndpoints
             return Results.Json(new { id = run.Id, settingsHash = run.SettingsHash });
         });
 
+        // Image and video presets (the Generate page).
+        group.MapPlaygroundGenerationEndpoints();
+
         group.MapPost("/runs/delete", async (DeleteRunsInput input, LRDbContext db) =>
         {
             var deleted = await db.PlaygroundRuns.Where(r => input.Ids.Contains(r.Id)).ExecuteDeleteAsync();

@@ -196,4 +196,16 @@ public class StableDiffusionCppTests
         Assert.Equal(4, extra["sample_params"]!["sample_steps"]!.GetValue<int>());
         Assert.Equal(1.0, extra["sample_params"]!["guidance"]!["txt_cfg"]!.GetValue<double>());
     }
+
+    // --- native job API errors ---
+
+    [Theory]
+    [InlineData("""{"error":"loaded model does not support vid_gen"}""", "loaded model does not support vid_gen")]
+    [InlineData("""{"error":{"code":"queue_full","message":"job queue is full"}}""", "job queue is full")]
+    [InlineData("""{"status":"failed"}""", null)]
+    [InlineData("not json", null)]
+    public void NativeErrorMessage_ReadsStringOrObjectError(string body, string? expected)
+    {
+        Assert.Equal(expected, StableDiffusionCppProvider.NativeErrorMessage(body));
+    }
 }

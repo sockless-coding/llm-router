@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -1188,6 +1189,20 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
         var request = new HttpRequestMessage(method, $"{ServerUrl}{path}");
         ApplyRequestHeaders(request);
         return request;
+    }
+
+    /// <summary>
+    /// Sends <paramref name="method"/> <paramref name="path"/> (with an optional JSON body) to the
+    /// running server and returns the status and response body, whatever the status — for
+    /// engine-specific APIs beyond <see cref="SendRawRequestAsync"/>, whose providers word the errors.
+    /// </summary>
+    protected async Task<(HttpStatusCode Status, string Body)> SendServerRequestAsync(HttpMethod method, string path, string? jsonBody, CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(method, path);
+        if (jsonBody is not null)
+            request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(cancellationToken));
     }
 
     /// <summary>
