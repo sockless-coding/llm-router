@@ -81,7 +81,7 @@ public class EngineActionsModel : PageModel
             var name = string.IsNullOrWhiteSpace(Name) ? null : Name;
             var id = Engine == ServerEngine.Strata
                 ? await _buildService.StartStrataReleaseInstallAsync(tag, Asset, name)
-                : await _buildService.StartReleaseInstallAsync(Backend, tag, name);
+                : await _buildService.StartReleaseInstallAsync(Engine ?? ServerEngine.LlamaCpp, Backend, tag, name);
             return new JsonResult(new { success = true, buildId = id, message = "Install started." });
         }
         catch (Exception ex)

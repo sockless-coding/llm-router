@@ -21,10 +21,10 @@ public interface IRequestQueueService
     /// <summary>
     /// Try to dequeue the oldest pending request that can be served by a server whose active
     /// preset is <paramref name="activePresetId"/>. A request with no resolved preset (unknown
-    /// model) matches any server. Requests that don't match are left in the queue in their
+    /// model) matches any server of <paramref name="modality"/>. Requests that don't match are left in the queue in their
     /// original relative order. Returns true if a request was dequeued.
     /// </summary>
-    bool TryDequeueMatching(Guid? activePresetId, out (RouteRequest Request, TaskCompletionSource<RouteResponse> Tcs) item);
+    bool TryDequeueMatching(Guid? activePresetId, out (RouteRequest Request, TaskCompletionSource<RouteResponse> Tcs) item, EngineModality modality = EngineModality.Text);
 
     /// <summary>
     /// Check if there are any pending requests in the queue.

@@ -19,7 +19,7 @@
     }
     else
     {
-        <p class="text-text-secondary text-sm">Prebuilt llama.cpp releases for <span class="text-text-primary font-mono">@Model.HostOs-@Model.HostArch</span></p>
+        <p class="text-text-secondary text-sm">Prebuilt @Model.Profile?.DisplayName releases for <span class="text-text-primary font-mono">@Model.HostOs-@Model.HostArch</span></p>
     }
 </div>
 
@@ -135,7 +135,7 @@
                     <div class="flex flex-wrap items-center gap-2">
                         @foreach (var backend in backends)
                         {
-                            <button type="button" onclick="installRelease('@ServerEngine.LlamaCpp', '@backend', '@release.TagName')"
+                            <button type="button" onclick="installRelease('@Model.Engine', '@backend', '@release.TagName')"
                                     class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">
                                 Install @backend
                             </button>

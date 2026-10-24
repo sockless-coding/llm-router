@@ -2,10 +2,15 @@
 @inject LR.Core.Interfaces.IEngineCatalog EngineCatalog
 @using LR.Core.Services.EngineBuilds
 @{
-    // Which engine each server runs: a Strata server shows only Identity and the Strata section.
-    var engineByServerJson = System.Text.Json.JsonSerializer.Serialize(
-        Model.Servers.ToDictionary(s => s.Id.ToString(), s => s.Engine.ToString()));
+    // The settings section of each server's engine: an engine with its own section (Strata,
+    // stable-diffusion.cpp) shows only Identity and that section; llama.cpp ("") shows the typed sections.
+    var sectionByServerJson = System.Text.Json.JsonSerializer.Serialize(
+        Model.Servers.ToDictionary(s => s.Id.ToString(), s => EngineCatalog.Get(s.Engine)?.PresetFormSection ?? ""));
+    var engineSectionsJson = System.Text.Json.JsonSerializer.Serialize(
+        EngineCatalog.All.Select(e => e.PresetFormSection).OfType<string>().Distinct());
     string Strata(string key) => Model.ViewModel.EngineSettings.GetValueOrDefault(key) ?? "";
+    string Sd(string key) => Model.ViewModel.EngineSettings.GetValueOrDefault(key) ?? "";
+    bool SdFlag(string key) => bool.TryParse(Sd(key), out var on) && on;
     // What the model path means differs per engine (a GGUF for llama.cpp, a run config for Strata);
     // the help under the manual path follows the selected server.
     var modelPathHelpJson = System.Text.Json.JsonSerializer.Serialize(
@@ -16,6 +21,32 @@
     var detectedVarsJson = System.Text.Json.JsonSerializer.Serialize(
         Model.DetectedTemplateVariables.Select(v => new { name = v.Name, literalValues = v.LiteralValues })
     ).Replace("</", "<\\/");
+    // For each library model that is a known diffusion family's main model: the VAE/encoders from the
+    // library it pairs with, the family's generation defaults, and what's still missing. Picking the
+    // model fills them into the Diffusion section.
+    var sdSuggestionsJson = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        labels = StableDiffusionPresetSettings.ComponentFiles.ToDictionary(c => c.Key, c => c.Label),
+        models = Model.Models
+            .Select(m => (m.Id, Suggestion: DiffusionModelGuide.ForPreset(m, Model.Models)))
+            .Where(x => x.Suggestion is not null)
+            .ToDictionary(x => x.Id.ToString(), x => new
+            {
+                family = x.Suggestion!.Family.Name,
+                modelRole = x.Suggestion.Family.ModelRole,
+                files = x.Suggestion.Files,
+                defaults = x.Suggestion.Family.Defaults,
+                note = x.Suggestion.Family.Note,
+                missing = x.Suggestion.Missing.Select(p => new
+                {
+                    key = p.SettingKey,
+                    label = p.Label,
+                    sourceRepo = p.SourceRepo,
+                    sourceUrl = LR.Application.Pages.Features.Models.ModelsHuggingFaceModel.BrowseRepoUrl(p.SourceRepo, p.SourceFormat),
+                    hint = p.Hint,
+                }),
+            }),
+    }).Replace("</", "<\\/");
 }
 
         <!-- ==================== IDENTITY ==================== -->
@@ -136,21 +167,17 @@
                     const helpByServer = @Html.Raw(modelPathHelpJson);
                     const serverSelect = document.getElementById('ViewModel_ServerInstanceId');
                     const help = document.getElementById('model-path-help');
-                    const engineByServer = @Html.Raw(engineByServerJson);
+                    const sectionByServer = @Html.Raw(sectionByServerJson);
+                    const engineSections = new Set(@Html.Raw(engineSectionsJson));
                     // Sections that don't apply to the selected server's engine are hidden (their
-                    // values are kept and still saved, so switching back loses nothing).
+                    // values are kept and still saved, so switching back loses nothing). An engine
+                    // with its own section shows just that one; llama.cpp shows every other section.
                     const update = () => {
                         help.textContent = helpByServer[serverSelect.value] || '';
-                        const strata = engineByServer[serverSelect.value] === 'Strata';
-                        document.querySelectorAll('[id^="section-"]').forEach(el => {
-                            if (el.id === 'section-identity') return;
-                            el.classList.toggle('hidden', el.id === 'section-strata' ? !strata : strata);
-                        });
-                        document.querySelectorAll('.preset-nav-link').forEach(a => {
-                            const id = a.dataset.section;
-                            if (id === 'section-identity') return;
-                            a.classList.toggle('hidden', id === 'section-strata' ? !strata : strata);
-                        });
+                        const own = sectionByServer[serverSelect.value] || '';
+                        const visible = id => id === 'section-identity' || (own ? id === own : !engineSections.has(id));
+                        document.querySelectorAll('[id^="section-"]').forEach(el => el.classList.toggle('hidden', !visible(el.id)));
+                        document.querySelectorAll('.preset-nav-link').forEach(a => a.classList.toggle('hidden', !visible(a.dataset.section)));
                     };
                     serverSelect.addEventListener('change', update);
                     // Called again once the rest of the form and the section nav exist (end of _PresetFormNav).
@@ -224,6 +251,271 @@
                     <p class="text-xs text-text-secondary mt-1">Each extra slot leaves fewer experts in VRAM.</p>
                 </div>
             </div>
+        </div>
+
+        <!-- ==================== DIFFUSION (stable-diffusion.cpp servers only) ==================== -->
+        <div id="section-diffusion" class="hidden bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-6 scroll-mt-24">
+            <div class="space-y-1">
+                <h2 class="text-lg font-semibold text-text-primary">Diffusion</h2>
+                <p class="text-xs text-text-secondary">
+                    How stable-diffusion.cpp loads this preset's model, and the defaults it generates with. Clients reach it at
+                    <span class="font-mono">POST /v1/images/generations</span> with this preset's name as the model; a request's own
+                    <span class="font-mono">size</span>, <span class="font-mono">n</span>, <span class="font-mono">seed</span>, <span class="font-mono">steps</span>,
+                    <span class="font-mono">cfg_scale</span>, <span class="font-mono">negative_prompt</span>… override the defaults below. Leave a setting blank for stable-diffusion.cpp's default.
+                </p>
+            </div>
+
+            <datalist id="sd-model-files">
+                @foreach (var m in Model.Models)
+                {
+                    var role = DiffusionModelGuide.ClassifyFile(m);
+                    <option value="@m.FilePath">@m.Name@(role is DiffusionFileRole.Model or DiffusionFileRole.Other ? "" : $" ({DiffusionModelGuide.Label(role)})")</option>
+                }
+            </datalist>
+
+            <div class="space-y-4">
+                <h3 class="text-xs font-semibold text-text-secondary uppercase tracking-wide">Model files</h3>
+                <div id="sd-suggestion" class="hidden rounded-lg border border-neon-cyan/20 bg-neon-cyan/5 p-3 space-y-1.5 text-sm"></div>
+                <script id="sd-suggestions-data" type="application/json">@Html.Raw(sdSuggestionsJson)</script>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="sd-model-role" class="block text-sm font-medium text-text-secondary mb-1">Model is</label>
+                        <select id="sd-model-role" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.ModelRole]" class="@selCls">
+                            <option value="">Detect (a diffusion model when a VAE or text encoder is set)</option>
+                            <option value="@StableDiffusionPresetSettings.RoleCheckpoint" selected="@(Sd(StableDiffusionPresetSettings.ModelRole) == StableDiffusionPresetSettings.RoleCheckpoint)">A full checkpoint (-m)</option>
+                            <option value="@StableDiffusionPresetSettings.RoleDiffusion" selected="@(Sd(StableDiffusionPresetSettings.ModelRole) == StableDiffusionPresetSettings.RoleDiffusion)">A standalone diffusion model (--diffusion-model)</option>
+                        </select>
+                        <p class="text-xs text-text-secondary mt-1">SD 1.x/2.x/SDXL checkpoints carry their own VAE and encoders; Flux, SD3, Qwen-Image and Z-Image need them set below.</p>
+                    </div>
+                    <div>
+                        <label for="sd-lora-dir" class="block text-sm font-medium text-text-secondary mb-1">LoRA folder</label>
+                        <input id="sd-lora-dir" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.LoraDir]" value="@Sd(StableDiffusionPresetSettings.LoraDir)"
+                               placeholder="C:\models\loras" class="@inpCls" />
+                        <p class="text-xs text-text-secondary mt-1">Where requests' <span class="font-mono">lora</span> entries are looked up.</p>
+                    </div>
+                    @foreach (var (key, flag, label) in StableDiffusionPresetSettings.ComponentFiles)
+                    {
+                        var id = "sd-" + key[(key.IndexOf('.') + 1)..].ToLowerInvariant();
+                        <div>
+                            <label for="@id" class="block text-sm font-medium text-text-secondary mb-1">@label <span class="font-mono text-xs">@flag</span></label>
+                            <input id="@id" name="ViewModel.EngineSettings[@key]" value="@Sd(key)" list="sd-model-files"
+                                   placeholder="pick from the library or enter a path" class="@inpCls" />
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <h3 class="text-xs font-semibold text-text-secondary uppercase tracking-wide">Generation defaults</h3>
+                <datalist id="sd-sizes">
+                    @foreach (var size in StableDiffusionPresetSettings.SuggestedSizes)
+                    {
+                        <option value="@size"></option>
+                    }
+                </datalist>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                        <label for="sd-width" class="block text-sm font-medium text-text-secondary mb-1">Width</label>
+                        <input id="sd-width" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.Width]" value="@Sd(StableDiffusionPresetSettings.Width)"
+                               list="sd-sizes" inputmode="numeric" placeholder="512" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label for="sd-height" class="block text-sm font-medium text-text-secondary mb-1">Height</label>
+                        <input id="sd-height" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.Height]" value="@Sd(StableDiffusionPresetSettings.Height)"
+                               list="sd-sizes" inputmode="numeric" placeholder="512" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label for="sd-steps" class="block text-sm font-medium text-text-secondary mb-1">Steps</label>
+                        <input id="sd-steps" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.Steps]" value="@Sd(StableDiffusionPresetSettings.Steps)"
+                               type="number" min="1" placeholder="20" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label for="sd-seed" class="block text-sm font-medium text-text-secondary mb-1">Seed</label>
+                        <input id="sd-seed" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.Seed]" value="@Sd(StableDiffusionPresetSettings.Seed)"
+                               type="number" placeholder="42 (negative = random)" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label for="sd-cfg" class="block text-sm font-medium text-text-secondary mb-1">CFG scale</label>
+                        <input id="sd-cfg" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.CfgScale]" value="@Sd(StableDiffusionPresetSettings.CfgScale)"
+                               type="number" step="0.1" min="0" placeholder="7.0" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label for="sd-guidance" class="block text-sm font-medium text-text-secondary mb-1">Distilled guidance</label>
+                        <input id="sd-guidance" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.Guidance]" value="@Sd(StableDiffusionPresetSettings.Guidance)"
+                               type="number" step="0.1" min="0" placeholder="3.5 (Flux)" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label for="sd-flow-shift" class="block text-sm font-medium text-text-secondary mb-1">Flow shift</label>
+                        <input id="sd-flow-shift" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.FlowShift]" value="@Sd(StableDiffusionPresetSettings.FlowShift)"
+                               type="number" step="0.1" min="0" placeholder="model default" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label for="sd-clip-skip" class="block text-sm font-medium text-text-secondary mb-1">CLIP skip</label>
+                        <input id="sd-clip-skip" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.ClipSkip]" value="@Sd(StableDiffusionPresetSettings.ClipSkip)"
+                               type="number" min="-1" placeholder="model default" class="@inpCls" />
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="sd-sampler" class="block text-sm font-medium text-text-secondary mb-1">Sampling method</label>
+                        <input id="sd-sampler" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.SamplingMethod]" value="@Sd(StableDiffusionPresetSettings.SamplingMethod)"
+                               list="sd-samplers" placeholder="model default (euler / euler_a)" class="@inpCls" />
+                        <datalist id="sd-samplers">
+                            @foreach (var v in StableDiffusionPresetSettings.SuggestedSamplingMethods)
+                            {
+                                <option value="@v"></option>
+                            }
+                        </datalist>
+                    </div>
+                    <div>
+                        <label for="sd-scheduler" class="block text-sm font-medium text-text-secondary mb-1">Scheduler</label>
+                        <input id="sd-scheduler" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.Scheduler]" value="@Sd(StableDiffusionPresetSettings.Scheduler)"
+                               list="sd-schedulers" placeholder="model default" class="@inpCls" />
+                        <datalist id="sd-schedulers">
+                            @foreach (var v in StableDiffusionPresetSettings.SuggestedSchedulers)
+                            {
+                                <option value="@v"></option>
+                            }
+                        </datalist>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="sd-negative" class="block text-sm font-medium text-text-secondary mb-1">Negative prompt</label>
+                        <textarea id="sd-negative" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.NegativePrompt]" rows="2"
+                                  placeholder="blurry, low quality" class="@inpCls text-sm">@Sd(StableDiffusionPresetSettings.NegativePrompt)</textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <h3 class="text-xs font-semibold text-text-secondary uppercase tracking-wide">Performance</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label for="sd-type" class="block text-sm font-medium text-text-secondary mb-1">Weight type</label>
+                        <input id="sd-type" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.WeightType]" value="@Sd(StableDiffusionPresetSettings.WeightType)"
+                               list="sd-types" placeholder="as stored in the files" class="@inpCls" />
+                        <datalist id="sd-types">
+                            @foreach (var v in StableDiffusionPresetSettings.SuggestedWeightTypes)
+                            {
+                                <option value="@v"></option>
+                            }
+                        </datalist>
+                        <p class="text-xs text-text-secondary mt-1">Quantizes on load — lower uses less VRAM.</p>
+                    </div>
+                    <div>
+                        <label for="sd-threads" class="block text-sm font-medium text-text-secondary mb-1">CPU threads</label>
+                        <input id="sd-threads" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.Threads]" value="@Sd(StableDiffusionPresetSettings.Threads)"
+                               type="number" min="-1" placeholder="physical cores" class="@inpCls" />
+                    </div>
+                    <div>
+                        <label for="sd-fa" class="block text-sm font-medium text-text-secondary mb-1">Flash attention</label>
+                        <select id="sd-fa" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.FlashAttention]" class="@selCls">
+                            <option value="">Default (auto)</option>
+                            <option value="on" selected="@(Sd(StableDiffusionPresetSettings.FlashAttention) == "on")">On</option>
+                            <option value="off" selected="@(Sd(StableDiffusionPresetSettings.FlashAttention) == "off")">Off</option>
+                            <option value="auto" selected="@(Sd(StableDiffusionPresetSettings.FlashAttention) == "auto")">Auto</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
+                    @foreach (var (key, label, help) in new[]
+                    {
+                        (StableDiffusionPresetSettings.OffloadToCpu, "Offload weights to CPU", "Keeps weights in RAM and moves each part to VRAM when it runs — big models on small GPUs."),
+                        (StableDiffusionPresetSettings.VaeTiling, "VAE tiling", "Decodes the image in tiles, cutting peak VRAM at large sizes."),
+                        (StableDiffusionPresetSettings.ClipOnCpu, "Text encoders on CPU", "Frees VRAM for the diffusion model; prompt encoding gets slower."),
+                        (StableDiffusionPresetSettings.VaeOnCpu, "VAE on CPU", "Frees VRAM; decoding gets much slower."),
+                        (StableDiffusionPresetSettings.Mmap, "Memory-map model files", "Maps the files instead of reading them into RAM."),
+                    })
+                    {
+                        <label class="flex items-start gap-2 text-sm text-text-secondary">
+                            <input type="checkbox" name="ViewModel.EngineSettings[@key]" value="true" checked="@SdFlag(key)"
+                                   class="mt-0.5 rounded border-gray-600/30 bg-cyber-bg-dark text-neon-magenta focus:ring-neon-magenta/30" />
+                            <span><span class="font-medium">@label</span><span class="block text-xs">@help</span></span>
+                        </label>
+                    }
+                </div>
+                <div>
+                    <label for="sd-extra" class="block text-sm font-medium text-text-secondary mb-1">Extra arguments</label>
+                    <input id="sd-extra" name="ViewModel.EngineSettings[@StableDiffusionPresetSettings.ExtraArgs]" value="@Sd(StableDiffusionPresetSettings.ExtraArgs)"
+                           placeholder="--backend te=cpu --max-vram 10" class="@inpCls font-mono text-sm" />
+                    <p class="text-xs text-text-secondary mt-1">Appended to the <span class="font-mono">sd-server</span> command line as is — for any option not above.</p>
+                </div>
+            </div>
+            <script>
+                (() => {
+                    const data = JSON.parse(document.getElementById('sd-suggestions-data').textContent);
+                    const section = document.getElementById('section-diffusion');
+                    const panel = document.getElementById('sd-suggestion');
+                    const modelSelect = document.getElementById('model-select');
+                    const serverSelect = document.getElementById('ViewModel_ServerInstanceId');
+                    const roleKey = '@StableDiffusionPresetSettings.ModelRole';
+                    const field = key => section.querySelector(`[name="ViewModel.EngineSettings[${key}]"]`);
+
+                    // A field is filled in only while it's empty or still holds what was filled in
+                    // last, so a value the user typed or saved is never overwritten.
+                    const isOurs = el => !el.value.trim() || el.value === el.dataset.autofilled;
+                    function fill(key, value) {
+                        const el = field(key);
+                        if (!el || !isOurs(el)) return false;
+                        el.value = value;
+                        el.dataset.autofilled = value;
+                        return true;
+                    }
+
+                    function render(suggestion, filled) {
+                        panel.replaceChildren();
+                        panel.classList.toggle('hidden', !suggestion);
+                        if (!suggestion) return;
+
+                        const line = (cls, ...parts) => {
+                            const p = document.createElement('p');
+                            p.className = cls;
+                            p.append(...parts);
+                            panel.appendChild(p);
+                            return p;
+                        };
+                        const strong = text => Object.assign(document.createElement('span'), { className: 'font-medium text-text-primary', textContent: text });
+                        line('text-text-secondary', strong(suggestion.family), suggestion.modelRole === 'checkpoint'
+                            ? ' checkpoint — loaded with -m.'
+                            : ' diffusion model — loaded with --diffusion-model, alongside the files below.');
+                        if (filled.length)
+                            line('text-xs text-text-secondary', 'Filled in from your library: ' + filled.join(', ') + '. Change any of them below.');
+                        for (const part of suggestion.missing) {
+                            if (field(part.key)?.value.trim()) continue;
+                            const link = Object.assign(document.createElement('a'), { className: 'text-neon-cyan hover:underline font-mono', href: part.sourceUrl, textContent: part.sourceRepo });
+                            line('text-xs text-amber-400', `Missing ${part.label}: download it from `, link, ` — ${part.hint}`);
+                        }
+                        if (suggestion.note) line('text-xs text-text-secondary', suggestion.note);
+                    }
+
+                    // Picking a model (or switching to a stable-diffusion.cpp server) fills in its companion
+                    // files, model role and recommended defaults, clearing what a previous pick filled in.
+                    function apply() {
+                        if (section.classList.contains('hidden')) return;
+                        const suggestion = data.models[modelSelect.value];
+                        section.querySelectorAll('[data-autofilled]').forEach(el => {
+                            if (el.value === el.dataset.autofilled) el.value = '';
+                            delete el.dataset.autofilled;
+                        });
+
+                        const filled = [];
+                        if (suggestion) {
+                            fill(roleKey, suggestion.modelRole);
+                            for (const [key, path] of Object.entries(suggestion.files))
+                                if (fill(key, path)) filled.push(data.labels[key] || key);
+                            for (const [key, value] of Object.entries(suggestion.defaults))
+                                fill(key, value);
+                        }
+                        render(suggestion, filled);
+                        // Refreshes the command preview and memory estimate.
+                        section.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+
+                    modelSelect?.addEventListener('change', apply);
+                    serverSelect?.addEventListener('change', apply);
+                    // On load nothing is filled in (an edited preset keeps what it has); only what's missing is shown.
+                    if (modelSelect) render(data.models[modelSelect.value], []);
+                })();
+            </script>
         </div>
 
         <!-- ==================== CORE SETTINGS (Always Visible) ==================== -->

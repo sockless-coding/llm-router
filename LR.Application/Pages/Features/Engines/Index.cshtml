@@ -103,7 +103,7 @@ else
                 if (result.success) location.reload(); else alert(result.message || 'Cancel failed.');
             };
 
-            // --- llama.cpp ---
+            // --- prebuilt/compiled builds (llama.cpp, stable-diffusion.cpp) ---
 
             window.deleteBuild = async function (id, name, usage) {
                 let msg = `Delete build "${name}"?`;

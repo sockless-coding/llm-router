@@ -31,6 +31,7 @@ public class OllamaHandler : IProtocolHandler
     private readonly IApiKeyRequestContext _apiKeyContext;
     private readonly ILogger<OllamaHandler> _logger;
     private readonly EmbeddingsGateway _embeddings;
+    private readonly IEngineCatalog _engines;
 
     public ApiProtocol Protocol => ApiProtocol.Ollama;
     public string PathPrefix => "/api";
@@ -47,7 +48,8 @@ public class OllamaHandler : IProtocolHandler
         GatewaySettings gatewaySettings,
         IApiKeyRequestContext apiKeyContext,
         ILogger<OllamaHandler> logger,
-        EmbeddingsGateway embeddings)
+        EmbeddingsGateway embeddings,
+        IEngineCatalog engines)
     {
         _serverManager = serverManager;
         _presetManager = presetManager;
@@ -61,11 +63,14 @@ public class OllamaHandler : IProtocolHandler
         _apiKeyContext = apiKeyContext;
         _logger = logger;
         _embeddings = embeddings;
+        _engines = engines;
     }
 
     public async Task<object> HandleListModelsAsync()
     {
-        var presets = await _presetManager.GetAllPresetsAsync();
+        // Ollama has no image models — only chat presets are listed.
+        var presets = (await _presetManager.GetAllPresetsAsync())
+            .OfModality(await _serverManager.GetAllInstancesAsync(), _engines, EngineModality.Text);
         var models = _apiKeyContext.FilterAllowed(presets).Select(p =>
         {
             var architecture = p.GgufArchitecture ?? "llama";
@@ -720,7 +725,7 @@ public class OllamaHandler : IProtocolHandler
 
         foreach (var instance in instances)
         {
-            if (instance.Status != ServerStatus.Running || !instance.IsHealthy)
+            if (instance.Status != ServerStatus.Running || !instance.IsHealthy || _engines.ModalityOf(instance.Engine) != EngineModality.Text)
                 continue;
 
             var presetId = instance.ActivePresetId;

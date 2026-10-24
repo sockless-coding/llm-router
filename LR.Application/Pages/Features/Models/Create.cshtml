@@ -45,7 +45,7 @@
     {
         <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 mt-6 space-y-3">
             <h2 class="text-lg font-semibold text-text-primary">@(string.IsNullOrEmpty(Model.Folder) ? "Found in Root Folder" : "Found in This Model's Folder")</h2>
-            <p class="text-sm text-text-secondary">These .gguf files were found @(string.IsNullOrEmpty(Model.Folder) ? "in your configured root folder" : "alongside this model") but aren't registered yet. Click one to fill in the path above.</p>
+            <p class="text-sm text-text-secondary">These model files were found @(string.IsNullOrEmpty(Model.Folder) ? "in your configured root folder" : "alongside this model") but aren't registered yet. Click one to fill in the path above.</p>
             <ul class="space-y-1">
                 @foreach (var candidate in Model.ScannedCandidates)
                 {
@@ -60,7 +60,7 @@
     }
     else if (!string.IsNullOrEmpty(Model.Folder))
     {
-        <p class="text-sm text-text-secondary mt-6">No other unregistered .gguf files found alongside this model — enter a path above (e.g. a file you haven't downloaded yet).</p>
+        <p class="text-sm text-text-secondary mt-6">No other unregistered model files found alongside this model — enter a path above (e.g. a file you haven't downloaded yet).</p>
     }
 </div>
 

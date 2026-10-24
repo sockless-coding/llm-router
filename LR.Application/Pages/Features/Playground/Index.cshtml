@@ -22,9 +22,28 @@
             <div class="flex flex-wrap items-center gap-2">
                 <label for="pgPreset" class="sr-only">Preset</label>
                 <select id="pgPreset" class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg pl-3 pr-8 py-1.5 text-sm font-medium max-w-[16rem]">
-                    @foreach (var preset in Model.Presets)
+                    @if (Model.ImagePresets.Any())
                     {
-                        <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
+                        <optgroup label="Chat">
+                            @foreach (var preset in Model.Presets)
+                            {
+                                <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
+                            }
+                        </optgroup>
+                        <!-- Picking one of these switches to the Generate page -->
+                        <optgroup label="Image &amp; video">
+                            @foreach (var preset in Model.ImagePresets)
+                            {
+                                <option value="@preset.Id" data-generate="true">@preset.Name</option>
+                            }
+                        </optgroup>
+                    }
+                    else
+                    {
+                        @foreach (var preset in Model.Presets)
+                        {
+                            <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
+                        }
                     }
                 </select>
                 <span id="pgPresetStatus" class="inline-flex items-center gap-1.5 text-xs whitespace-nowrap"></span>
@@ -59,7 +78,7 @@
         </div>
 
         <!-- Composer -->
-        <form id="pgForm" class="p-4 border-t border-gray-700/30">
+        <form id="pgForm" hx-boost="false" class="p-4 border-t border-gray-700/30">
             <div class="flex items-end gap-2 bg-cyber-surface border border-gray-600 rounded-xl px-3 py-2 focus-within:border-tint-cyan transition-colors">
                 <label for="pgInput" class="sr-only">Message</label>
                 <textarea id="pgInput" rows="1" placeholder="Message…"
@@ -177,7 +196,7 @@ function loadSettings() {
     try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch { }
     if (!s) return;
     // An explicit ?presetId= wins over the remembered preset.
-    if (s.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${s.preset}"]`))
+    if (s.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${s.preset}"]:not([data-generate])`))
         presetSelect.value = s.preset;
     $('pgLabel').value = s.label ?? '';
     $('pgRecord').checked = s.record ?? true;
@@ -709,7 +728,15 @@ document.querySelectorAll('aside input, aside select, aside textarea').forEach(e
     el.addEventListener('change', saveSettings);
     el.addEventListener('input', () => { syncOverrides(); syncRepeatHint(); });
 });
+let chatPresetId = presetSelect.value;
 presetSelect.addEventListener('change', () => {
+    if (presetSelect.selectedOptions[0]?.dataset.generate) {
+        const target = presetSelect.value;
+        presetSelect.value = chatPresetId; // so Back returns to the chat preset
+        location.href = '/Features/Playground/Generate?presetId=' + encodeURIComponent(target);
+        return;
+    }
+    chatPresetId = presetSelect.value;
     clearInterval(loadPoll);
     saveSettings();
     syncSendState();

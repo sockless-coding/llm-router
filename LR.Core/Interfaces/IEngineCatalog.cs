@@ -14,4 +14,7 @@ public interface IEngineCatalog
 
     /// <summary>The descriptor for <paramref name="engine"/>, or null if it isn't registered.</summary>
     IEngineDescriptor? Get(ServerEngine engine);
+
+    /// <summary>What <paramref name="engine"/> generates; <see cref="EngineModality.Text"/> for an unregistered engine.</summary>
+    EngineModality ModalityOf(ServerEngine engine) => Get(engine)?.Modality ?? EngineModality.Text;
 }

@@ -29,6 +29,12 @@ public sealed class BuildContext
     public required string Repo { get; init; }
     public required BackendType BackendType { get; init; }
 
+    /// <summary>
+    /// The engine being installed or compiled: whose prebuilt releases a release install downloads,
+    /// which server executable a finished build must contain, and how its version tags read.
+    /// </summary>
+    public EngineReleaseProfile Profile { get; init; } = LlamaCppReleaseProfile.Instance;
+
     /// <summary>Release tag to install; null means "latest". Release pipeline only.</summary>
     public string? ReleaseTag { get; set; }
 

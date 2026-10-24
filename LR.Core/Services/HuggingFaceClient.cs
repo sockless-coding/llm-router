@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 
@@ -30,9 +31,16 @@ public class HuggingFaceClient : IHuggingFaceClient
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<HfModelSummary>> SearchModelsAsync(string query, int limit = 20, CancellationToken ct = default)
+    public async Task<IReadOnlyList<HfModelSummary>> SearchModelsAsync(
+        string query,
+        HfModelFormat format,
+        string? pipelineTag = null,
+        int limit = 20,
+        CancellationToken ct = default)
     {
-        var url = $"{BaseUrl}/api/models?search={Uri.EscapeDataString(query)}&filter=gguf&limit={limit}";
+        var url = $"{BaseUrl}/api/models?search={Uri.EscapeDataString(query)}&filter={format.HubFilter()}&limit={limit}";
+        if (!string.IsNullOrWhiteSpace(pipelineTag))
+            url += $"&pipeline_tag={Uri.EscapeDataString(pipelineTag)}";
         using var request = await CreateRequestAsync(HttpMethod.Get, url, ct);
         using var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
@@ -52,14 +60,14 @@ public class HuggingFaceClient : IHuggingFaceClient
         return await response.Content.ReadFromJsonAsync<HfRepoDetail>(cancellationToken: ct);
     }
 
-    public async Task<IReadOnlyList<HfRepoFile>> ListGgufFilesAsync(string repoId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<HfRepoFile>> ListModelFilesAsync(string repoId, HfModelFormat format, CancellationToken ct = default)
     {
         var detail = await GetRepoDetailAsync(repoId, ct);
         if (detail is null)
             return Array.Empty<HfRepoFile>();
 
         return detail.Siblings
-            .Where(f => f.Filename.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            .Where(f => f.Filename.EndsWith(format.FileExtension(), StringComparison.OrdinalIgnoreCase))
             .OrderBy(f => f.Filename)
             .ToList();
     }
@@ -76,7 +84,8 @@ public class HuggingFaceClient : IHuggingFaceClient
         _logger.LogInformation("Downloading {RepoId}/{Filename}@{Revision} to {DestinationPath}", repoId, filename, revision, destinationPath);
         using var request = await CreateRequestAsync(HttpMethod.Get, url, ct);
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+            throw DownloadError(response, repoId, filename, hasToken: request.Headers.Authorization is not null);
 
         var totalBytes = response.Content.Headers.ContentLength;
         var resolvedSha = response.Headers.TryGetValues("x-repo-commit", out var shaValues)
@@ -116,6 +125,32 @@ public class HuggingFaceClient : IHuggingFaceClient
         if (!string.IsNullOrWhiteSpace(token))
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
+    }
+
+    /// <summary>
+    /// Turns a failed download response into a message the Models page can show as-is. Gated repos
+    /// (most image/video models) answer 401 without a token and 403 until the token's account has
+    /// accepted the license, so those get instructions instead of a bare status code.
+    /// </summary>
+    private HttpRequestException DownloadError(HttpResponseMessage response, string repoId, string filename, bool hasToken)
+    {
+        var hubMessage = response.Headers.TryGetValues("X-Error-Message", out var values) ? values.FirstOrDefault() : null;
+        _logger.LogWarning("Hugging Face returned {StatusCode} for {RepoId}/{Filename}: {HubMessage}", (int)response.StatusCode, repoId, filename, hubMessage);
+
+        var repoUrl = $"{BaseUrl}/{repoId}";
+        var message = response.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden when !hasToken =>
+                $"{repoId} is a gated model. Accept its license at {repoUrl}, then add a Hugging Face API token from that account in the Model Library settings.",
+            HttpStatusCode.Unauthorized =>
+                "Hugging Face rejected the API token. Check the token in the Model Library settings.",
+            HttpStatusCode.Forbidden =>
+                $"{repoId} is a gated model and your token's account doesn't have access. Accept its license at {repoUrl} (fine-grained tokens also need \"read access to public gated repos\").",
+            HttpStatusCode.NotFound =>
+                $"{filename} was not found in {repoId}.",
+            _ => $"Hugging Face returned {(int)response.StatusCode} ({response.ReasonPhrase}){(hubMessage is null ? "" : $": {hubMessage}")}.",
+        };
+        return new HttpRequestException(message, null, response.StatusCode);
     }
 
     private static string EscapeRepoId(string repoId) =>

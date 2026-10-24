@@ -16,4 +16,7 @@ public enum ServerEngine
 
     /// <summary>Strata (github.com/Niko1221/Strata) — MoE-offloading engine with a Python HTTP frontend.</summary>
     Strata = 2,
+
+    /// <summary>stable-diffusion.cpp (github.com/leejet/stable-diffusion.cpp) — image generation via <c>sd-server</c>.</summary>
+    StableDiffusionCpp = 3,
 }

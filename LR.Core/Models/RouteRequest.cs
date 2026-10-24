@@ -44,6 +44,13 @@ public class RouteRequest
     public string? BackendEndpoint { get; set; }
 
     /// <summary>
+    /// What the request asks to generate. Only servers whose engine produces this
+    /// (<see cref="LR.Core.Interfaces.IEngineDescriptor.Modality"/>) are routed to; naming a preset
+    /// of the other kind fails with <see cref="ModelModalityMismatchException"/>.
+    /// </summary>
+    public EngineModality Modality { get; set; } = EngineModality.Text;
+
+    /// <summary>
     /// The API key that authenticated the client for this request, if any. Carried through the
     /// routing/queue pipeline so statistics can be attributed per key even when the request is
     /// recorded from a background dispatch scope that never saw the HTTP auth context. Null when

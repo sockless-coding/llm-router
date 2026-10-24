@@ -1,0 +1,729 @@
+@page
+@model LR.Application.Pages.Features.Playground.GenerateModel
+@{
+    ViewData["Title"] = "Playground";
+    var fieldClass = "w-full bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-1.5 text-sm";
+    var labelClass = "block text-xs font-medium text-text-secondary mb-1";
+    var ghostBtn = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-600 text-text-secondary hover:text-neon-cyan hover:border-neon-cyan transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-text-secondary disabled:hover:border-gray-600";
+    var cardClass = "bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3";
+    var headingClass = "text-sm font-semibold text-neon-cyan uppercase tracking-wider";
+}
+
+<form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+<datalist id="genSizes">
+    @foreach (var size in LR.Core.Services.EngineBuilds.StableDiffusionPresetSettings.SuggestedSizes)
+    {
+        <option value="@size"></option>
+    }
+</datalist>
+
+<!-- Same frame as the chat Playground: the gallery scrolls on its own, composer and settings stay put. -->
+<div class="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-7rem)]">
+
+    <section class="flex-1 min-w-0 flex flex-col bg-cyber-card rounded-xl border border-gray-700/30 min-h-[70vh]" aria-label="Generate">
+
+        <div class="flex items-start gap-4 px-4 py-3 border-b border-gray-700/30">
+            <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                    <label for="genPreset" class="sr-only">Preset</label>
+                    <select id="genPreset" class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg pl-3 pr-8 py-1.5 text-sm font-medium max-w-[16rem]">
+                        <optgroup label="Image &amp; video">
+                            @foreach (var preset in Model.Presets)
+                            {
+                                <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
+                            }
+                        </optgroup>
+                        @if (Model.ChatPresets.Any())
+                        {
+                            <!-- Picking one of these switches to the chat Playground -->
+                            <optgroup label="Chat">
+                                @foreach (var preset in Model.ChatPresets)
+                                {
+                                    <option value="@preset.Id" data-chat="true">@preset.Name</option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                    <span id="genPresetStatus" class="inline-flex items-center gap-1.5 text-xs whitespace-nowrap"></span>
+                    <button type="button" id="genLoad" class="hidden text-xs px-2.5 py-1 rounded-md border border-tint-magenta text-neon-magenta hover:tint-magenta transition-colors disabled:opacity-50"
+                            title="Load this preset's model now, so the first generation isn't a cold start">Load model</button>
+                </div>
+                <p id="genPresetDetails" class="text-xs text-text-secondary truncate mt-1"></p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                <button type="button" id="genClear" class="@ghostBtn" title="Remove this session's results">Clear</button>
+            </div>
+        </div>
+
+        <div id="genGallery" class="flex-1 overflow-y-auto px-5 py-5 space-y-5" aria-live="polite">
+            <div id="genEmpty" class="h-full flex flex-col items-center justify-center text-center gap-2 text-text-secondary">
+                @if (!Model.Presets.Any())
+                {
+                    <span class="text-4xl" aria-hidden="true">🎨</span>
+                    <p class="text-sm">No image or video presets yet. Create one on a <a href="/Features/Servers/Index" class="text-neon-cyan underline">stable-diffusion.cpp server</a> to start generating.</p>
+                }
+                else
+                {
+                    <span class="text-4xl" aria-hidden="true">🎨</span>
+                    <p class="text-lg font-semibold text-text-primary">Describe what to generate</p>
+                    <p class="text-sm max-w-md">Results stay on this page until you leave it — download the ones you want to keep. Settings left blank use the model's defaults.</p>
+                }
+            </div>
+        </div>
+
+        <form id="genForm" hx-boost="false" class="p-4 border-t border-gray-700/30 space-y-2">
+            <div class="flex items-end gap-2 bg-cyber-surface border border-gray-600 rounded-xl px-3 py-2 focus-within:border-tint-cyan transition-colors">
+                <label for="genPrompt" class="sr-only">Prompt</label>
+                <textarea id="genPrompt" rows="2" placeholder="A lighthouse on a cliff at sunset, oil painting…"
+                          class="flex-1 bg-transparent text-text-primary text-sm resize-none outline-none focus-visible:!outline-none py-1.5 max-h-60 overflow-y-auto"></textarea>
+                <button type="submit" id="genGo" class="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium tint-cyan-20 text-neon-cyan border border-neon-cyan hover:tint-cyan-30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    <span id="genGoLabel">Generate</span>
+                </button>
+            </div>
+            <div>
+                <label for="genNegative" class="sr-only">Negative prompt</label>
+                <input id="genNegative" type="text" placeholder="Negative prompt (optional)" class="@fieldClass" />
+            </div>
+            <p class="text-[11px] text-text-secondary">
+                <kbd class="font-mono">Enter</kbd> to generate · <kbd class="font-mono">Shift+Enter</kbd> for a new line · <kbd class="font-mono">Esc</kbd> to stop
+            </p>
+        </form>
+    </section>
+
+    <aside class="w-full lg:w-80 shrink-0 flex flex-col gap-4 lg:overflow-y-auto" aria-label="Generation settings">
+        <div class="@cardClass">
+            <h2 class="@headingClass">Mode</h2>
+            <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Mode">
+                <button type="button" data-mode="image" role="radio" class="gen-mode px-3 py-1.5 rounded-lg text-sm border transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Image</button>
+                <button type="button" data-mode="video" role="radio" class="gen-mode px-3 py-1.5 rounded-lg text-sm border transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Video</button>
+            </div>
+            <p id="genModeHint" class="text-xs text-text-secondary"></p>
+        </div>
+
+        <div class="@cardClass">
+            <div class="flex items-center justify-between">
+                <h2 class="@headingClass">Settings</h2>
+                <button type="button" id="genResetParams" class="hidden text-xs text-text-secondary hover:text-neon-cyan underline">Reset to defaults</button>
+            </div>
+            <p class="text-xs text-text-secondary -mt-1">Placeholders show the model's default; type to override it.</p>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label for="genWidth" class="@labelClass">Width</label><input id="genWidth" data-field="width" data-default="width" type="number" step="16" min="64" list="genSizes" class="@fieldClass" /></div>
+                <div><label for="genHeight" class="@labelClass">Height</label><input id="genHeight" data-field="height" data-default="height" type="number" step="16" min="64" list="genSizes" class="@fieldClass" /></div>
+                <div><label for="genSteps" class="@labelClass">Steps</label><input id="genSteps" data-field="steps" data-default="sample_params.sample_steps" data-preset-default="sample_steps" type="number" step="1" min="1" class="@fieldClass" /></div>
+                <div><label for="genCfg" class="@labelClass">CFG scale</label><input id="genCfg" data-field="cfg" data-default="sample_params.guidance.txt_cfg" data-preset-default="txt_cfg" type="number" step="0.5" min="0" class="@fieldClass" /></div>
+                <div title="Distilled guidance, for Flux-style models"><label for="genGuidance" class="@labelClass">Guidance</label><input id="genGuidance" data-field="guidance" data-default="sample_params.guidance.distilled_guidance" data-preset-default="distilled_guidance" type="number" step="0.1" min="0" class="@fieldClass" /></div>
+                <div><label for="genSeed" class="@labelClass">Seed</label><input id="genSeed" data-field="seed" type="number" step="1" min="-1" placeholder="random" class="@fieldClass" /></div>
+                <div data-only="image"><label for="genBatch" class="@labelClass">Images</label><input id="genBatch" data-field="batch" data-default="batch_count" type="number" step="1" min="1" max="8" class="@fieldClass" /></div>
+                <div data-only="video"><label for="genFrames" class="@labelClass">Frames</label><input id="genFrames" data-field="frames" data-default="video_frames" type="number" step="4" min="1" class="@fieldClass" title="Rounded down to 4n+1 by the engine" /></div>
+                <div data-only="video"><label for="genFps" class="@labelClass">FPS</label><input id="genFps" data-field="fps" data-default="fps" type="number" step="1" min="1" class="@fieldClass" /></div>
+            </div>
+            <div>
+                <label for="genSampler" class="@labelClass">Sampler</label>
+                <select id="genSampler" data-field="sampler" data-default="sample_params.sample_method" data-preset-default="sample_method" class="@fieldClass">
+                    <option value="">Default</option>
+                    @foreach (var s in Model.SamplingMethods) { <option value="@s">@s</option> }
+                </select>
+            </div>
+            <div>
+                <label for="genScheduler" class="@labelClass">Scheduler</label>
+                <select id="genScheduler" data-field="scheduler" data-default="sample_params.scheduler" data-preset-default="scheduler" class="@fieldClass">
+                    <option value="">Default</option>
+                    @foreach (var s in Model.Schedulers) { <option value="@s">@s</option> }
+                </select>
+            </div>
+        </div>
+
+        <div class="@cardClass" id="genInputsCard">
+            <h2 class="@headingClass">Input images</h2>
+            <div data-feature="init_image">
+                <p class="@labelClass" data-only="image">Init image (image-to-image)</p>
+                <p class="@labelClass" data-only="video">Start frame (image-to-video)</p>
+                <div class="gen-drop" data-input="init"></div>
+            </div>
+            <div data-feature="mask_image" data-only="image">
+                <p class="@labelClass">Mask (inpainting — white is repainted)</p>
+                <div class="gen-drop" data-input="mask"></div>
+            </div>
+            <div data-feature="end_image" data-only="video">
+                <p class="@labelClass">End frame</p>
+                <div class="gen-drop" data-input="end"></div>
+            </div>
+            <div id="genStrengthWrap" class="hidden">
+                <label for="genStrength" class="@labelClass">Strength — how far to move from the init image</label>
+                <input id="genStrength" data-field="strength" data-default="strength" type="number" step="0.05" min="0" max="1" class="@fieldClass" />
+            </div>
+        </div>
+
+        <div class="@cardClass hidden" id="genLoraCard">
+            <h2 class="@headingClass">LoRA</h2>
+            <div class="flex gap-2">
+                <label for="genLoraPick" class="sr-only">LoRA</label>
+                <select id="genLoraPick" class="@fieldClass min-w-0"></select>
+                <button type="button" id="genLoraAdd" class="@ghostBtn shrink-0">Add</button>
+            </div>
+            <ul id="genLoraList" class="space-y-2"></ul>
+        </div>
+
+        <div class="@cardClass">
+            <h2 class="@headingClass">Output</h2>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label for="genFormat" class="@labelClass">Format</label><select id="genFormat" class="@fieldClass"></select></div>
+                <div title="Live preview while sampling — proj is cheapest; tae/vae need a TAESD or cost a VAE decode per frame">
+                    <label for="genPreview" class="@labelClass">Preview</label><select id="genPreview" class="@fieldClass"></select>
+                </div>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<script>
+// IIFE: this script re-runs on every htmx-boosted navigation to this page.
+(function () {
+const $ = id => document.getElementById(id);
+const gallery = $('genGallery');
+const promptEl = $('genPrompt');
+const presetSelect = $('genPreset');
+const goBtn = $('genGo');
+const fields = Array.from(document.querySelectorAll('[data-field]'));
+const field = name => fields.find(el => el.dataset.field === name);
+
+const SETTINGS_KEY = 'playground.generate.settings';
+const OVERRIDE_CLASSES = ['!border-neon-cyan', 'ring-tint-cyan'];
+const MODE_KEY = { image: 'img_gen', video: 'vid_gen' };
+const FALLBACK_FORMATS = { image: ['png', 'jpeg', 'webp'], video: ['webm', 'webp', 'avi'] };
+const FALLBACK_PREVIEWS = ['none', 'proj', 'tae', 'vae'];
+
+let mode = 'image';
+let presetState = null;   // the selected preset's entry from /api/playground/generation/presets
+let caps = null;          // the loaded model's /sdcpp/v1/capabilities, or null while not loaded
+let inputs = { init: null, mask: null, end: null }; // data URLs
+let loras = [];           // [{ path, name, multiplier }]
+let busy = false;
+let abortController = null;
+let loadPoll = null;
+let saved = null;         // remembered settings, applied once the selects have their options
+
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+const fmtMs = ms => ms == null ? '—' : ms >= 10000 ? `${(ms / 1000).toFixed(1)} s` : ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${Math.round(ms)} ms`;
+const pathGet = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
+function chip(label, value, title) {
+    return `<span class="inline-flex items-baseline gap-1 px-2 py-0.5 rounded-md bg-gray-800/30 border border-gray-700/40"${title ? ` title="${esc(title)}"` : ''}>` +
+           `<span class="text-text-secondary">${esc(label)}</span><span class="font-mono text-text-primary">${esc(value)}</span></span>`;
+}
+function b64ToBlob(b64, mime) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+}
+const readAsDataUrl = file => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+});
+
+// ── Settings persistence (per browser; input images aren't kept) ──
+function saveSettings() {
+    const s = { preset: presetSelect.value, mode, negative: $('genNegative').value, format: $('genFormat').value, preview: $('genPreview').value, fields: {} };
+    fields.forEach(el => s.fields[el.id] = el.value);
+    saved = s;
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { }
+}
+function loadSettings() {
+    try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch { }
+    if (!saved) return;
+    if (saved.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${saved.preset}"]:not([data-chat])`))
+        presetSelect.value = saved.preset;
+    mode = saved.mode === 'video' ? 'video' : 'image';
+    $('genNegative').value = saved.negative ?? '';
+    fields.forEach(el => { if (el.tagName !== 'SELECT' && saved.fields?.[el.id] !== undefined) el.value = saved.fields[el.id]; });
+}
+
+function syncOverrides() {
+    let count = 0;
+    fields.forEach(el => {
+        const on = el.value.trim() !== '' && el.offsetParent !== null;
+        if (on && el.id !== 'genSeed') count++;
+        OVERRIDE_CLASSES.forEach(c => el.classList.toggle(c, on));
+    });
+    $('genResetParams').classList.toggle('hidden', count === 0);
+}
+
+// ── Selects whose options come from the loaded model ──
+function fillSelect(select, values, keep, defaultLabel) {
+    const current = keep ?? select.value;
+    const head = defaultLabel != null ? `<option value="">${esc(defaultLabel)}</option>` : '';
+    select.innerHTML = head + values.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    select.value = values.includes(current) ? current : (defaultLabel != null ? '' : values[0] ?? '');
+}
+
+// ── Mode, defaults and feature gating ──
+function modeDefaults() { return caps?.defaults_by_mode?.[MODE_KEY[mode]] ?? null; }
+function modeFeatures() { return caps?.features_by_mode?.[MODE_KEY[mode]] ?? null; }
+
+function applyMode() {
+    const supported = caps?.supported_modes;
+    document.querySelectorAll('.gen-mode').forEach(btn => {
+        const m = btn.dataset.mode;
+        const on = m === mode;
+        btn.disabled = !!supported && !supported.includes(MODE_KEY[m]);
+        btn.setAttribute('aria-checked', on);
+        btn.className = 'gen-mode px-3 py-1.5 rounded-lg text-sm border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ' +
+            (on ? 'tint-cyan-20 text-neon-cyan border-neon-cyan' : 'border-gray-600 text-text-secondary hover:text-neon-cyan hover:border-neon-cyan');
+    });
+    $('genModeHint').textContent = !caps
+        ? 'Load the model to see which modes and options it supports.'
+        : supported?.includes('vid_gen') && !supported.includes('img_gen') ? 'This is a video model.'
+        : !supported?.includes('vid_gen') ? 'This is an image model — load a video model (Wan, LTX, HunyuanVideo…) for video.'
+        : '';
+
+    // Shown for this mode, and — once the model is loaded — only if it supports the input.
+    const features = modeFeatures();
+    document.querySelectorAll('[data-only], [data-feature]').forEach(el => {
+        const modeOk = !el.dataset.only || el.dataset.only === mode;
+        const featureOk = !el.dataset.feature || !features || features[el.dataset.feature] !== false;
+        el.classList.toggle('hidden', !(modeOk && featureOk));
+    });
+    syncStrength();
+
+    // Placeholders: the loaded model's defaults for this mode, else what the preset sets.
+    const d = modeDefaults();
+    fields.forEach(el => {
+        if (!el.dataset.default && !el.dataset.presetDefault) return;
+        let v = d && el.dataset.default ? pathGet(d, el.dataset.default) : undefined;
+        if (v == null && el.dataset.presetDefault) v = presetState?.defaults?.[el.dataset.presetDefault];
+        if (v == null && !d && (el.dataset.default === 'width' || el.dataset.default === 'height')) v = presetState?.defaults?.[el.dataset.default];
+        const shown = typeof v === 'number' && !Number.isInteger(v) ? +v.toFixed(2) : v;
+        if (el.tagName === 'SELECT') el.options[0].textContent = shown ? `Default (${shown})` : 'Default';
+        else el.placeholder = shown == null || shown === '' ? 'default' : String(shown);
+    });
+    if (!$('genNegative').value) $('genNegative').placeholder = presetState?.defaults?.negative_prompt
+        ? `Negative prompt — preset: ${presetState.defaults.negative_prompt}` : 'Negative prompt (optional)';
+
+    fillSelect($('genFormat'), caps?.output_formats_by_mode?.[MODE_KEY[mode]] ?? FALLBACK_FORMATS[mode], saved?.format);
+    fillSelect($('genPreview'), caps?.preview_modes ?? FALLBACK_PREVIEWS, saved?.preview ?? 'proj');
+    syncOverrides();
+}
+
+// An input counts only while its section is shown (the mode and model take it).
+function inputFor(key) {
+    const drop = document.querySelector(`.gen-drop[data-input="${key}"]`);
+    return inputs[key] && !drop.closest('.hidden') ? inputs[key] : null;
+}
+
+// Strength only matters with an init image.
+function syncStrength() { $('genStrengthWrap').classList.toggle('hidden', !inputFor('init')); }
+
+function applyCaps() {
+    if (caps?.samplers?.length) fillSelect($('genSampler'), caps.samplers, saved?.fields?.genSampler, 'Default');
+    else if (saved?.fields?.genSampler) $('genSampler').value = saved.fields.genSampler;
+    if (caps?.schedulers?.length) fillSelect($('genScheduler'), caps.schedulers, saved?.fields?.genScheduler, 'Default');
+    else if (saved?.fields?.genScheduler) $('genScheduler').value = saved.fields.genScheduler;
+
+    if (caps?.supported_modes && !caps.supported_modes.includes(MODE_KEY[mode]))
+        mode = caps.supported_modes.includes('vid_gen') ? 'video' : 'image';
+
+    const available = caps?.loras ?? [];
+    $('genLoraCard').classList.toggle('hidden', !available.length);
+    $('genLoraPick').innerHTML = available.map(l => `<option value="${esc(l.path)}">${esc(l.display_path || l.name)}</option>`).join('');
+    loras = loras.filter(l => available.some(a => a.path === l.path));
+    renderLoras();
+    applyMode();
+}
+
+// ── Preset state: load status and capabilities ──
+async function fetchPresetState() {
+    try {
+        const resp = await fetch('/api/playground/generation/presets');
+        const presets = await resp.json();
+        return presets.find(p => p.id === presetSelect.value) ?? null;
+    } catch { return null; }
+}
+
+async function fetchCaps(p) {
+    if (!p?.loaded) return null;
+    try {
+        const resp = await fetch('/api/playground/generation/capabilities?presetId=' + encodeURIComponent(p.id));
+        const body = await resp.json();
+        return body.supported_modes ? body : null;
+    } catch { return null; }
+}
+
+function applyPresetState(p) {
+    presetState = p;
+    const status = $('genPresetStatus');
+    const loadBtn = $('genLoad');
+    if (!p) { status.textContent = ''; loadBtn.classList.add('hidden'); $('genPresetDetails').textContent = ''; return; }
+
+    if (p.loaded) {
+        status.innerHTML = '<span class="w-2 h-2 rounded-full bg-neon-green"></span><span class="text-neon-green">Loaded</span>';
+        loadBtn.classList.add('hidden');
+    } else if (p.serverStatus === 'Starting') {
+        status.innerHTML = '<span class="w-2 h-2 rounded-full bg-neon-magenta animate-pulse"></span><span class="text-neon-magenta">Loading…</span>';
+        loadBtn.classList.add('hidden');
+    } else {
+        status.innerHTML = '<span class="w-2 h-2 rounded-full border border-neon-magenta"></span><span class="text-text-secondary">Not loaded</span>';
+        loadBtn.classList.remove('hidden');
+        loadBtn.disabled = busy;
+    }
+    status.title = p.loaded ? `Running on ${p.serverName}` : `The first generation will include loading the model on ${p.serverName}`;
+    $('genPresetDetails').textContent = [p.serverName, p.modelFile].filter(Boolean).join(' · ');
+}
+
+async function refreshPresetState() {
+    if (!presetSelect.value) { applyPresetState(null); caps = null; applyCaps(); return null; }
+    const p = await fetchPresetState();
+    applyPresetState(p);
+    caps = await fetchCaps(p);
+    applyCaps();
+    return p;
+}
+
+async function loadModel() {
+    const loadBtn = $('genLoad');
+    loadBtn.disabled = true;
+    const form = new FormData();
+    form.append('PresetId', presetSelect.value);
+    form.append('Command', 'Start');
+    form.append('__RequestVerificationToken', document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '');
+    try {
+        const resp = await fetch('/Features/Presets/Actions', { method: 'POST', body: form });
+        const result = await resp.json();
+        if (!resp.ok || !result.success) { alert(result.message || 'Failed to load the model.'); loadBtn.disabled = false; return; }
+    } catch (e) { alert('Failed to load the model: ' + e.message); loadBtn.disabled = false; return; }
+
+    clearInterval(loadPoll);
+    const presetId = presetSelect.value;
+    const started = Date.now();
+    applyPresetState({ ...presetState, serverStatus: 'Starting', loaded: false });
+    loadPoll = setInterval(async () => {
+        if (presetSelect.value !== presetId || !document.body.contains(loadBtn)) { clearInterval(loadPoll); return; }
+        const p = await fetchPresetState();
+        if (!p) return;
+        if (p.loaded || p.serverStatus === 'Error' || Date.now() - started > 10 * 60 * 1000) {
+            clearInterval(loadPoll);
+            await refreshPresetState();
+            if (p.serverStatus === 'Error') alert('The server failed to start — check its logs on the Servers page.');
+        } else {
+            applyPresetState({ ...p, serverStatus: 'Starting' });
+        }
+    }, 2000);
+}
+
+// ── Input images ──
+function renderDrop(el) {
+    const key = el.dataset.input;
+    const url = inputs[key];
+    el.innerHTML = url
+        ? `<div class="relative inline-block"><img src="${url}" alt="" class="max-h-32 rounded-lg border border-gray-700/50" />` +
+          `<button type="button" class="gen-drop-clear absolute -top-2 -right-2 w-6 h-6 rounded-full bg-cyber-surface border border-gray-600 text-text-secondary hover:text-neon-red text-xs" aria-label="Remove image">✕</button></div>`
+        : `<label class="flex flex-col items-center justify-center gap-1 h-20 rounded-lg border border-dashed border-gray-600 text-xs text-text-secondary hover:border-neon-cyan hover:text-neon-cyan cursor-pointer transition-colors">` +
+          `<span>Choose or drop an image</span><input type="file" accept="image/*" class="sr-only" /></label>`;
+    el.querySelector('input[type=file]')?.addEventListener('change', async e => { if (e.target.files[0]) setInput(key, await readAsDataUrl(e.target.files[0])); });
+    el.querySelector('.gen-drop-clear')?.addEventListener('click', () => setInput(key, null));
+}
+function setInput(key, url) {
+    inputs[key] = url;
+    renderDrop(document.querySelector(`.gen-drop[data-input="${key}"]`));
+    syncStrength();
+}
+document.querySelectorAll('.gen-drop').forEach(el => {
+    renderDrop(el);
+    el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('ring-tint-cyan'); });
+    el.addEventListener('dragleave', () => el.classList.remove('ring-tint-cyan'));
+    el.addEventListener('drop', async e => {
+        e.preventDefault();
+        el.classList.remove('ring-tint-cyan');
+        const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
+        if (file) setInput(el.dataset.input, await readAsDataUrl(file));
+    });
+});
+
+// ── LoRA ──
+function renderLoras() {
+    $('genLoraList').innerHTML = loras.map((l, i) =>
+        `<li class="flex items-center gap-2 text-sm"><span class="flex-1 min-w-0 truncate text-text-primary" title="${esc(l.path)}">${esc(l.name)}</span>` +
+        `<input type="number" step="0.05" value="${l.multiplier}" data-lora="${i}" aria-label="Weight" class="w-20 bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-2 py-1 text-sm" />` +
+        `<button type="button" data-lora-remove="${i}" class="text-text-secondary hover:text-neon-red" aria-label="Remove LoRA">✕</button></li>`).join('');
+    $('genLoraList').querySelectorAll('[data-lora]').forEach(el => el.addEventListener('input', () => loras[+el.dataset.lora].multiplier = parseFloat(el.value) || 0));
+    $('genLoraList').querySelectorAll('[data-lora-remove]').forEach(el => el.addEventListener('click', () => { loras.splice(+el.dataset.loraRemove, 1); renderLoras(); }));
+}
+$('genLoraAdd').addEventListener('click', () => {
+    const opt = $('genLoraPick').selectedOptions[0];
+    if (!opt || loras.some(l => l.path === opt.value)) return;
+    loras.push({ path: opt.value, name: opt.textContent, multiplier: 1 });
+    renderLoras();
+});
+
+// ── Building the request (sd-server's native body; blank fields are left to the model's defaults) ──
+function num(name, int) {
+    const el = field(name);
+    if (!el || el.value.trim() === '' || el.offsetParent === null) return undefined;
+    const v = int ? parseInt(el.value, 10) : parseFloat(el.value);
+    return isFinite(v) ? v : undefined;
+}
+function buildRequest() {
+    const req = { prompt: promptEl.value.trim() };
+    const negative = $('genNegative').value.trim();
+    if (negative) req.negative_prompt = negative;
+    const set = (obj, key, v) => { if (v !== undefined && v !== '') obj[key] = v; };
+    set(req, 'width', num('width', true));
+    set(req, 'height', num('height', true));
+
+    // A blank seed means a fresh random one per run — picked here so the result can show it.
+    let seed = num('seed', true);
+    if (seed === undefined || seed < 0) seed = Math.floor(Math.random() * 2147483647);
+    req.seed = seed;
+
+    const sample = {}, guidance = {};
+    set(sample, 'sample_steps', num('steps', true));
+    set(sample, 'sample_method', field('sampler').value);
+    set(sample, 'scheduler', field('scheduler').value);
+    set(guidance, 'txt_cfg', num('cfg'));
+    set(guidance, 'distilled_guidance', num('guidance'));
+    if (Object.keys(guidance).length) sample.guidance = guidance;
+    if (Object.keys(sample).length) req.sample_params = sample;
+
+    const init = inputFor('init');
+    if (init) { req.init_image = init; set(req, 'strength', num('strength')); }
+    if (mode === 'image') {
+        set(req, 'batch_count', num('batch', true));
+        if (init && inputFor('mask')) req.mask_image = inputFor('mask');
+    } else {
+        set(req, 'video_frames', num('frames', true));
+        set(req, 'fps', num('fps', true));
+        if (inputFor('end')) req.end_image = inputFor('end');
+    }
+    if (loras.length) req.lora = loras.map(l => ({ path: l.path, multiplier: l.multiplier, is_high_noise: false }));
+    set(req, 'output_format', $('genFormat').value);
+    const preview = $('genPreview').value;
+    if (preview && preview !== 'none') { req.preview = preview; req.preview_interval = 1; }
+    return req;
+}
+
+// ── Gallery ──
+function hideEmpty() { $('genEmpty')?.remove(); }
+
+function newJobCard(req) {
+    hideEmpty();
+    const card = document.createElement('article');
+    card.className = 'rounded-xl border border-gray-700/40 bg-gray-800/10 p-4 space-y-3';
+    card.innerHTML =
+        `<div class="flex items-start justify-between gap-3"><p class="text-sm text-text-primary whitespace-pre-wrap break-words min-w-0">${esc(req.prompt)}</p>` +
+        `<span class="gen-elapsed font-mono text-xs text-text-secondary shrink-0"></span></div>` +
+        `<div class="gen-progress space-y-2"><p class="gen-phase text-sm text-neon-magenta">Starting…</p>` +
+        `<div class="h-1.5 rounded-full bg-gray-700/50 overflow-hidden"><div class="gen-bar h-full w-0 bg-neon-cyan transition-all"></div></div>` +
+        `<img class="gen-preview hidden max-h-64 rounded-lg border border-gray-700/50 opacity-90" alt="Preview" /></div>` +
+        `<div class="gen-output"></div><div class="gen-meta flex flex-wrap gap-1.5 text-xs"></div>`;
+    gallery.prepend(card);
+    gallery.scrollTop = 0;
+    return card;
+}
+
+function setPhase(card, s) {
+    const phase = card.querySelector('.gen-phase');
+    const bar = card.querySelector('.gen-bar');
+    const text = {
+        loading: `Loading the model${s.server ? ` on ${s.server}` : ''}…`,
+        waiting: 'Waiting for the server — it is busy with another request…',
+        submitting: 'Submitting…',
+        queued: `Queued on the server${s.queuePosition ? ` (#${s.queuePosition})` : ''}…`,
+        generating: s.totalSteps ? `Sampling step ${s.step} of ${s.totalSteps}${s.pass > 1 ? ` · pass ${s.pass}` : ''}` : 'Generating…',
+    }[s.phase] ?? 'Working…';
+    phase.textContent = text;
+    bar.style.width = s.phase === 'generating' && s.totalSteps ? `${Math.round(100 * s.step / s.totalSteps)}%` : '0%';
+    bar.classList.toggle('animate-pulse', s.phase === 'generating' && !s.totalSteps);
+}
+
+function renderResult(card, data, req) {
+    card.querySelector('.gen-progress').remove();
+    const out = card.querySelector('.gen-output');
+    const r = data.result ?? {};
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const items = [];
+
+    if (data.kind === 'video') {
+        const mime = r.mime_type || 'video/webm';
+        const url = URL.createObjectURL(b64ToBlob(r.b64_json, mime));
+        const ext = r.output_format || 'webm';
+        const media = mime.startsWith('video/') && mime !== 'video/x-msvideo'
+            ? `<video src="${url}" controls loop autoplay muted playsinline class="max-h-[28rem] max-w-full rounded-lg border border-gray-700/50"></video>`
+            : ext === 'avi'
+                ? `<p class="text-sm text-text-secondary">AVI can't play in the browser — download it to watch.</p>`
+                : `<img src="${url}" alt="Generated video" class="max-h-[28rem] max-w-full rounded-lg border border-gray-700/50" />`;
+        out.innerHTML = `<div class="space-y-2">${media}<a href="${url}" download="video-${stamp}.${ext}" class="inline-block text-xs text-neon-cyan underline">Download .${esc(ext)}</a></div>`;
+        items.push(chip('Frames', r.frame_count ?? '?'), chip('FPS', r.fps ?? '?'));
+    } else {
+        const fmt = r.output_format || 'png';
+        const mime = fmt === 'jpeg' ? 'image/jpeg' : `image/${fmt}`;
+        const images = (r.images ?? []).map(img => ({ url: URL.createObjectURL(b64ToBlob(img.b64_json, mime)), data: `data:${mime};base64,${img.b64_json}` }));
+        out.innerHTML = `<div class="grid gap-3 ${images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}">` + images.map((img, i) =>
+            `<figure class="space-y-1"><a href="${img.url}" target="_blank" rel="noopener"><img src="${img.url}" alt="Generated image ${i + 1}" class="max-h-[28rem] max-w-full rounded-lg border border-gray-700/50" /></a>` +
+            `<figcaption class="flex gap-3 text-xs"><a href="${img.url}" download="image-${stamp}-${i + 1}.${fmt === 'jpeg' ? 'jpg' : fmt}" class="text-neon-cyan underline">Download</a>` +
+            `<button type="button" data-use-input="${i}" class="text-text-secondary hover:text-neon-cyan underline">Use as init image</button></figcaption></figure>`).join('') + `</div>`;
+        out.querySelectorAll('[data-use-input]').forEach(btn => btn.addEventListener('click', () => setInput('init', images[+btn.dataset.useInput].data)));
+    }
+
+    if (req.width || req.height) items.push(chip('Size', `${req.width ?? '?'}×${req.height ?? '?'}`));
+    if (req.sample_params?.sample_steps) items.push(chip('Steps', req.sample_params.sample_steps));
+    items.push(chip('Seed', req.seed));
+    items.push(chip('Generation', fmtMs(data.generationMs), 'Time sd-server spent on the job, excluding its queue'));
+    items.push(chip('Total', fmtMs(data.totalMs), 'From pressing Generate to the result, including any model load'));
+    if (data.coldStart) items.push(`<span class="px-2 py-0.5 rounded-md border border-tint-magenta text-neon-magenta" title="The model wasn't loaded — the total includes ${esc(fmtMs(data.loadMs))} of loading">cold start</span>`);
+    items.push(`<button type="button" class="gen-reuse px-2 py-0.5 rounded-md border border-gray-700/40 text-text-secondary hover:text-neon-cyan hover:border-neon-cyan" title="Put this prompt and seed back in the form">Reuse</button>`);
+    card.querySelector('.gen-meta').innerHTML = items.join(' ');
+    card.querySelector('.gen-reuse').addEventListener('click', () => {
+        promptEl.value = req.prompt;
+        $('genNegative').value = req.negative_prompt ?? '';
+        field('seed').value = req.seed;
+        syncOverrides();
+        saveSettings();
+        promptEl.focus();
+    });
+}
+
+function renderFailure(card, message, cancelled) {
+    card.querySelector('.gen-progress')?.remove();
+    card.querySelector('.gen-output').innerHTML = cancelled
+        ? `<p class="text-sm text-text-secondary">Stopped.</p>`
+        : `<p class="text-sm text-neon-red whitespace-pre-wrap break-words">${esc(message)}</p>`;
+}
+
+// ── Running a generation ──
+function setBusy(b) {
+    busy = b;
+    $('genGoLabel').textContent = b ? 'Stop' : 'Generate';
+    goBtn.type = b ? 'button' : 'submit';
+    goBtn.disabled = !b && (!promptEl.value.trim() || !presetSelect.value);
+    $('genLoad').disabled = b;
+}
+
+async function generate() {
+    const req = buildRequest();
+    if (!req.prompt || !presetSelect.value || busy) return;
+    const card = newJobCard(req);
+    const started = performance.now();
+    const timer = setInterval(() => {
+        const el = card.querySelector('.gen-elapsed');
+        if (el) el.textContent = fmtMs(performance.now() - started);
+    }, 250);
+    abortController = new AbortController();
+    setBusy(true);
+    let finished = false;
+
+    try {
+        const resp = await fetch('/api/playground/generation/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ presetId: presetSelect.value, kind: mode, request: req }),
+            signal: abortController.signal,
+        });
+        if (!resp.ok || !(resp.headers.get('content-type') ?? '').includes('text/event-stream')) {
+            let body = null;
+            try { body = await resp.json(); } catch { }
+            throw new Error(body?.error ?? `HTTP ${resp.status}`);
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (!finished) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split(/\r?\n\r?\n/);
+            buffer = events.pop();
+            for (const evt of events) {
+                let name = 'message', data = '';
+                for (const line of evt.split(/\r?\n/)) {
+                    if (line.startsWith('event:')) name = line.slice(6).trim();
+                    else if (line.startsWith('data:')) data += line.slice(5).trim();
+                }
+                let obj = {};
+                try { obj = JSON.parse(data); } catch { continue; }
+                if (name === 'status') setPhase(card, obj);
+                else if (name === 'preview') {
+                    const img = card.querySelector('.gen-preview');
+                    if (img) { img.src = 'data:image/png;base64,' + obj.b64; img.classList.remove('hidden'); }
+                }
+                else if (name === 'result') { renderResult(card, obj, req); finished = true; }
+                else if (name === 'error') { renderFailure(card, obj.message); finished = true; }
+                else if (name === 'cancelled') { renderFailure(card, null, true); finished = true; }
+            }
+        }
+        if (!finished) renderFailure(card, 'The connection closed before the generation finished.');
+    } catch (e) {
+        if (e.name === 'AbortError') renderFailure(card, null, true);
+        else renderFailure(card, e.message);
+    } finally {
+        clearInterval(timer);
+        const el = card.querySelector('.gen-elapsed');
+        if (el) el.textContent = fmtMs(performance.now() - started);
+        abortController = null;
+        setBusy(false);
+        refreshPresetState();
+    }
+}
+
+// ── Wiring ──
+loadSettings();
+setBusy(false);
+applyMode();
+refreshPresetState();
+
+document.querySelectorAll('.gen-mode').forEach(btn => btn.addEventListener('click', () => {
+    if (btn.disabled || busy) return;
+    mode = btn.dataset.mode;
+    applyMode();
+    saveSettings();
+}));
+document.querySelectorAll('aside input, aside select, #genNegative').forEach(el => {
+    el.addEventListener('change', saveSettings);
+    el.addEventListener('input', syncOverrides);
+});
+$('genResetParams').addEventListener('click', () => {
+    fields.forEach(el => { if (el.id !== 'genSeed') el.value = ''; });
+    syncOverrides();
+    saveSettings();
+});
+
+let imagePresetId = presetSelect.value;
+presetSelect.addEventListener('change', () => {
+    if (presetSelect.selectedOptions[0]?.dataset.chat) {
+        const target = presetSelect.value;
+        presetSelect.value = imagePresetId; // so Back returns to the image preset
+        location.href = '/Features/Playground/Index?presetId=' + encodeURIComponent(target);
+        return;
+    }
+    imagePresetId = presetSelect.value;
+    clearInterval(loadPoll);
+    caps = null;
+    saveSettings();
+    setBusy(busy);
+    refreshPresetState();
+});
+$('genLoad').addEventListener('click', loadModel);
+$('genClear').addEventListener('click', () => {
+    if (busy) return;
+    gallery.querySelectorAll('[src^="blob:"], [href^="blob:"]').forEach(el => URL.revokeObjectURL(el.src || el.href));
+    gallery.innerHTML = '';
+});
+
+$('genForm').addEventListener('submit', e => { e.preventDefault(); generate(); });
+goBtn.addEventListener('click', () => { if (busy) abortController?.abort(); });
+promptEl.addEventListener('input', () => setBusy(busy));
+promptEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        $('genForm').requestSubmit();
+    }
+});
+document.addEventListener('keydown', function onEsc(e) {
+    if (!document.body.contains(gallery)) { document.removeEventListener('keydown', onEsc); return; }
+    if (e.key === 'Escape' && busy) abortController?.abort();
+});
+
+promptEl.focus();
+})();
+</script>

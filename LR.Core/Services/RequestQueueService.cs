@@ -61,11 +61,12 @@ public class RequestQueueService : IRequestQueueService, IDisposable
     /// <summary>
     /// Try to dequeue the oldest pending request that can be served by a server whose active
     /// preset is <paramref name="activePresetId"/>. A request with no resolved preset (unknown
-    /// model) matches any server. Non-matching requests are drained and put back so their
+    /// model) matches any server of <paramref name="modality"/> — never a server of the other kind.
+    /// Non-matching requests are drained and put back so their
     /// relative order is preserved — Channel&lt;T&gt; has no peek/skip API, so this is O(queue depth)
     /// per call, which is acceptable given the queue is only ever a handful of in-flight requests.
     /// </summary>
-    public bool TryDequeueMatching(Guid? activePresetId, out (RouteRequest Request, TaskCompletionSource<RouteResponse> Tcs) item)
+    public bool TryDequeueMatching(Guid? activePresetId, out (RouteRequest Request, TaskCompletionSource<RouteResponse> Tcs) item, EngineModality modality = EngineModality.Text)
     {
         item = default!;
         if (_channel == null) return false;
@@ -79,7 +80,8 @@ public class RequestQueueService : IRequestQueueService, IDisposable
             if (candidate.Tcs.Task.IsCanceled)
                 continue;
 
-            if (!found && (candidate.Request.PresetId is null || candidate.Request.PresetId == activePresetId))
+            if (!found && candidate.Request.Modality == modality
+                && (candidate.Request.PresetId is null || candidate.Request.PresetId == activePresetId))
             {
                 item = candidate;
                 found = true;

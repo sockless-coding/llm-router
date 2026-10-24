@@ -11,8 +11,9 @@ using LR.Core.Services.EngineBuilds;
 namespace LR.Application.Pages.Features.Engines;
 
 /// <summary>
-/// Lists an engine's GitHub releases to install (<c>?engine=</c>): llama.cpp's prebuilt archives per
-/// backend, or Strata's releases (whose setup picks the right ready-made engine for this PC).
+/// Lists an engine's GitHub releases to install (<c>?engine=</c>): the prebuilt archives per backend of
+/// an engine with an <see cref="EngineReleaseProfile"/> (llama.cpp, stable-diffusion.cpp), or Strata's
+/// releases (whose setup picks the right ready-made engine for this PC).
 /// </summary>
 public partial class EngineReleasesModel : PageModel
 {
@@ -23,6 +24,9 @@ public partial class EngineReleasesModel : PageModel
 
     [BindProperty(SupportsGet = true)]
     public ServerEngine Engine { get; set; } = ServerEngine.LlamaCpp;
+
+    /// <summary>The prebuilt-release engine being listed (null for Strata).</summary>
+    public EngineReleaseProfile? Profile { get; private set; }
 
     public IReadOnlyList<GitHubRelease> Releases { get; set; } = new List<GitHubRelease>();
     public string HostOs { get; private set; } = "";
@@ -63,11 +67,12 @@ public partial class EngineReleasesModel : PageModel
             }
             else
             {
-                Engine = ServerEngine.LlamaCpp;
-                var all = await _github.ListReleasesAsync(_manager.Repo, 20);
-                // Skip non-build tags (e.g. the "nightly-tag" marker release) — keep the b#### builds.
+                Profile = EngineReleaseProfile.For(Engine) ?? LlamaCppReleaseProfile.Instance;
+                Engine = Profile.Engine;
+                var all = await _github.ListReleasesAsync(Profile.Repo, 20);
+                // Skip non-build tags (e.g. llama.cpp's "nightly-tag" marker release).
                 Releases = all
-                    .Where(r => Regex.IsMatch(r.TagName, @"^b\d{3,}$", RegexOptions.IgnoreCase))
+                    .Where(r => Profile.IsInstallableRelease(r.TagName))
                     .Take(15)
                     .ToList();
             }
@@ -90,14 +95,11 @@ public partial class EngineReleasesModel : PageModel
     /// <summary>The backends that have a prebuilt archive in the given release for this host.</summary>
     public IEnumerable<BackendType> AvailableBackends(GitHubRelease release)
     {
-        var candidates = new[]
+        if (Profile is null)
+            yield break;
+        foreach (var backend in Profile.CandidateBackends)
         {
-            BackendType.Cpu, BackendType.Cuda, BackendType.Vulkan, BackendType.Sycl,
-            BackendType.Hip, BackendType.OpenVino, BackendType.OpenCL, BackendType.Metal,
-        };
-        foreach (var backend in candidates)
-        {
-            if (ReleaseAssetResolver.IsAvailable(release.Assets, backend, HostOs, HostArch))
+            if (Profile.IsAvailable(release.Assets, backend, HostOs, HostArch))
                 yield return backend;
         }
     }

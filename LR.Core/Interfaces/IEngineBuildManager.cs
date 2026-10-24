@@ -3,7 +3,7 @@ using LR.Core.Models;
 namespace LR.Core.Interfaces;
 
 /// <summary>
-/// Manages the registry of managed llama.cpp builds and the reusable compile recipes. CRUD +
+/// Manages the registry of managed engine builds and the reusable compile recipes. CRUD +
 /// reconciliation + update checks. Modelled on <see cref="IModelLibrary"/>.
 /// </summary>
 public interface IEngineBuildManager
@@ -24,7 +24,8 @@ public interface IEngineBuildManager
     /// <summary>How many servers currently point at this build.</summary>
     Task<int> GetServerUsageCountAsync(Guid buildId);
 
-    Task<IReadOnlyList<LlamaCppBuildRecipe>> GetRecipesAsync();
+    /// <summary>Compile recipes — all of them, or just one engine's — built-ins first.</summary>
+    Task<IReadOnlyList<LlamaCppBuildRecipe>> GetRecipesAsync(ServerEngine? engine = null);
     Task<LlamaCppBuildRecipe?> GetRecipeAsync(Guid id);
     Task<LlamaCppBuildRecipe> SaveRecipeAsync(LlamaCppBuildRecipe recipe);
 
@@ -44,11 +45,11 @@ public interface IEngineBuildManager
     Task<EngineBuildUpdateStatus> GetUpdateStatusAsync(Guid buildId, CancellationToken ct = default);
 
     /// <summary>
-    /// Fetches llama.cpp's own build docs / example scripts for a backend and extracts the
+    /// Fetches the engine's own build docs / example scripts for a backend and extracts the
     /// candidate <c>cmake</c> configure commands (with a best-effort parse into recipe fields), so
     /// the recipe editor can show and offer to apply them.
     /// </summary>
-    Task<IReadOnlyList<UpstreamDocReference>> GetUpstreamReferenceAsync(Models.BackendType backend, CancellationToken ct = default);
+    Task<IReadOnlyList<UpstreamDocReference>> GetUpstreamReferenceAsync(ServerEngine engine, Models.BackendType backend, CancellationToken ct = default);
 }
 
 /// <summary>One upstream doc/script and the build commands pulled out of it.</summary>

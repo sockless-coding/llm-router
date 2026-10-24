@@ -39,7 +39,7 @@ public sealed class GitSyncStep : IBuildStep
 
         ctx.ResolvedCommitSha = (await CaptureGitAsync(ctx, ct, "rev-parse", "HEAD"))?.Trim();
         var describe = (await CaptureGitAsync(ctx, ct, "describe", "--tags", "--always"))?.Trim();
-        ctx.ResolvedVersionTag = (describe is not null ? ReleaseAssetResolver.ExtractBuildTag(describe) : null) ?? describe;
+        ctx.ResolvedVersionTag = describe is not null ? ctx.Profile.VersionTagOf(describe) : null;
         await ctx.Sink.PhaseAsync(Phase, $"At {ctx.ResolvedCommitSha?[..Math.Min(7, ctx.ResolvedCommitSha?.Length ?? 0)]} ({ctx.ResolvedVersionTag}).");
     }
 

@@ -15,6 +15,10 @@
         {
             <p class="text-xs text-neon-red mt-0.5">File missing on disk</p>
         }
+        else if (lm.Status == ModelStatus.Error && !string.IsNullOrEmpty(lm.StatusMessage))
+        {
+            <p class="text-xs text-neon-red mt-0.5 max-w-xl break-words">@lm.StatusMessage</p>
+        }
     </td>
     <td class="px-4 py-3">
         @if (lm.Source == ModelSource.HuggingFace)
@@ -67,7 +71,7 @@
         {
             if (lm.Source == ModelSource.HuggingFace && !string.IsNullOrEmpty(lm.HfRepoId))
             {
-                <a href="/Features/Models/HuggingFace?repoId=@Uri.EscapeDataString(lm.HfRepoId)" class="text-xs px-2 py-1 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium" title="Download another quant of this model from Hugging Face">+ Version</a>
+                <a href="@LR.Application.Pages.Features.Models.ModelsHuggingFaceModel.BrowseRepoUrl(lm.HfRepoId, lm.FilePath)" class="text-xs px-2 py-1 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium" title="Download another quant of this model from Hugging Face">+ Version</a>
             }
             var folder = System.IO.Path.GetDirectoryName(lm.FilePath);
             if (!string.IsNullOrEmpty(folder))

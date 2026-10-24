@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -59,7 +60,7 @@ public class ModelDownloadService
             var model = new LocalModel
             {
                 Id = Guid.NewGuid(),
-                Name = name ?? Path.GetFileNameWithoutExtension(filename),
+                Name = name ?? DefaultName(repoId, filename),
                 FilePath = destinationPath,
                 Source = ModelSource.HuggingFace,
                 Status = ModelStatus.Downloading,
@@ -116,6 +117,32 @@ public class ModelDownloadService
         return modelId;
     }
 
+    /// <summary>
+    /// Library name for a downloaded file. Quantized GGUFs are usually named after the model
+    /// (Qwen3-8B-Q4_K_M.gguf) and keep their file name; a generic name made only of words from the
+    /// repo name (turbo.safetensors in krea/Krea-2-Turbo, model.safetensors) uses the repo name
+    /// instead, plus the subfolder for diffusers-layout components that all share one file name
+    /// (vae/ and unet/diffusion_pytorch_model.safetensors).
+    /// </summary>
+    public static string DefaultName(string repoId, string filename)
+    {
+        var stem = Path.ChangeExtension(filename, null);
+        var slash = stem.LastIndexOf('/');
+        var folder = slash < 0 ? null : stem[..slash];
+        var repoName = repoId[(repoId.LastIndexOf('/') + 1)..];
+
+        var repoWords = Words(repoName).Concat(GenericFileWords).ToHashSet();
+        if (!Words(stem[(slash + 1)..]).All(repoWords.Contains))
+            return stem;
+
+        return folder is null ? repoName : $"{repoName}/{folder}";
+
+        static IEnumerable<string> Words(string s) =>
+            Regex.Split(s.ToLowerInvariant(), "[^a-z0-9]+").Where(w => w.Length > 0);
+    }
+
+    private static readonly string[] GenericFileWords = ["model", "diffusion", "pytorch"];
+
     public bool CancelDownload(Guid modelId)
     {
         if (!_activeDownloads.TryGetValue(modelId, out var cts))
@@ -147,7 +174,7 @@ public class ModelDownloadService
             }
             else
             {
-                var sizes = (await _hfClient.ListGgufFilesAsync(repoId, ct))
+                var sizes = (await _hfClient.ListModelFilesAsync(repoId, HfModelFormat.Gguf, ct))
                     .ToDictionary(f => f.Filename, f => f.SizeBytes, StringComparer.OrdinalIgnoreCase);
                 long? total = shardNames.All(n => sizes.GetValueOrDefault(n) is not null)
                     ? shardNames.Sum(n => sizes[n]!.Value)

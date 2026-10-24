@@ -53,8 +53,20 @@
             </div>
             <div>
                 <label asp-for="HuggingFaceApiToken" class="block text-sm font-medium text-text-secondary mb-1">Hugging Face API Token (optional)</label>
-                <input asp-for="HuggingFaceApiToken" type="password" placeholder="hf_..." class="w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all" />
-                <p class="text-xs text-text-secondary mt-1">Needed for gated repos, or to avoid anonymous rate limits.</p>
+                <input asp-for="HuggingFaceApiToken" type="password" autocomplete="off" placeholder="@(Model.SavedTokenHint is null ? "hf_..." : "Leave blank to keep the saved token")" class="w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all" />
+                @if (Model.SavedTokenHint is not null)
+                {
+                    <div class="flex items-center justify-between gap-3 mt-1">
+                        <p class="text-xs text-neon-green">Token saved (<span class="font-mono">@Model.SavedTokenHint</span>)</p>
+                        <label class="flex items-center gap-1.5 text-xs text-text-secondary cursor-pointer">
+                            <input asp-for="ClearHuggingFaceApiToken" type="checkbox" class="accent-neon-red" /> Remove token
+                        </label>
+                    </div>
+                }
+                else
+                {
+                    <p class="text-xs text-text-secondary mt-1">No token saved. Needed for gated repos, or to avoid anonymous rate limits.</p>
+                }
             </div>
             <div class="md:col-span-2">
                 <button type="submit" class="px-5 py-2 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all text-sm font-medium">
@@ -147,7 +159,7 @@ else
                                 @if (!string.IsNullOrEmpty(groupRepoId))
                                 {
                                     <a href="https://huggingface.co/@groupRepoId" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium" title="Open this model's page on Hugging Face">Model Card</a>
-                                    <a href="/Features/Models/HuggingFace?repoId=@Uri.EscapeDataString(groupRepoId)" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium" title="Download another quant of this model from Hugging Face">+ Version</a>
+                                    <a href="@LR.Application.Pages.Features.Models.ModelsHuggingFaceModel.BrowseRepoUrl(groupRepoId, group.AllModels.First(m => m.HfRepoId == groupRepoId).FilePath)" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium" title="Download another quant of this model from Hugging Face">+ Version</a>
                                 }
                                 @if (!string.IsNullOrEmpty(groupFolder))
                                 {

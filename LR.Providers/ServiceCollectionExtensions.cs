@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using LR.Core.Interfaces;
 using LR.Core.Services;
 using LR.Providers.LlamaCpp;
+using LR.Providers.StableDiffusionCpp;
 using LR.Providers.Strata;
 
 namespace LR.Providers;
@@ -19,6 +20,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<IEngineDescriptor, LlamaCppEngineDescriptor>();
         services.AddSingleton<IEngineDescriptor, StrataEngineDescriptor>();
+        services.AddSingleton<IEngineDescriptor, StableDiffusionCppEngineDescriptor>();
 
         services.AddSingleton<IEngineCatalog, EngineCatalog>();
         services.AddSingleton<IBackendProviderFactory, BackendProviderFactory>();

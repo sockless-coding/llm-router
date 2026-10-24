@@ -18,6 +18,7 @@ public class RoutingEngine : IRoutingEngine
     private readonly IServerConcurrencyLimiter _concurrencyLimiter;
     private readonly GatewaySettings _settings;
     private readonly IApiKeyRequestContext _apiKeyContext;
+    private readonly IEngineCatalog? _engines;
     private int _roundRobinIndex;
 
     public RoutingEngine(
@@ -25,13 +26,15 @@ public class RoutingEngine : IRoutingEngine
         IServerManager serverManager,
         IServerConcurrencyLimiter concurrencyLimiter,
         GatewaySettings settings,
-        IApiKeyRequestContext apiKeyContext)
+        IApiKeyRequestContext apiKeyContext,
+        IEngineCatalog? engines = null)
     {
         _context = context;
         _serverManager = serverManager;
         _concurrencyLimiter = concurrencyLimiter;
         _settings = settings;
         _apiKeyContext = apiKeyContext;
+        _engines = engines;
     }
 
     public async Task<RouteDecision?> RouteAsync(RouteRequest request, CancellationToken cancellationToken = default)
@@ -42,6 +45,13 @@ public class RoutingEngine : IRoutingEngine
         // the request to whatever instance happens to already be running a different model.
         var targetPreset = await ResolveTargetPresetAsync(request, cancellationToken);
 
+        // A chat request naming an image model (or the reverse) can't be served by any server —
+        // say so instead of starting the model just to have it reject the request.
+        if (targetPreset is not null
+            && await GetInstanceAsync(targetPreset.ServerInstanceId, cancellationToken) is { } owner
+            && ModalityOf(owner) != request.Modality)
+            throw new ModelModalityMismatchException(targetPreset.Name, ModalityOf(owner), request.Modality);
+
         // 1. Evaluate rules by priority from database (admin-defined overrides)
         var rules = await _context.RoutingRules.OrderBy(r => r.Priority).ToListAsync(cancellationToken);
 
@@ -51,7 +61,7 @@ public class RoutingEngine : IRoutingEngine
                 continue;
 
             var instance = await GetInstanceAsync(rule.TargetServerInstanceId, cancellationToken);
-            if (instance is null)
+            if (instance is null || ModalityOf(instance) != request.Modality)
                 continue;
 
             var ready = await EnsureInstanceServesPresetAsync(instance, targetPreset, cancellationToken);
@@ -93,7 +103,7 @@ public class RoutingEngine : IRoutingEngine
         // IsBusy is [NotMapped] so meaningless across requests; queue handles concurrency.
         var allInstances = _serverManager.GetAllInstances();
         var healthyInstances = allInstances
-            .Where(s => s.Status == ServerStatus.Running && s.IsHealthy)
+            .Where(s => s.Status == ServerStatus.Running && s.IsHealthy && ModalityOf(s) == request.Modality)
             .Where(s => targetPreset is null || s.ActivePresetId == targetPreset.Id)
             .ToList();
 
@@ -122,7 +132,7 @@ public class RoutingEngine : IRoutingEngine
         if (targetPreset is null)
         {
             var idleInstances = allInstances
-                .Where(s => s.Status == ServerStatus.Idle || s.Status == ServerStatus.Error)
+                .Where(s => (s.Status == ServerStatus.Idle || s.Status == ServerStatus.Error) && ModalityOf(s) == request.Modality)
                 .ToList();
 
             foreach (var instance in idleInstances)
@@ -171,7 +181,7 @@ public class RoutingEngine : IRoutingEngine
                 continue;
 
             var instance = await GetInstanceAsync(fallback.ServerInstanceId, cancellationToken);
-            if (instance is null)
+            if (instance is null || ModalityOf(instance) != request.Modality)
                 continue;
 
             if (instance.Status == ServerStatus.Running && instance.IsHealthy && instance.ActivePresetId == fallback.Id)
@@ -362,6 +372,10 @@ public class RoutingEngine : IRoutingEngine
 
         return true;
     }
+
+    /// <summary>What <paramref name="instance"/>'s engine generates (everything is text when no catalog was given).</summary>
+    private EngineModality ModalityOf(ServerInstance instance) =>
+        _engines?.ModalityOf(instance.Engine) ?? EngineModality.Text;
 
     private Task<ServerInstance?> GetInstanceAsync(Guid instanceId, CancellationToken ct = default)
     {

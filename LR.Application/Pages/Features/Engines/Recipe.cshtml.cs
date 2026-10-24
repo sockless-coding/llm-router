@@ -17,6 +17,10 @@ public class EngineRecipeModel : PageModel
     [BindProperty(SupportsGet = true)]
     public Guid CloneFrom { get; set; }
 
+    /// <summary>The engine a brand-new recipe is for (<c>?engine=</c>, from the tab's "New recipe" link).</summary>
+    [BindProperty(SupportsGet = true)]
+    public ServerEngine? Engine { get; set; }
+
     [BindProperty] public RecipeInput Input { get; set; } = new();
 
     public bool IsExisting { get; set; }
@@ -24,11 +28,17 @@ public class EngineRecipeModel : PageModel
     public string? StatusMessage { get; set; }
     public IReadOnlyList<LlamaCppBuildRecipe> AllRecipes { get; set; } = new List<LlamaCppBuildRecipe>();
 
+    /// <summary>Engines a recipe can compile, for the engine picker.</summary>
+    public static IReadOnlyList<(ServerEngine Engine, string Label)> RecipeEngines { get; } =
+    [
+        (ServerEngine.LlamaCpp, "llama.cpp"),
+        (ServerEngine.StableDiffusionCpp, "stable-diffusion.cpp"),
+    ];
+
     public EngineRecipeModel(IEngineBuildManager manager) => _manager = manager;
 
     public async Task<IActionResult> OnGetAsync()
     {
-        AllRecipes = await _manager.GetRecipesAsync();
 
         var source = Id != Guid.Empty ? await _manager.GetRecipeAsync(Id)
             : CloneFrom != Guid.Empty ? await _manager.GetRecipeAsync(CloneFrom)
@@ -49,13 +59,19 @@ public class EngineRecipeModel : PageModel
                 Input.Name = $"{source.Name} (copy)";
             }
         }
+        else if (Engine is { } engine)
+        {
+            Input.Engine = engine;
+            Input.GitRepoUrl = LlamaCppBuildRecipe.DefaultRepoUrl(engine);
+        }
 
+        AllRecipes = await _manager.GetRecipesAsync(Input.Engine);
         return Page();
     }
 
     public async Task<IActionResult> OnPostAsync()
     {
-        AllRecipes = await _manager.GetRecipesAsync();
+        AllRecipes = await _manager.GetRecipesAsync(Input.Engine);
 
         if (string.IsNullOrWhiteSpace(Input.Name))
         {
@@ -76,17 +92,18 @@ public class EngineRecipeModel : PageModel
 
     public async Task<IActionResult> OnPostDeleteAsync()
     {
+        var engine = (await _manager.GetRecipeAsync(Id))?.Engine;
         await _manager.DeleteRecipeAsync(Id);
-        return RedirectToPage("Index");
+        return RedirectToPage("Index", new { engine });
     }
 
     /// <summary>
-    /// Fetches llama.cpp's own build docs / example scripts for a backend and returns the candidate
+    /// Fetches the engine's own build docs / example scripts for a backend and returns the candidate
     /// cmake commands (with a best-effort parse). Called from the recipe editor's reference panel.
     /// </summary>
-    public async Task<IActionResult> OnGetReferenceAsync(BackendType backend, CancellationToken ct)
+    public async Task<IActionResult> OnGetReferenceAsync(ServerEngine engine, BackendType backend, CancellationToken ct)
     {
-        var docs = await _manager.GetUpstreamReferenceAsync(backend, ct);
+        var docs = await _manager.GetUpstreamReferenceAsync(engine, backend, ct);
         return new JsonResult(new
         {
             docs = docs.Select(d => new
@@ -111,10 +128,11 @@ public class EngineRecipeModel : PageModel
 
     public class RecipeInput
     {
+        public ServerEngine Engine { get; set; } = ServerEngine.LlamaCpp;
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
         public BackendType BackendType { get; set; } = BackendType.Cpu;
-        public string GitRepoUrl { get; set; } = "https://github.com/ggml-org/llama.cpp";
+        public string GitRepoUrl { get; set; } = LlamaCppBuildRecipe.DefaultRepoUrl(ServerEngine.LlamaCpp);
         public string GitRef { get; set; } = "master";
         public string CMakeArgsText { get; set; } = "";
         public string? CMakeGenerator { get; set; }
@@ -124,6 +142,7 @@ public class EngineRecipeModel : PageModel
 
         public static RecipeInput From(LlamaCppBuildRecipe r) => new()
         {
+            Engine = r.Engine,
             Name = r.Name,
             Description = r.Description,
             BackendType = r.BackendType,
@@ -139,10 +158,11 @@ public class EngineRecipeModel : PageModel
         public LlamaCppBuildRecipe ToRecipe(Guid id) => new()
         {
             Id = id,
+            Engine = Engine,
             Name = Name.Trim(),
             Description = Description?.Trim(),
             BackendType = BackendType,
-            GitRepoUrl = string.IsNullOrWhiteSpace(GitRepoUrl) ? "https://github.com/ggml-org/llama.cpp" : GitRepoUrl.Trim(),
+            GitRepoUrl = string.IsNullOrWhiteSpace(GitRepoUrl) ? LlamaCppBuildRecipe.DefaultRepoUrl(Engine) : GitRepoUrl.Trim(),
             GitRef = string.IsNullOrWhiteSpace(GitRef) ? "master" : GitRef.Trim(),
             CMakeArgs = SplitLines(CMakeArgsText),
             CMakeGenerator = string.IsNullOrWhiteSpace(CMakeGenerator) ? null : CMakeGenerator.Trim(),

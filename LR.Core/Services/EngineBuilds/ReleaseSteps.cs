@@ -24,7 +24,7 @@ public sealed class ResolveReleaseAssetStep : IBuildStep
         ctx.TargetArch = arch;
 
         await ctx.Sink.PhaseAsync(Phase, ctx.ReleaseTag is null
-            ? "Looking up the latest llama.cpp release…"
+            ? $"Looking up the latest {ctx.Profile.DisplayName} release…"
             : $"Looking up release {ctx.ReleaseTag}…");
 
         var release = ctx.ReleaseTag is null
@@ -37,9 +37,9 @@ public sealed class ResolveReleaseAssetStep : IBuildStep
                 : $"Release '{ctx.ReleaseTag}' was not found.");
 
         ctx.Release = release;
-        ctx.ResolvedVersionTag = ReleaseAssetResolver.ExtractBuildTag(release.TagName) ?? release.TagName;
+        ctx.ResolvedVersionTag = ctx.Profile.VersionTagOf(release.TagName);
 
-        var selected = ReleaseAssetResolver.Resolve(release.Assets, ctx.BackendType, os, arch);
+        var selected = ctx.Profile.Resolve(release.Assets, ctx.BackendType, os, arch);
         ctx.SelectedAssets.AddRange(selected);
 
         await ctx.Sink.PhaseAsync(Phase,
@@ -100,8 +100,8 @@ public sealed class ExtractArchiveStep : IBuildStep
                 ZipFile.ExtractToDirectory(archivePath, stagingDir, overwriteFiles: true);
             }
 
-            // llama.cpp archives sometimes nest everything under a single "build/bin" or top-level
-            // folder — flatten so llama-server ends up directly in OutputDir.
+            // Release archives sometimes nest everything under a single "build/bin" or top-level
+            // folder — flatten so the server executable ends up directly in OutputDir.
             var root = FindPayloadRoot(stagingDir);
             CopyDirectory(root, ctx.OutputDir);
         }
@@ -142,7 +142,8 @@ public sealed class ExtractArchiveStep : IBuildStep
 }
 
 /// <summary>
-/// Verifies <c>llama-server</c> landed in the output folder and records the size. The runner reads
+/// Verifies the engine's server executable (<see cref="EngineReleaseProfile.ServerExecutableName"/>,
+/// e.g. <c>llama-server</c>) landed in the output folder and records the size. The runner reads
 /// <see cref="BuildContext.ResolvedVersionTag"/>/<see cref="BuildContext.ResolvedCommitSha"/> back
 /// onto the build row.
 /// </summary>
@@ -152,7 +153,7 @@ public sealed class FinalizeBuildStep : IBuildStep
 
     public Task ExecuteAsync(BuildContext ctx, CancellationToken ct)
     {
-        var serverName = OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
+        var serverName = ctx.Profile.ServerExecutableName;
         var serverPath = Directory.EnumerateFiles(ctx.OutputDir, serverName, SearchOption.AllDirectories).FirstOrDefault()
             ?? throw new InvalidOperationException($"{serverName} was not found under {ctx.OutputDir} after install.");
 

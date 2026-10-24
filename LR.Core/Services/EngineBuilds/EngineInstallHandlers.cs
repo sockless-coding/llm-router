@@ -22,6 +22,25 @@ public sealed class LlamaCppInstallHandler : IEngineInstallHandler
     public void RefreshFromDisk(EngineBuild build) { }
 }
 
+/// <summary>stable-diffusion.cpp builds: a folder holding <c>sd-server</c>, compared against the latest release.</summary>
+public sealed class SdCppInstallHandler : IEngineInstallHandler
+{
+    public ServerEngine Engine => ServerEngine.StableDiffusionCpp;
+
+    public string Repo => SdCppReleaseProfile.RepoName;
+
+    public bool IsInstallPresent(string installPath) =>
+        File.Exists(Path.Combine(installPath, "sd-server.exe")) ||
+        File.Exists(Path.Combine(installPath, "sd-server"));
+
+    public bool IsReady(string installPath) => IsInstallPresent(installPath);
+
+    public async Task<string?> GetLatestRefAsync(EngineBuild build, IGitHubClient github, CancellationToken ct = default) =>
+        (await github.GetLatestReleaseAsync(Repo, ct))?.TagName;
+
+    public void RefreshFromDisk(EngineBuild build) { }
+}
+
 /// <summary>
 /// Strata checkouts: a release install (<see cref="EngineBuildSource.OfficialRelease"/>, pinned to a
 /// tag) is compared against the latest release, a checkout following the branch
