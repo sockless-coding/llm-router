@@ -84,8 +84,9 @@ public class EnginesIndexModel : PageModel
     {
         var engine = SelectedEngine.Engine;
         Builds = await _manager.GetBuildsAsync(engine);
-        if (engine == ServerEngine.LlamaCpp)
-            Recipes = await _manager.GetRecipesAsync();
+        // Engines that publish ggml-style release binaries can also be compiled from a recipe.
+        if (EngineReleaseProfile.For(engine) is not null)
+            Recipes = await _manager.GetRecipesAsync(engine);
 
         foreach (var b in Builds)
         {

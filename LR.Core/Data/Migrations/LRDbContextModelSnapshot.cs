@@ -326,6 +326,9 @@ namespace LR.Core.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Engine")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("EnvironmentSetupCommand")
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");

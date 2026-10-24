@@ -6,7 +6,8 @@ using LR.Core.Models;
 namespace LR.Core.Services.EngineBuilds;
 
 /// <summary>
-/// Surfaces llama.cpp's own build documentation and example scripts next to the recipe editor, and
+/// Surfaces the engine's own build documentation and example scripts (llama.cpp, stable-diffusion.cpp)
+/// next to the recipe editor, and
 /// does a best-effort parse of a <c>cmake</c> configure line into the structured fields a
 /// <see cref="LlamaCppBuildRecipe"/> uses. It never edits a recipe on its own — the user reviews
 /// what it extracts before applying it.
@@ -16,7 +17,17 @@ public static class UpstreamBuildDocs
     /// <summary>Branch the reference docs are read from (docs at old tags are often missing/stale).</summary>
     public const string DocsRef = "master";
 
-    /// <summary>Repo-relative doc / example-script paths to show for each backend.</summary>
+    /// <summary>Repo-relative doc / example-script paths to show for an engine's backend.</summary>
+    public static IReadOnlyList<string> SourcesFor(ServerEngine engine, BackendType backend) => engine switch
+    {
+        // sd.cpp documents every backend in one file; HIP on Windows has its own guide.
+        ServerEngine.StableDiffusionCpp => backend == BackendType.Hip
+            ? new[] { "docs/build.md", "docs/hipBLAS_on_Windows.md" }
+            : new[] { "docs/build.md" },
+        _ => SourcesFor(backend),
+    };
+
+    /// <summary>llama.cpp's repo-relative doc / example-script paths to show for each backend.</summary>
     public static IReadOnlyList<string> SourcesFor(BackendType backend) => backend switch
     {
         BackendType.Cpu => new[] { "docs/build.md" },
@@ -40,24 +51,26 @@ public static class UpstreamBuildDocs
     public static string GitHubUrlFor(string repo, string path) =>
         $"https://github.com/{repo}/blob/{DocsRef}/{path}";
 
-    // The accelerator flag each backend is identified by inside the shared build.md.
-    private static readonly Dictionary<BackendType, string> BackendFlag = new()
+    // The accelerator flags each backend is identified by inside the shared build.md — llama.cpp's
+    // GGML_* switch, and stable-diffusion.cpp's own SD_* one.
+    private static readonly Dictionary<BackendType, string[]> BackendFlags = new()
     {
-        [BackendType.Cuda] = "GGML_CUDA",
-        [BackendType.Vulkan] = "GGML_VULKAN",
-        [BackendType.Sycl] = "GGML_SYCL",
-        [BackendType.Hip] = "GGML_HIP",
-        [BackendType.Metal] = "GGML_METAL",
-        [BackendType.OpenCL] = "GGML_OPENCL",
-        [BackendType.OpenVino] = "GGML_OPENVINO",
-        [BackendType.Musa] = "GGML_MUSA",
-        [BackendType.Cann] = "GGML_CANN",
+        [BackendType.Cuda] = new[] { "GGML_CUDA", "SD_CUDA" },
+        [BackendType.Vulkan] = new[] { "GGML_VULKAN", "SD_VULKAN" },
+        [BackendType.Sycl] = new[] { "GGML_SYCL", "SD_SYCL" },
+        [BackendType.Hip] = new[] { "GGML_HIP", "SD_HIPBLAS" },
+        [BackendType.Metal] = new[] { "GGML_METAL", "SD_METAL" },
+        [BackendType.OpenCL] = new[] { "GGML_OPENCL", "SD_OPENCL" },
+        [BackendType.OpenVino] = new[] { "GGML_OPENVINO" },
+        [BackendType.Musa] = new[] { "GGML_MUSA", "SD_MUSA" },
+        [BackendType.Cann] = new[] { "GGML_CANN" },
     };
 
     private static readonly string[] AllAcceleratorFlags =
     {
         "GGML_CUDA", "GGML_VULKAN", "GGML_SYCL", "GGML_HIP", "GGML_MUSA", "GGML_CANN",
-        "GGML_METAL", "GGML_OPENCL", "GGML_OPENVINO", "GGML_BLAS", "GGML_ZENDNN",
+        "GGML_METAL", "GGML_OPENCL", "GGML_OPENVINO", "GGML_BLAS", "GGML_OPENBLAS", "GGML_ZENDNN",
+        "SD_CUDA", "SD_VULKAN", "SD_SYCL", "SD_HIPBLAS", "SD_MUSA", "SD_METAL", "SD_OPENCL",
     };
 
     /// <summary>
@@ -110,10 +123,10 @@ public static class UpstreamBuildDocs
         // Metal is on by default on macOS, so its documented command is a plain `cmake -B build` —
         // show both the generic commands and any explicit GGML_METAL ones.
         if (backend == BackendType.Metal)
-            return hasNoAccelerator || command.Contains("GGML_METAL", StringComparison.OrdinalIgnoreCase);
+            return hasNoAccelerator || BackendFlags[backend].Any(f => command.Contains(f, StringComparison.OrdinalIgnoreCase));
 
-        if (BackendFlag.TryGetValue(backend, out var flag))
-            return command.Contains(flag, StringComparison.OrdinalIgnoreCase);
+        if (BackendFlags.TryGetValue(backend, out var flags))
+            return flags.Any(f => command.Contains(f, StringComparison.OrdinalIgnoreCase));
 
         // CPU: skip anything that turns on another backend or a BLAS vendor.
         return hasNoAccelerator;

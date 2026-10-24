@@ -3,10 +3,11 @@ using LR.Core.Models;
 namespace LR.Core.Services.EngineBuilds;
 
 /// <summary>
-/// The recipe templates seeded on startup (<see cref="LlamaCppBuildRecipe.IsBuiltIn"/>). They're a
-/// starting point — users duplicate one and adjust for their machine.
+/// The recipe templates seeded on startup (<see cref="LlamaCppBuildRecipe.IsBuiltIn"/>), for each
+/// engine that compiles from source. They're a starting point — users duplicate one and adjust for
+/// their machine. Built-ins are matched by engine + name, so names only need to be unique per engine.
 ///
-/// The CMake flags / generator / environment-setup commands here are taken from llama.cpp's own
+/// The llama.cpp CMake flags / generator / environment-setup commands here are taken from llama.cpp's own
 /// build documentation on the <c>master</c> branch, not invented:
 /// <list type="bullet">
 ///   <item><c>docs/build.md</c> — per-backend <c>cmake</c> invocations (CPU, CUDA, Vulkan, HIP,
@@ -35,7 +36,9 @@ public static class BuiltInRecipeTemplates
         ? new[] { "-DCMAKE_C_COMPILER=cl", "-DCMAKE_CXX_COMPILER=icx" }
         : new[] { "-DCMAKE_C_COMPILER=icx", "-DCMAKE_CXX_COMPILER=icpx" };
 
-    public static IEnumerable<LlamaCppBuildRecipe> All()
+    public static IEnumerable<LlamaCppBuildRecipe> All() => LlamaCpp().Concat(StableDiffusionCpp());
+
+    private static IEnumerable<LlamaCppBuildRecipe> LlamaCpp()
     {
         yield return new LlamaCppBuildRecipe
         {
@@ -145,6 +148,100 @@ public static class BuiltInRecipeTemplates
             BackendType = BackendType.Cann,
             EnvironmentSetupCommand = "source /usr/local/Ascend/cann/set_env.sh",
             CMakeArgs = new() { "-DGGML_CANN=on", "-DLLAMA_CURL=OFF" },
+        };
+    }
+
+    /// <summary>
+    /// stable-diffusion.cpp templates, from its <c>docs/build.md</c>. It vendors ggml as a submodule
+    /// and turns a backend on with its own <c>SD_*</c> switch (which sets the matching
+    /// <c>GGML_*</c> one); plain <c>GGML_*</c> options such as <c>GGML_SYCL_F16</c> pass straight
+    /// through. The upstream SYCL docs are Linux-only — the Windows values mirror llama.cpp's
+    /// (Ninja, <c>cl</c> + <c>icx</c>), since both drive the same ggml SYCL backend.
+    /// </summary>
+    private static IEnumerable<LlamaCppBuildRecipe> StableDiffusionCpp()
+    {
+        const string docs = "Source: stable-diffusion.cpp docs/build.md.";
+        var repo = LlamaCppBuildRecipe.DefaultRepoUrl(ServerEngine.StableDiffusionCpp);
+
+        yield return new LlamaCppBuildRecipe
+        {
+            Engine = ServerEngine.StableDiffusionCpp,
+            Name = "CPU (portable)",
+            Description = $"Portable CPU build (GGML_NATIVE=OFF) — runs on any x64 host. {docs}",
+            BackendType = BackendType.Cpu,
+            GitRepoUrl = repo,
+            CMakeArgs = new() { "-DGGML_NATIVE=OFF" },
+        };
+
+        yield return new LlamaCppBuildRecipe
+        {
+            Engine = ServerEngine.StableDiffusionCpp,
+            Name = "CUDA",
+            Description = $"NVIDIA CUDA build. Needs the CUDA Toolkit (nvcc). {docs}",
+            BackendType = BackendType.Cuda,
+            GitRepoUrl = repo,
+            CMakeArgs = new() { "-DSD_CUDA=ON" },
+        };
+
+        yield return new LlamaCppBuildRecipe
+        {
+            Engine = ServerEngine.StableDiffusionCpp,
+            Name = "Vulkan",
+            Description = $"Cross-vendor Vulkan build. Needs the Vulkan SDK (glslc). {docs}",
+            BackendType = BackendType.Vulkan,
+            GitRepoUrl = repo,
+            CMakeArgs = new() { "-DSD_VULKAN=ON" },
+        };
+
+        yield return new LlamaCppBuildRecipe
+        {
+            Engine = ServerEngine.StableDiffusionCpp,
+            Name = "SYCL FP32",
+            Description = $"Intel oneAPI SYCL build (FP32, upstream's recommended mode). No official SYCL release exists for sd.cpp. {docs}",
+            BackendType = BackendType.Sycl,
+            GitRepoUrl = repo,
+            CMakeGenerator = Win ? "Ninja" : null,
+            EnvironmentSetupCommand = SyclEnvSetup,
+            CMakeArgs = new List<string> { "-DSD_SYCL=ON" }.Concat(SyclCompilerArgs).ToList(),
+        };
+
+        yield return new LlamaCppBuildRecipe
+        {
+            Engine = ServerEngine.StableDiffusionCpp,
+            Name = "SYCL FP16",
+            Description = $"Intel oneAPI SYCL build with GGML_SYCL_F16=ON (half-precision path). {docs}",
+            BackendType = BackendType.Sycl,
+            GitRepoUrl = repo,
+            CMakeGenerator = Win ? "Ninja" : null,
+            EnvironmentSetupCommand = SyclEnvSetup,
+            CMakeArgs = new List<string> { "-DSD_SYCL=ON" }.Concat(SyclCompilerArgs).Append("-DGGML_SYCL_F16=ON").ToList(),
+        };
+
+        yield return new LlamaCppBuildRecipe
+        {
+            Engine = ServerEngine.StableDiffusionCpp,
+            Name = "HIP / ROCm",
+            Description = "AMD ROCm/HIP build. Needs ROCm installed. Set GPU_TARGETS/AMDGPU_TARGETS to your GPU arch " +
+                          $"(gfx1100 = RX 7900, gfx1030 = RX 6800/6900; check with rocminfo). {docs}",
+            BackendType = BackendType.Hip,
+            GitRepoUrl = repo,
+            CMakeGenerator = "Ninja",
+            EnvironmentSetupCommand = Win ? "set PATH=%HIP_PATH%\\bin;%PATH%" : null,
+            CMakeArgs = new()
+            {
+                "-DSD_HIPBLAS=ON", "-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++",
+                "-DGPU_TARGETS=gfx1100", "-DAMDGPU_TARGETS=gfx1100",
+            },
+        };
+
+        yield return new LlamaCppBuildRecipe
+        {
+            Engine = ServerEngine.StableDiffusionCpp,
+            Name = "Metal (macOS)",
+            Description = $"Apple Metal build — macOS only. {docs}",
+            BackendType = BackendType.Metal,
+            GitRepoUrl = repo,
+            CMakeArgs = new() { "-DSD_METAL=ON" },
         };
     }
 }

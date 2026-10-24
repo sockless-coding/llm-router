@@ -8,7 +8,7 @@
 }
 
 <div class="flex items-center gap-3 mb-6">
-    <a href="/Features/Engines/Index" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
+    <a href="/Features/Engines/Index?engine=@Model.Input.Engine" class="text-text-secondary hover:text-neon-cyan transition-colors text-sm">← Engines</a>
     <span class="text-text-secondary">/</span>
     <p class="text-text-primary text-sm font-medium">@ViewData["Title"]</p>
 </div>
@@ -26,10 +26,19 @@
 
 <form method="post" hx-boost="false" class="bg-cyber-card rounded-xl border border-gray-700/30 p-6 space-y-4 max-w-3xl">
     @Html.AntiForgeryToken()
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
             <label class="@label" asp-for="Input.Name">Name</label>
             <input class="@input" asp-for="Input.Name" />
+        </div>
+        <div>
+            <label class="@label" asp-for="Input.Engine">Engine</label>
+            <select class="@input" asp-for="Input.Engine">
+                @foreach (var (engine, engineLabel) in LR.Application.Pages.Features.Engines.EngineRecipeModel.RecipeEngines)
+                {
+                    <option value="@engine" data-repo="@LlamaCppBuildRecipe.DefaultRepoUrl(engine)" selected="@(engine == Model.Input.Engine)">@engineLabel</option>
+                }
+            </select>
         </div>
         <div>
             <label class="@label" asp-for="Input.BackendType">Backend</label>
@@ -61,7 +70,7 @@
             Upstream build reference
         </summary>
         <div class="px-4 pb-4 pt-1 space-y-3">
-            <p class="text-xs text-text-secondary">The <code>cmake</code> commands llama.cpp documents for the selected backend, pulled live from its repo. "Apply" fills the fields above — review before saving.</p>
+            <p class="text-xs text-text-secondary">The <code>cmake</code> commands the selected engine documents for the selected backend, pulled live from its repo. "Apply" fills the fields above — review before saving.</p>
             <button type="button" id="ref-load" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">Load reference</button>
             <div id="ref-body" class="space-y-4"></div>
         </div>
@@ -113,6 +122,17 @@
     <script>
         (function () {
             const backendSelect = document.getElementById('Input_BackendType');
+            const engineSelect = document.getElementById('Input_Engine');
+            const repoField = document.getElementById('Input_GitRepoUrl');
+
+            // Switching engine swaps the repo URL too — unless it's been changed to a fork.
+            if (engineSelect && repoField) {
+                const defaults = [...engineSelect.options].map(o => o.dataset.repo);
+                engineSelect.addEventListener('change', () => {
+                    if (!repoField.value.trim() || defaults.includes(repoField.value.trim()))
+                        repoField.value = engineSelect.selectedOptions[0].dataset.repo;
+                });
+            }
             const loadBtn = document.getElementById('ref-load');
             const body = document.getElementById('ref-body');
             if (!loadBtn || !body) return;
@@ -134,10 +154,11 @@
 
             async function load() {
                 const backend = backendSelect ? backendSelect.value : 'Cpu';
-                loadedFor = backend;
+                const engine = engineSelect ? engineSelect.value : 'LlamaCpp';
+                loadedFor = engine + '/' + backend;
                 body.innerHTML = '<p class="text-xs text-text-secondary">Loading…</p>';
                 try {
-                    const resp = await fetch(`/Features/Engines/Recipe?handler=Reference&backend=${encodeURIComponent(backend)}`);
+                    const resp = await fetch(`/Features/Engines/Recipe?handler=Reference&engine=${encodeURIComponent(engine)}&backend=${encodeURIComponent(backend)}`);
                     const data = await resp.json();
                     body.innerHTML = data.docs.map(renderDoc).join('') || '<p class="text-xs text-text-secondary">Nothing found.</p>';
                 } catch (e) {
@@ -168,7 +189,11 @@
             }
 
             loadBtn.addEventListener('click', load);
-            if (backendSelect) backendSelect.addEventListener('change', () => { if (loadedFor && loadedFor !== backendSelect.value) load(); });
+            const reloadIfStale = () => {
+                if (loadedFor && loadedFor !== `${engineSelect ? engineSelect.value : 'LlamaCpp'}/${backendSelect ? backendSelect.value : 'Cpu'}`) load();
+            };
+            if (backendSelect) backendSelect.addEventListener('change', reloadIfStale);
+            if (engineSelect) engineSelect.addEventListener('change', reloadIfStale);
         })();
     </script>
 }

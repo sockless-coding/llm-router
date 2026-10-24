@@ -161,10 +161,12 @@ public partial class EngineBuildService
             var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
             recipe = await context.LlamaCppBuildRecipes.FindAsync(recipeId)
                 ?? throw new InvalidOperationException("Recipe not found.");
+            var profile = EngineReleaseProfile.For(recipe.Engine)
+                ?? throw new InvalidOperationException($"{recipe.Engine} can't be compiled from a recipe.");
 
             var refLabel = string.IsNullOrWhiteSpace(gitRefOverride) ? recipe.GitRef : gitRefOverride!;
             var recipeSlug = SanitizeFolder(recipe.Name).Replace(' ', '-').ToLowerInvariant();
-            var folderName = SanitizeFolder($"{refLabel}-{recipe.BackendType.ToString().ToLowerInvariant()}-{recipeSlug}");
+            var folderName = SanitizeFolder($"{profile.FolderPrefix}{refLabel}-{recipe.BackendType.ToString().ToLowerInvariant()}-{recipeSlug}");
             outputDir = Path.GetFullPath(Path.Combine(installRoot, folderName));
 
             if (await context.EngineBuilds.AnyAsync(b => b.InstallPath == outputDir))
@@ -174,6 +176,7 @@ public partial class EngineBuildService
             {
                 Id = Guid.NewGuid(),
                 Name = name ?? $"{recipe.Name} ({refLabel})",
+                Engine = recipe.Engine,
                 BackendType = recipe.BackendType,
                 Source = EngineBuildSource.SourceCompile,
                 RecipeId = recipe.Id,
@@ -289,7 +292,7 @@ public partial class EngineBuildService
         var ctx = new BuildContext
         {
             BuildId = buildId,
-            Repo = source == EngineBuildSource.OfficialRelease ? profile.Repo : EngineBuildManager.LlamaCppRepo,
+            Repo = profile.Repo,
             BackendType = backend,
             Profile = profile,
             Recipe = recipe,
@@ -429,11 +432,13 @@ public partial class EngineBuildService
             System.Text.Encoding.UTF8.GetBytes(recipe.GitRepoUrl)))[..12].ToLowerInvariant();
         var sharedSrc = Path.Combine(workspaceRoot, ".src", repoKey);
 
+        var profile = EngineReleaseProfile.For(recipe.Engine)!;
         var ctx = new BuildContext
         {
             BuildId = buildId,
-            Repo = EngineBuildManager.LlamaCppRepo,
+            Repo = profile.Repo,
             BackendType = recipe.BackendType,
+            Profile = profile,
             Recipe = recipe,
             GitRefOverride = gitRefOverride,
             WorkRoot = workRoot,

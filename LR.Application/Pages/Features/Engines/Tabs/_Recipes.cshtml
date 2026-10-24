@@ -1,0 +1,29 @@
+@using LR.Core.Models
+@using LR.Application.Pages.Features.Engines
+@model LR.Application.Pages.Features.Engines.EnginesIndexModel
+@* The selected engine's compile-from-source recipes — shared by the engine tabs that can build from source. *@
+
+<div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold uppercase tracking-wider text-text-secondary">Compile recipes</h2>
+    <a href="/Features/Engines/Recipe?engine=@Model.SelectedEngine.Engine" class="text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all font-medium">New recipe</a>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    @foreach (var r in Model.Recipes)
+    {
+        <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4">
+            <div class="flex items-center justify-between mb-1">
+                <a href="/Features/Engines/Recipe?id=@r.Id" class="text-text-primary font-medium hover:text-neon-magenta transition-colors">@r.Name</a>
+                <span class="text-xs px-2 py-0.5 rounded border @EngineDisplay.BackendBadge(r.BackendType)">@EngineDisplay.BackendLabel(r.BackendType)</span>
+            </div>
+            <p class="text-xs text-text-secondary mb-3">@r.Description</p>
+            <p class="text-[11px] text-text-secondary font-mono break-words mb-3">@string.Join(" ", r.CMakeArgs)</p>
+            <div class="flex items-center gap-2">
+                <button type="button" onclick="startBuild('@r.Id', '@r.Name')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Build now</button>
+                @if (r.IsBuiltIn)
+                {
+                    <span class="text-[11px] text-text-secondary">built-in</span>
+                }
+            </div>
+        </div>
+    }
+</div>

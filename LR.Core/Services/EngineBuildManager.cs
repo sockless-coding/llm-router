@@ -9,7 +9,7 @@ namespace LR.Core.Services;
 
 /// <summary>
 /// Registry of managed engine installs (llama.cpp builds, Strata checkouts) and the reusable
-/// llama.cpp compile recipes, with SQLite persistence via EF Core. Engine-specific checks go
+/// compile recipes (llama.cpp, stable-diffusion.cpp), with SQLite persistence via EF Core. Engine-specific checks go
 /// through each engine's <see cref="IEngineInstallHandler"/>. Mirrors <see cref="ModelLibraryManager"/>.
 /// </summary>
 public class EngineBuildManager : IEngineBuildManager
@@ -88,9 +88,10 @@ public class EngineBuildManager : IEngineBuildManager
     public Task<int> GetServerUsageCountAsync(Guid buildId) =>
         _context.BackendConfigs.CountAsync(c => c.EngineBuildId == buildId);
 
-    public async Task<IReadOnlyList<LlamaCppBuildRecipe>> GetRecipesAsync()
+    public async Task<IReadOnlyList<LlamaCppBuildRecipe>> GetRecipesAsync(ServerEngine? engine = null)
     {
         var list = await _context.LlamaCppBuildRecipes
+            .Where(r => engine == null || r.Engine == engine)
             .OrderByDescending(r => r.IsBuiltIn)
             .ThenBy(r => r.Name)
             .ToListAsync();
@@ -115,6 +116,7 @@ public class EngineBuildManager : IEngineBuildManager
         }
         else
         {
+            existing.Engine = recipe.Engine;
             existing.Name = recipe.Name;
             existing.Description = recipe.Description;
             existing.BackendType = recipe.BackendType;
@@ -147,11 +149,12 @@ public class EngineBuildManager : IEngineBuildManager
         var existing = await _context.LlamaCppBuildRecipes
             .Where(r => r.IsBuiltIn)
             .ToListAsync(ct);
-        var byName = existing.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+        // Engines reuse names ("CUDA", "SYCL FP32"), so a built-in is identified by engine + name.
+        var byKey = existing.ToDictionary(r => (r.Engine, r.Name.ToLowerInvariant()));
 
         foreach (var template in BuiltInRecipeTemplates.All())
         {
-            if (byName.TryGetValue(template.Name, out var current))
+            if (byKey.TryGetValue((template.Engine, template.Name.ToLowerInvariant()), out var current))
             {
                 // Keep built-in rows in sync with the templates (they're read-only in the UI —
                 // editing one saves a user copy — so overwriting here is safe and lets doc-based
@@ -315,15 +318,16 @@ public class EngineBuildManager : IEngineBuildManager
         return result;
     }
 
-    public async Task<IReadOnlyList<UpstreamDocReference>> GetUpstreamReferenceAsync(BackendType backend, CancellationToken ct = default)
+    public async Task<IReadOnlyList<UpstreamDocReference>> GetUpstreamReferenceAsync(ServerEngine engine, BackendType backend, CancellationToken ct = default)
     {
+        var repo = EngineReleaseProfile.For(engine)?.Repo ?? Repo;
         var refs = new List<UpstreamDocReference>();
-        foreach (var path in UpstreamBuildDocs.SourcesFor(backend))
+        foreach (var path in UpstreamBuildDocs.SourcesFor(engine, backend))
         {
-            var url = UpstreamBuildDocs.GitHubUrlFor(Repo, path);
+            var url = UpstreamBuildDocs.GitHubUrlFor(repo, path);
             try
             {
-                var content = await _github.GetRawFileAsync(Repo, UpstreamBuildDocs.DocsRef, path, ct);
+                var content = await _github.GetRawFileAsync(repo, UpstreamBuildDocs.DocsRef, path, ct);
                 if (content is null)
                 {
                     refs.Add(new UpstreamDocReference(path, url, Array.Empty<CommandBlock>(), "Not found upstream."));

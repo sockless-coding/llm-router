@@ -33,7 +33,7 @@ public abstract class EngineReleaseProfile
     /// <summary>Whether a release tag is an installable build (skips marker/nightly tags).</summary>
     public abstract bool IsInstallableRelease(string tagName);
 
-    /// <summary>The version recorded on the build row for a release tag.</summary>
+    /// <summary>The version recorded on the build row for a release tag (or a source build's <c>git describe</c>).</summary>
     public virtual string VersionTagOf(string tagName) => tagName;
 
     /// <summary>Regex the primary binary archive name must match, or null for a combo the engine doesn't publish.</summary>

@@ -3,7 +3,8 @@
 
 <div class="flex items-center justify-between mb-4">
     <p class="text-text-secondary text-sm">
-        Install official stable-diffusion.cpp releases for image generation, and track what version each backend folder holds.
+        Install official stable-diffusion.cpp releases for image generation or compile your own from source (e.g. for SYCL, which has no
+        official release), and track what version each backend folder holds.
         Servers on these builds serve <span class="font-mono">/v1/images/generations</span>.
     </p>
     <a href="/Features/Engines/Releases?engine=@ServerEngine.StableDiffusionCpp" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium shrink-0">
@@ -13,3 +14,5 @@
 </div>
 
 <partial name="~/Pages/Features/Engines/Tabs/_ReleaseBuilds.cshtml" model="Model" />
+
+<partial name="~/Pages/Features/Engines/Tabs/_Recipes.cshtml" model="Model" />
