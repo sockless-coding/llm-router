@@ -9,9 +9,15 @@ namespace LR.Core.Interfaces;
 public interface IHuggingFaceClient
 {
     /// <summary>
-    /// Searches for models on the hub, filtered to repos that contain GGUF files.
+    /// Searches for models on the hub, filtered to repos that contain <paramref name="format"/> files
+    /// and, when given, to one pipeline tag (e.g. <c>text-to-image</c>).
     /// </summary>
-    Task<IReadOnlyList<HfModelSummary>> SearchModelsAsync(string query, int limit = 20, CancellationToken ct = default);
+    Task<IReadOnlyList<HfModelSummary>> SearchModelsAsync(
+        string query,
+        HfModelFormat format,
+        string? pipelineTag = null,
+        int limit = 20,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Gets full repo detail (current revision + file list with sizes) for a repo.
@@ -19,9 +25,10 @@ public interface IHuggingFaceClient
     Task<HfRepoDetail?> GetRepoDetailAsync(string repoId, CancellationToken ct = default);
 
     /// <summary>
-    /// Lists just the .gguf files in a repo (a convenience filter over <see cref="GetRepoDetailAsync"/>).
+    /// Lists just the files of <paramref name="format"/> in a repo, subfolders included (a convenience
+    /// filter over <see cref="GetRepoDetailAsync"/>).
     /// </summary>
-    Task<IReadOnlyList<HfRepoFile>> ListGgufFilesAsync(string repoId, CancellationToken ct = default);
+    Task<IReadOnlyList<HfRepoFile>> ListModelFilesAsync(string repoId, HfModelFormat format, CancellationToken ct = default);
 
     /// <summary>
     /// Downloads a single file from a repo to <paramref name="destinationPath"/>, reporting

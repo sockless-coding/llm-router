@@ -30,9 +30,16 @@ public class HuggingFaceClient : IHuggingFaceClient
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<HfModelSummary>> SearchModelsAsync(string query, int limit = 20, CancellationToken ct = default)
+    public async Task<IReadOnlyList<HfModelSummary>> SearchModelsAsync(
+        string query,
+        HfModelFormat format,
+        string? pipelineTag = null,
+        int limit = 20,
+        CancellationToken ct = default)
     {
-        var url = $"{BaseUrl}/api/models?search={Uri.EscapeDataString(query)}&filter=gguf&limit={limit}";
+        var url = $"{BaseUrl}/api/models?search={Uri.EscapeDataString(query)}&filter={format.HubFilter()}&limit={limit}";
+        if (!string.IsNullOrWhiteSpace(pipelineTag))
+            url += $"&pipeline_tag={Uri.EscapeDataString(pipelineTag)}";
         using var request = await CreateRequestAsync(HttpMethod.Get, url, ct);
         using var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
@@ -52,14 +59,14 @@ public class HuggingFaceClient : IHuggingFaceClient
         return await response.Content.ReadFromJsonAsync<HfRepoDetail>(cancellationToken: ct);
     }
 
-    public async Task<IReadOnlyList<HfRepoFile>> ListGgufFilesAsync(string repoId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<HfRepoFile>> ListModelFilesAsync(string repoId, HfModelFormat format, CancellationToken ct = default)
     {
         var detail = await GetRepoDetailAsync(repoId, ct);
         if (detail is null)
             return Array.Empty<HfRepoFile>();
 
         return detail.Siblings
-            .Where(f => f.Filename.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            .Where(f => f.Filename.EndsWith(format.FileExtension(), StringComparison.OrdinalIgnoreCase))
             .OrderBy(f => f.Filename)
             .ToList();
     }

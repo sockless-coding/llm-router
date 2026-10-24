@@ -3,6 +3,39 @@ using System.Text.Json.Serialization;
 namespace LR.Core.Models;
 
 /// <summary>
+/// The model file format the Hugging Face browser searches for: GGUF (llama.cpp, Strata,
+/// stable-diffusion.cpp) or safetensors (the format most diffusion checkpoints, VAEs and text
+/// encoders ship in, which stable-diffusion.cpp loads as is).
+/// </summary>
+public enum HfModelFormat
+{
+    Gguf,
+    Safetensors,
+}
+
+public static class HfModelFormatExtensions
+{
+    /// <summary>The hub's library filter for repos containing this format (<c>?filter=</c>).</summary>
+    public static string HubFilter(this HfModelFormat format) => format switch
+    {
+        HfModelFormat.Safetensors => "safetensors",
+        _ => "gguf",
+    };
+
+    public static string FileExtension(this HfModelFormat format) => format switch
+    {
+        HfModelFormat.Safetensors => ".safetensors",
+        _ => ".gguf",
+    };
+
+    public static string DisplayName(this HfModelFormat format) => format switch
+    {
+        HfModelFormat.Safetensors => "Safetensors",
+        _ => "GGUF",
+    };
+}
+
+/// <summary>
 /// A single search result from the Hugging Face model hub.
 /// </summary>
 public class HfModelSummary

@@ -147,7 +147,7 @@ else
                                 @if (!string.IsNullOrEmpty(groupRepoId))
                                 {
                                     <a href="https://huggingface.co/@groupRepoId" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium" title="Open this model's page on Hugging Face">Model Card</a>
-                                    <a href="/Features/Models/HuggingFace?repoId=@Uri.EscapeDataString(groupRepoId)" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium" title="Download another quant of this model from Hugging Face">+ Version</a>
+                                    <a href="@LR.Application.Pages.Features.Models.ModelsHuggingFaceModel.BrowseRepoUrl(groupRepoId, group.AllModels.First(m => m.HfRepoId == groupRepoId).FilePath)" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium" title="Download another quant of this model from Hugging Face">+ Version</a>
                                 }
                                 @if (!string.IsNullOrEmpty(groupFolder))
                                 {

@@ -59,7 +59,9 @@ public class ModelDownloadService
             var model = new LocalModel
             {
                 Id = Guid.NewGuid(),
-                Name = name ?? Path.GetFileNameWithoutExtension(filename),
+                // Keep the repo subfolder: diffusers-layout components all share a file name
+                // (vae/ and unet/diffusion_pytorch_model.safetensors).
+                Name = name ?? Path.ChangeExtension(filename, null),
                 FilePath = destinationPath,
                 Source = ModelSource.HuggingFace,
                 Status = ModelStatus.Downloading,
@@ -147,7 +149,7 @@ public class ModelDownloadService
             }
             else
             {
-                var sizes = (await _hfClient.ListGgufFilesAsync(repoId, ct))
+                var sizes = (await _hfClient.ListModelFilesAsync(repoId, HfModelFormat.Gguf, ct))
                     .ToDictionary(f => f.Filename, f => f.SizeBytes, StringComparer.OrdinalIgnoreCase);
                 long? total = shardNames.All(n => sizes.GetValueOrDefault(n) is not null)
                     ? shardNames.Sum(n => sizes[n]!.Value)

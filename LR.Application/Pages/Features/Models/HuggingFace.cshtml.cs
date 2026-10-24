@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 using LR.Core.Interfaces;
+using LR.Core.Models;
 using LR.Core.Services;
 
 namespace LR.Application.Pages.Features.Models;
@@ -22,19 +23,35 @@ public class ModelsHuggingFaceModel : PageModel
     /// </summary>
     public string? PrefillRepoId { get; set; }
 
-    public void OnGet(string? repoId)
+    /// <summary>The selected tab ("?format="): which file format to search repos for and list.</summary>
+    public HfModelFormat Format { get; set; }
+
+    public void OnGet(string? repoId, HfModelFormat format = HfModelFormat.Gguf)
     {
         PrefillRepoId = repoId;
+        Format = format;
     }
 
-    public async Task<IActionResult> OnGetSearchAsync(string q, CancellationToken ct)
+    /// <summary>
+    /// Link to this page for another file from <paramref name="repoId"/>, opened on the tab matching
+    /// the format of <paramref name="filePath"/> (a model already downloaded from that repo).
+    /// </summary>
+    public static string BrowseRepoUrl(string repoId, string? filePath)
+    {
+        var url = $"/Features/Models/HuggingFace?repoId={Uri.EscapeDataString(repoId)}";
+        return filePath?.EndsWith(HfModelFormat.Safetensors.FileExtension(), StringComparison.OrdinalIgnoreCase) == true
+            ? url + $"&format={HfModelFormat.Safetensors}"
+            : url;
+    }
+
+    public async Task<IActionResult> OnGetSearchAsync(string q, HfModelFormat format, bool textToImage, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(q))
             return new JsonResult(Array.Empty<object>());
 
         try
         {
-            var results = await _hfClient.SearchModelsAsync(q, 25, ct);
+            var results = await _hfClient.SearchModelsAsync(q, format, textToImage ? "text-to-image" : null, 25, ct);
             return new JsonResult(results);
         }
         catch (Exception ex)
@@ -43,16 +60,16 @@ public class ModelsHuggingFaceModel : PageModel
         }
     }
 
-    public async Task<IActionResult> OnGetFilesAsync(string repoId, CancellationToken ct)
+    public async Task<IActionResult> OnGetFilesAsync(string repoId, HfModelFormat format, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoId))
             return new JsonResult(Array.Empty<object>());
 
         try
         {
-            // A split model is offered once, as its first shard with the size of all of them; downloading
-            // it fetches every shard (ModelDownloadService).
-            var files = await _hfClient.ListGgufFilesAsync(repoId, ct);
+            // A split GGUF model is offered once, as its first shard with the size of all of them; downloading
+            // it fetches every shard (ModelDownloadService). Safetensors files never match the shard pattern.
+            var files = await _hfClient.ListModelFilesAsync(repoId, format, ct);
             var sizes = files.ToDictionary(f => f.Filename, f => f.SizeBytes, StringComparer.OrdinalIgnoreCase);
             return new JsonResult(files
                 .Where(f => SplitGguf.Parse(f.Filename) is not { Index: > 1 })
@@ -73,7 +90,7 @@ public class ModelsHuggingFaceModel : PageModel
         }
     }
 
-    public async Task<IActionResult> OnGetDetailsAsync(string repoId, CancellationToken ct)
+    public async Task<IActionResult> OnGetDetailsAsync(string repoId, HfModelFormat format, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoId))
             return new JsonResult(new { error = "repoId is required" }) { StatusCode = 400 };
@@ -84,7 +101,7 @@ public class ModelsHuggingFaceModel : PageModel
             if (detail is null)
                 return new JsonResult(new { error = "Repo not found." }) { StatusCode = 404 };
 
-            var ggufFiles = detail.Siblings.Where(f => f.Filename.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)).ToList();
+            var modelFiles = detail.Siblings.Where(f => f.Filename.EndsWith(format.FileExtension(), StringComparison.OrdinalIgnoreCase)).ToList();
             return new JsonResult(new
             {
                 id = detail.Id,
@@ -96,8 +113,8 @@ public class ModelsHuggingFaceModel : PageModel
                 pipelineTag = detail.PipelineTag,
                 license = detail.CardData?.License,
                 tags = detail.Tags,
-                fileCount = ggufFiles.Count,
-                totalSizeBytes = ggufFiles.Sum(f => f.SizeBytes ?? 0)
+                fileCount = modelFiles.Count,
+                totalSizeBytes = modelFiles.Sum(f => f.SizeBytes ?? 0)
             });
         }
         catch (Exception ex)
