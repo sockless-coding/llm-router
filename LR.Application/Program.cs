@@ -125,6 +125,7 @@ builder.Services.AddHttpClient<IGitHubClient, GitHubReleaseClient>(client =>
 });
 builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.LlamaCppInstallHandler>();
 builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.StrataInstallHandler>();
+builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.SdCppInstallHandler>();
 builder.Services.AddScoped<IEngineBuildManager, EngineBuildManager>();
 builder.Services.AddSingleton<IEngineBuildProgressPublisher, EngineBuildProgressPublisher>();
 builder.Services.AddSingleton<EngineBuildService>();
@@ -194,6 +195,7 @@ builder.Services.AddSingleton<IServerConcurrencyLimiter, ServerConcurrencyLimite
 
 // Protocol handlers (scoped — need DbContext access via preset manager)
 builder.Services.AddScoped<LR.Application.Pages.Api.EmbeddingsGateway>();
+builder.Services.AddScoped<LR.Application.Pages.Api.ImagesGateway>();
 builder.Services.AddScoped<LR.Application.Pages.Api.OpenAiHandler>();
 builder.Services.AddScoped<LR.Application.Pages.Api.ClaudeHandler>();
 builder.Services.AddScoped<LR.Application.Pages.Api.OllamaHandler>();
@@ -263,6 +265,21 @@ if (splitRoutingPort)
         await next();
     });
 }
+
+// Naming a model of the wrong kind (a chat request for an image model, or the reverse) is the
+// client's mistake — answer 400 with the reason rather than letting it surface as a 500.
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (ModelModalityMismatchException ex) when (!context.Response.HasStarted)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { error = new { message = ex.Message, type = "invalid_request_error", code = "model_not_supported" } });
+    }
+});
 
 app.UseStaticFiles();
 app.MapRazorPages();

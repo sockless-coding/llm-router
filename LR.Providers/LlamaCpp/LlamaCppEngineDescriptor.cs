@@ -9,6 +9,10 @@ public class LlamaCppEngineDescriptor : IEngineDescriptor
 
     public string DisplayName => "llama.cpp";
 
+    public EngineModality Modality => EngineModality.Text;
+
+    public string? PresetFormSection => null;
+
     public Type ProviderType => typeof(LlamaCppProvider);
 
     public bool SupportsManagedBuilds => true;

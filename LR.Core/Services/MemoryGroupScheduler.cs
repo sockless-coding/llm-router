@@ -119,7 +119,9 @@ public class MemoryGroupScheduler
     public async Task<long> EstimateAsync(ModelPreset preset, CancellationToken cancellationToken = default)
     {
         var model = preset.ModelId is Guid id ? await _context.LocalModels.FindAsync([id], cancellationToken) : null;
-        return PresetMemoryEstimator.EstimateBytes(preset, model, _fileSize);
+        var engine = (preset.ServerInstance ?? await _context.ServerInstances.FindAsync([preset.ServerInstanceId], cancellationToken))?.Engine
+            ?? ServerEngine.LlamaCpp;
+        return PresetMemoryEstimator.EstimateBytes(preset, model, _fileSize, engine);
     }
 
     private sealed class GateLock : IDisposable

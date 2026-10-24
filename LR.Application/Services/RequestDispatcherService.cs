@@ -50,6 +50,7 @@ public class RequestDispatcherService : BackgroundService
                 using var scope = _scopeFactory.CreateScope();
                 var serverManager = scope.ServiceProvider.GetRequiredService<IServerManager>();
                 var presetManager = scope.ServiceProvider.GetRequiredService<IPresetManager>();
+                var engines = scope.ServiceProvider.GetRequiredService<IEngineCatalog>();
 
                 // Get all running healthy servers
                 var instances = await serverManager.GetAllInstancesAsync();
@@ -63,12 +64,14 @@ public class RequestDispatcherService : BackgroundService
                     // model it asked for (or, for requests with no resolvable model, any server).
                     // Otherwise a request for model B could be silently answered by a server
                     // currently running model A.
+                    // An image server never takes a chat request (or the reverse), even an unresolved one.
+                    var modality = engines.ModalityOf(server.Engine);
 
                     if (serverManager.GetProvider(server.Id) is not IServerCapacityProvider)
                     {
                         // Engines that don't report slot capacity manage their own parallelism —
                         // pass through unbounded (one dequeue per tick, as before).
-                        if (_queue.TryDequeueMatching(server.ActivePresetId, out var item))
+                        if (_queue.TryDequeueMatching(server.ActivePresetId, out var item, modality))
                         {
                             _ = ProcessRequestOnServer(server, item.Request, serverManager,
                                 item.Tcs, ServerConcurrencyLimiter.NoopLease, stoppingToken);
@@ -86,7 +89,7 @@ public class RequestDispatcherService : BackgroundService
                     int capacity = ResolveLlamaCapacity(server, serverManager, presetManager);
                     while (_limiter.TryAcquire(server.Id, capacity) is { } lease)
                     {
-                        if (_queue.TryDequeueMatching(server.ActivePresetId, out var item))
+                        if (_queue.TryDequeueMatching(server.ActivePresetId, out var item, modality))
                         {
                             _ = ProcessRequestOnServer(server, item.Request, serverManager,
                                 item.Tcs, lease, stoppingToken);

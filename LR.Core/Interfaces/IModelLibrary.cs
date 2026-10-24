@@ -18,7 +18,7 @@ public interface IModelLibrary
     Task<LocalModel> ImportFromPathAsync(string filePath, string? name = null);
 
     /// <summary>
-    /// Finds .gguf files under <paramref name="folder"/> that aren't already registered.
+    /// Finds model files (.gguf, .safetensors) under <paramref name="folder"/> that aren't already registered.
     /// </summary>
     Task<IReadOnlyList<string>> ScanFolderAsync(string folder);
 

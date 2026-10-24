@@ -68,7 +68,8 @@ public class ModelLibraryManager : IModelLibrary
         var registered = await _context.LocalModels.Select(m => m.FilePath).ToListAsync();
         var registeredSet = new HashSet<string>(registered, StringComparer.OrdinalIgnoreCase);
 
-        return Directory.EnumerateFiles(folder, "*.gguf", SearchOption.AllDirectories)
+        return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+            .Where(IsModelFile)
             .Select(Path.GetFullPath)
             .Where(p => !registeredSet.Contains(p))
             // shards 2..N of a split model belong to its first shard's entry
@@ -146,6 +147,14 @@ public class ModelLibraryManager : IModelLibrary
     {
         return await _context.ModelPresets.CountAsync(p => p.ModelId == id);
     }
+
+    /// <summary>
+    /// GGUF (llama.cpp, Strata, stable-diffusion.cpp) or safetensors — the format most diffusion
+    /// checkpoints, VAEs and text encoders ship in, which stable-diffusion.cpp loads as is.
+    /// </summary>
+    private static bool IsModelFile(string path) =>
+        path.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(".safetensors", StringComparison.OrdinalIgnoreCase);
 
     private async Task ApplyGgufMetadataAsync(LocalModel model, string filePath)
     {

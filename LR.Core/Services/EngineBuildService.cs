@@ -85,10 +85,14 @@ public partial class EngineBuildService
 
     /// <summary>
     /// Creates a placeholder <see cref="EngineBuild"/> row (Status = Downloading) and kicks off
-    /// the official-release install pipeline on a background task. Returns the build's ID.
+    /// the official-release install pipeline for <paramref name="engine"/> (llama.cpp or
+    /// stable-diffusion.cpp — see <see cref="EngineReleaseProfile"/>) on a background task.
+    /// Returns the build's ID.
     /// </summary>
-    public async Task<Guid> StartReleaseInstallAsync(BackendType backend, string? releaseTag, string? name)
+    public async Task<Guid> StartReleaseInstallAsync(ServerEngine engine, BackendType backend, string? releaseTag, string? name)
     {
+        var profile = EngineReleaseProfile.For(engine)
+            ?? throw new InvalidOperationException($"{engine} isn't installed from prebuilt releases.");
         var settings = await _settings.GetAsync();
         var installRoot = settings.InstallRootFolder;
         if (string.IsNullOrWhiteSpace(installRoot))
@@ -98,13 +102,13 @@ public partial class EngineBuildService
         // Resolve "latest" up front so the folder is named for the actual build number.
         if (releaseTag is null)
         {
-            var latest = await _github.GetLatestReleaseAsync(EngineBuildManager.LlamaCppRepo)
+            var latest = await _github.GetLatestReleaseAsync(profile.Repo)
                 ?? throw new InvalidOperationException("Could not reach GitHub to look up the latest release.");
-            releaseTag = EngineBuilds.ReleaseAssetResolver.ExtractBuildTag(latest.TagName) ?? latest.TagName;
+            releaseTag = profile.VersionTagOf(latest.TagName);
         }
 
         var tagLabel = releaseTag;
-        var folderName = SanitizeFolder($"{tagLabel}-{backend.ToString().ToLowerInvariant()}");
+        var folderName = SanitizeFolder($"{profile.FolderPrefix}{tagLabel}-{backend.ToString().ToLowerInvariant()}");
         var outputDir = Path.GetFullPath(Path.Combine(installRoot, folderName));
 
         Guid buildId;
@@ -118,7 +122,8 @@ public partial class EngineBuildService
             var build = new EngineBuild
             {
                 Id = Guid.NewGuid(),
-                Name = name ?? $"llama.cpp {tagLabel} ({backend})",
+                Name = name ?? $"{profile.DisplayName} {tagLabel} ({backend})",
+                Engine = engine,
                 BackendType = backend,
                 Source = EngineBuildSource.OfficialRelease,
                 InstallPath = outputDir,
@@ -132,7 +137,7 @@ public partial class EngineBuildService
 
         var cts = new CancellationTokenSource();
         _active[buildId] = cts;
-        _ = Task.Run(() => RunReleaseInstallAsync(buildId, backend, releaseTag, workspaceRoot, outputDir, cts.Token));
+        _ = Task.Run(() => RunReleaseInstallAsync(buildId, profile, backend, releaseTag, workspaceRoot, outputDir, cts.Token));
         return buildId;
     }
 
@@ -199,6 +204,7 @@ public partial class EngineBuildService
         var workspaceRoot = WorkspaceRoot(settings);
 
         EngineBuildSource source;
+        EngineReleaseProfile profile;
         BackendType backend;
         string installPath;
         LlamaCppBuildRecipe? recipe = null;
@@ -240,6 +246,8 @@ public partial class EngineBuildService
             }
 
             source = build.Source;
+            profile = EngineReleaseProfile.For(build.Engine)
+                ?? throw new InvalidOperationException($"Updating {build.Engine} installs isn't supported.");
             backend = build.BackendType;
             installPath = build.InstallPath;
 
@@ -252,12 +260,12 @@ public partial class EngineBuildService
 
         var cts = new CancellationTokenSource();
         _active[buildId] = cts;
-        _ = Task.Run(() => RunUpdateAsync(buildId, source, backend, installPath, recipe, refOverride, workspaceRoot, cts.Token));
+        _ = Task.Run(() => RunUpdateAsync(buildId, source, profile, backend, installPath, recipe, refOverride, workspaceRoot, cts.Token));
         return buildId;
     }
 
     private async Task RunUpdateAsync(
-        Guid buildId, EngineBuildSource source, BackendType backend, string installPath,
+        Guid buildId, EngineBuildSource source, EngineReleaseProfile profile, BackendType backend, string installPath,
         LlamaCppBuildRecipe? recipe, string? refOverride, string workspaceRoot, CancellationToken ct)
     {
         var workRoot = Path.Combine(workspaceRoot, ".work", buildId.ToString("N"));
@@ -281,8 +289,9 @@ public partial class EngineBuildService
         var ctx = new BuildContext
         {
             BuildId = buildId,
-            Repo = EngineBuildManager.LlamaCppRepo,
+            Repo = source == EngineBuildSource.OfficialRelease ? profile.Repo : EngineBuildManager.LlamaCppRepo,
             BackendType = backend,
+            Profile = profile,
             Recipe = recipe,
             GitRefOverride = source == EngineBuildSource.SourceCompile
                 ? (string.IsNullOrWhiteSpace(refOverride) ? null : refOverride)
@@ -338,7 +347,7 @@ public partial class EngineBuildService
                 build.SizeBytes = TryGetDirectorySize(installPath);
                 build.BuildCompletedAt = DateTime.UtcNow;
                 if (source == EngineBuildSource.OfficialRelease && ctx.ResolvedVersionTag is not null)
-                    build.Name = $"llama.cpp {ctx.ResolvedVersionTag} ({backend})";
+                    build.Name = $"{profile.DisplayName} {ctx.ResolvedVersionTag} ({backend})";
                 await context.SaveChangesAsync(ct);
             }
 
@@ -486,7 +495,7 @@ public partial class EngineBuildService
     }
 
     private async Task RunReleaseInstallAsync(
-        Guid buildId, BackendType backend, string? releaseTag, string workspaceRoot, string outputDir, CancellationToken ct)
+        Guid buildId, EngineReleaseProfile profile, BackendType backend, string? releaseTag, string workspaceRoot, string outputDir, CancellationToken ct)
     {
         var workRoot = Path.Combine(workspaceRoot, ".work", buildId.ToString("N"));
         Directory.CreateDirectory(workRoot);
@@ -495,8 +504,9 @@ public partial class EngineBuildService
         var ctx = new BuildContext
         {
             BuildId = buildId,
-            Repo = EngineBuildManager.LlamaCppRepo,
+            Repo = profile.Repo,
             BackendType = backend,
+            Profile = profile,
             ReleaseTag = releaseTag,
             WorkRoot = workRoot,
             OutputDir = outputDir,
@@ -530,7 +540,7 @@ public partial class EngineBuildService
                 build.SizeBytes = TryGetDirectorySize(ctx.OutputDir);
                 build.BuildCompletedAt = DateTime.UtcNow;
                 if (ctx.ResolvedVersionTag is not null)
-                    build.Name = $"llama.cpp {ctx.ResolvedVersionTag} ({backend})";
+                    build.Name = $"{profile.DisplayName} {ctx.ResolvedVersionTag} ({backend})";
                 await context.SaveChangesAsync(ct);
             }
 

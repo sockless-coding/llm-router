@@ -32,6 +32,7 @@ public class OpenAiHandler : IProtocolHandler
     private readonly GatewaySettings _gatewaySettings;
     private readonly IApiKeyRequestContext _apiKeyContext;
     private readonly EmbeddingsGateway _embeddings;
+    private readonly IEngineCatalog _engines;
 
     public ApiProtocol Protocol => ApiProtocol.OpenAI;
     public string PathPrefix => "/v1";
@@ -47,7 +48,8 @@ public class OpenAiHandler : IProtocolHandler
         IApiRequestLogger requestLogger,
         GatewaySettings gatewaySettings,
         IApiKeyRequestContext apiKeyContext,
-        EmbeddingsGateway embeddings)
+        EmbeddingsGateway embeddings,
+        IEngineCatalog engines)
     {
         _logger = logger;
         _serverManager = serverManager;
@@ -60,6 +62,7 @@ public class OpenAiHandler : IProtocolHandler
         _gatewaySettings = gatewaySettings;
         _apiKeyContext = apiKeyContext;
         _embeddings = embeddings;
+        _engines = engines;
     }
 
     public async Task<object> HandleListModelsAsync()
@@ -83,7 +86,9 @@ public class OpenAiHandler : IProtocolHandler
     /// </summary>
     public async Task<object> HandleListModelCapabilitiesAsync()
     {
-        var presets = await _presetManager.GetAllPresetsAsync();
+        // Chat models only — the capabilities shape (context, tools, vision) is meaningless for image models.
+        var presets = (await _presetManager.GetAllPresetsAsync())
+            .OfModality(await _serverManager.GetAllInstancesAsync(), _engines, EngineModality.Text);
         var models = _apiKeyContext.FilterAllowed(presets).Select(BuildCapabilities).ToList();
 
         return new { data = models };

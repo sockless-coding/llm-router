@@ -10,6 +10,10 @@ public class StrataEngineDescriptor : IEngineDescriptor
 
     public string DisplayName => "Strata";
 
+    public EngineModality Modality => EngineModality.Text;
+
+    public string? PresetFormSection => "section-strata";
+
     public Type ProviderType => typeof(StrataProvider);
 
     public bool SupportsManagedBuilds => true;

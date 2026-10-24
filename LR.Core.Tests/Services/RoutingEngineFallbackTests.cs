@@ -1,17 +1,20 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 using LR.Core.Data;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Services;
+using LR.Providers;
 
 namespace LR.Core.Tests.Services;
 
 /// <summary>
 /// Covers <see cref="RoutingEngine"/>'s preset fallback chain: when it kicks in (primary
 /// errored, or primary busy with the fallback already loaded), when it must not (key scoping,
-/// same-server fallbacks), and that the request is retargeted at the preset that serves it.
+/// same-server fallbacks), and that the request is retargeted at the preset that serves it —
+/// plus the modality guard that keeps chat and image requests on their own kind of server.
 /// </summary>
 public class RoutingEngineFallbackTests : IDisposable
 {
@@ -35,11 +38,17 @@ public class RoutingEngineFallbackTests : IDisposable
         _connection.Dispose();
     }
 
-    private RoutingEngine Engine() => new(_context, _serverManager, new ServerConcurrencyLimiter(), new GatewaySettings(), _keyContext);
+    private RoutingEngine Engine(IEngineCatalog? engines = null) =>
+        new(_context, _serverManager, new ServerConcurrencyLimiter(), new GatewaySettings(), _keyContext, engines);
 
-    private ServerInstance Server(string name, ServerStatus status, bool healthy = true)
+    /// <summary>The real engine catalog — llama.cpp and Strata are text, stable-diffusion.cpp is image.</summary>
+    private static IEngineCatalog Catalog() =>
+        new ServiceCollection().AddBackendEngines()
+            .BuildServiceProvider().GetRequiredService<IEngineCatalog>();
+
+    private ServerInstance Server(string name, ServerStatus status, bool healthy = true, ServerEngine engine = ServerEngine.LlamaCpp)
     {
-        var s = new ServerInstance { Name = name, Status = status, IsHealthy = healthy };
+        var s = new ServerInstance { Name = name, Status = status, IsHealthy = healthy, Engine = engine };
         _context.ServerInstances.Add(s);
         _context.SaveChanges();
         return s;
@@ -206,6 +215,62 @@ public class RoutingEngineFallbackTests : IDisposable
         using var decision = await Engine().RouteAsync(new RouteRequest { ModelName = "gpt-4o" });
 
         Assert.Equal(s1.Id, decision?.Server.Id);
+    }
+
+    [Fact]
+    public async Task ChatRequest_ForImagePreset_IsRejected()
+    {
+        var sd = Server("sd", ServerStatus.Running, engine: ServerEngine.StableDiffusionCpp);
+        var img = Preset("img", sd);
+        Load(sd, img);
+
+        var ex = await Assert.ThrowsAsync<ModelModalityMismatchException>(() => Engine(Catalog()).RouteAsync(new RouteRequest { ModelName = "img" }));
+        Assert.Contains("/v1/images/generations", ex.Message);
+    }
+
+    [Fact]
+    public async Task ImageRequest_ForImagePreset_Routes()
+    {
+        var sd = Server("sd", ServerStatus.Running, engine: ServerEngine.StableDiffusionCpp);
+        var img = Preset("img", sd);
+        Load(sd, img);
+
+        using var decision = await Engine(Catalog()).RouteAsync(new RouteRequest { ModelName = "img", PresetId = img.Id, Modality = EngineModality.Image });
+
+        Assert.Equal(sd.Id, decision?.Server.Id);
+    }
+
+    [Fact]
+    public async Task UnknownChatModel_NeverRoundRobinsOntoImageServer()
+    {
+        var runningSd = Server("sd1", ServerStatus.Running, engine: ServerEngine.StableDiffusionCpp);
+        Load(runningSd, Preset("img1", runningSd));
+        var idleSd = Server("sd2", ServerStatus.Idle, healthy: false, engine: ServerEngine.StableDiffusionCpp);
+        Preset("img2", idleSd);
+        var idleLlm = Server("llm", ServerStatus.Idle, healthy: false);
+        Preset("chat", idleLlm);
+
+        var decision = await Engine(Catalog()).RouteAsync(new RouteRequest { ModelName = "no-such-model" });
+
+        Assert.Null(decision);
+        Assert.DoesNotContain(idleSd.Id, _serverManager.AutoStarted);
+        Assert.Contains(idleLlm.Id, _serverManager.AutoStarted);
+    }
+
+    [Fact]
+    public async Task Fallback_OfOtherModality_IsSkipped()
+    {
+        var s1 = Server("s1", ServerStatus.Error, healthy: false);
+        var sd = Server("sd", ServerStatus.Running, engine: ServerEngine.StableDiffusionCpp);
+        var img = Preset("img", sd);
+        var a = Preset("a", s1, fallback: img);
+        Load(sd, img);
+
+        var request = new RouteRequest { ModelName = "a", PresetId = a.Id };
+        var decision = await Engine(Catalog()).RouteAsync(request);
+
+        Assert.Null(decision);
+        Assert.Equal(a.Id, request.PresetId);
     }
 
     /// <summary>

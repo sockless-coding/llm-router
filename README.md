@@ -1,10 +1,10 @@
 # LLM Router
 
-A lightweight .NET-based routing layer for managing and load-balancing across multiple local LLM inference servers.
+A lightweight .NET-based routing layer for managing and load-balancing across multiple local LLM and image-generation inference servers.
 
 ## Overview
 
-LLM Router provides a unified interface to route requests across heterogeneous backend inference engines — [llama.cpp](https://github.com/ggml-org/llama.cpp) builds (CPU, CUDA, Vulkan, SYCL, ...) and [Strata](https://github.com/Niko1221/Strata) — running on different machines or GPUs. It features:
+LLM Router provides a unified interface to route requests across heterogeneous backend inference engines — [llama.cpp](https://github.com/ggml-org/llama.cpp) builds (CPU, CUDA, Vulkan, SYCL, ...) and [Strata](https://github.com/Niko1221/Strata) for text, [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) for images — running on different machines or GPUs. It features:
 
 - **Multi-protocol API gateway** — Exposes OpenAI-compatible (`/v1/chat/completions`, `/v1/responses`, `/v1/models`), Claude-compatible (`/v1/messages`), and Ollama-compatible (`/api/chat`, `/api/generate`, `/api/tags`, ...) endpoints in front of your backend servers.
 - **Tool / function calling** — Passes OpenAI-style `tools`/`tool_choice` through to llama.cpp backends and translates the resulting tool calls back into Chat Completions or Responses API shapes.
@@ -12,6 +12,7 @@ LLM Router provides a unified interface to route requests across heterogeneous b
 - **Smart routing** — Priority-ordered routing rules, preset/model affinity (auto-start or restart the server that owns a preset), and round-robin fallback across healthy instances.
 - **Model aliases & fallback presets** — Extra names per preset (with `*` wildcards, e.g. `gpt-4o` or `claude-*`) for clients with hardcoded model ids, plus a fallback preset chain. The fallback serves when a preset's server is errored, and takes overflow when the preset is at capacity and the fallback is already loaded.
 - **Memory groups & idle unload** — Servers sharing a GPU form a group with a VRAM budget. Before a model loads, the least-recently-used idle servers in the group are stopped until its estimated footprint fits. Servers can also unload after N idle minutes.
+- **Image generation** — OpenAI `/v1/images/generations`, served by stable-diffusion.cpp presets with the same routing, fallbacks, memory groups, idle unload and queueing as chat. See [Image generation](#image-generation-stable-diffusioncpp).
 - **Embeddings** — OpenAI `/v1/embeddings` and Ollama `/api/embed` / `/api/embeddings`, served by presets launched with embeddings enabled.
 - **Health monitoring & auto-restart** — Background health checks detect failed or crashed backends and route around them.
 - **Model library with Hugging Face integration** — A local registry of GGUF models with metadata inspection, folder scanning, and search/download directly from the Hugging Face Hub (with live progress).
@@ -71,7 +72,7 @@ flowchart TB
 
 | Protocol | Endpoints |
 |---|---|
-| OpenAI | `POST /v1/chat/completions` (streaming + non-streaming, tool calling), `POST /v1/embeddings`, `GET /v1/models` |
+| OpenAI | `POST /v1/chat/completions` (streaming + non-streaming, tool calling), `POST /v1/embeddings`, `POST /v1/images/generations`, `GET /v1/models` |
 | OpenAI Responses | `POST /v1/responses`, `GET /v1/responses/{id}`, `DELETE /v1/responses/{id}`, `POST /v1/responses/{id}/cancel` |
 | Claude | `POST /v1/messages` |
 | Ollama | `POST /api/chat`, `POST /api/generate`, `GET /api/tags`, `POST /api/show`, `POST /api/embed`, `POST /api/embeddings`, `GET /api/ps`, `GET /api/version` |
@@ -170,9 +171,9 @@ updates, but you install them by replacing the files yourself.
 
 ## Using the dashboard
 
-- **Servers** — register backend server instances, pick their engine (llama.cpp or Strata), point them at a llama.cpp build / Strata folder, start/stop/restart them, and view live logs and status.
+- **Servers** — register backend server instances, pick their engine (llama.cpp, Strata or stable-diffusion.cpp), point them at a build / Strata folder, start/stop/restart them, and view live logs and status.
 - **Presets** — define launch configurations (model path, context size, sampling parameters, GPU/threading, speculative decoding, LoRA, multimodal settings, etc.), optionally linked to a model-library entry so the model path and GGUF metadata stay in sync automatically.
-- **Model Library** — import existing `.gguf` files, scan a folder for unregistered models, or search and download models from the Hugging Face Hub with live progress; inspect GGUF metadata per model.
+- **Model Library** — import existing `.gguf` (and, for diffusion models, `.safetensors`) files, scan a folder for unregistered models, or search and download models from the Hugging Face Hub with live progress; inspect GGUF metadata per model.
 - **Stats** — throughput, latency, and context-usage charts.
 - **Playground** — chat with a preset and see per-reply performance stats (TTFT, prompt/generation tok/s, cached tokens, draft acceptance). Tag runs with a label (e.g. `fa=on ub=1024`), use *Repeat ×N* to average out noise, and compare configurations on the **Run history** page — runs are grouped by preset, label and a hash of the preset's generated command line, so editing a preset automatically starts a new group. Runs aren't subject to request-log retention.
 - **Request Log** — browse and filter logged API requests by protocol and time range.
@@ -193,12 +194,31 @@ The Strata tab shows each install's version, commit, engine version and prepared
 
 If a run config (or `STRATA_API_KEY`) sets an API key, the router sends it automatically. Strata's `/props` and `/slots` mirror llama.cpp's, so slot-based concurrency limits, context-aware queuing, and the dashboard's slot/KV usage work the same as for llama.cpp servers.
 
+### Image generation (stable-diffusion.cpp)
+
+[stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) servers generate images and follow the same server → engine → model → preset flow as the LLM engines:
+
+1. **Engines → stable-diffusion.cpp → Install a release**: pick a release and a backend (CPU, CUDA, Vulkan, ROCm on Windows; CPU, Vulkan, ROCm on Linux; Metal on macOS). Windows CUDA builds come with their CUDA runtime. Installs can be checked for updates and updated in place like llama.cpp builds.
+2. **Models**: import the model files — `.gguf` or `.safetensors`. A full checkpoint (SD 1.x/2.x/SDXL) is one file; a standalone diffusion model (Flux, SD3, Qwen-Image, Z-Image…) also needs its VAE and text encoder(s).
+3. **Servers**: create a server with engine **stable-diffusion.cpp**, bound to the install.
+4. **Presets**: pick the main model and, in the **Diffusion** section, its VAE/text encoders (CLIP-L, CLIP-G, T5-XXL, LLM), the default size, steps, CFG scale, sampler, scheduler, seed and negative prompt, and performance options (weight type, flash attention, CPU offload, VAE tiling, …). The command preview shows the resulting `sd-server` command line.
+
+Clients call `POST /v1/images/generations` with the preset's name (or an alias) as `model`:
+
+```bash
+curl http://localhost:5053/v1/images/generations -H "Content-Type: application/json"   -d '{"model": "flux-schnell", "prompt": "a lighthouse at dusk", "size": "1024x768", "n": 1}'
+```
+
+The response is OpenAI's `{"created": ..., "data": [{"b64_json": "..."}]}` (images are always returned as base64; `response_format: "url"` isn't supported). Besides `prompt`, `n`, `size` and `output_format`, the router accepts the common extras `negative_prompt`, `seed`, `steps`, `cfg_scale`, `guidance`, `sampler`/`sample_method` and `scheduler`, and passes them to stable-diffusion.cpp as `<sd_cpp_extra_args>`; a client's own `<sd_cpp_extra_args>` block in the prompt still works and wins. Anything a request doesn't set falls back to the preset's defaults.
+
+Image presets are kept apart from chat: they don't appear in `/api/tags`, `/v1/models/capabilities` or the Playground, a chat request naming one gets a 400 pointing at the images endpoint, and unresolved chat models are never round-robined onto an image server (or the reverse). `sd-server` generates one image job at a time, so the router sends each server one request at a time and queues the rest. A preset's memory-group footprint is its model files plus compute buffers (only the largest file with CPU offload). Request-log entries keep the request and a summary of the response, with the base64 image data left out.
+
 ### Adding another engine
 
 1. Add a value to `ServerEngine` (append; values are persisted).
 2. Implement an `IBackendProvider`. For an engine that runs as a local OpenAI-compatible HTTP server, derive from `ManagedServerProviderBase` and implement `BuildLaunchSpec` (what to launch) plus `IsModelLoadedLine`/`TryParseListeningPort` (how its output signals readiness); override the optional hooks for request headers, out-of-band metrics, or a longer startup timeout.
-3. Implement an `IEngineDescriptor` (display name, provider type, install-folder help and validation, what a preset's model path means) and register it in `ServiceCollectionExtensions.AddBackendEngines`.
-4. Optionally, version management on the Engines page: an `IEngineInstallHandler` (upstream repo, how to tell a ready install from a missing one, what to compare updates against), the install/update jobs in an `EngineBuildService` partial (see `EngineBuildService.Strata.cs`), and a tab partial `Pages/Features/Engines/Tabs/_<Engine>.cshtml`. Installs are rows in `EngineBuilds` with their `Engine` set, so servers bind to them the same way for every engine.
+3. Implement an `IEngineDescriptor` (display name, what it generates — `EngineModality.Text` or `Image`, provider type, install-folder help and validation, what a preset's model path means, and its preset-form section if its settings live in `ModelPreset.EngineSettings`) and register it in `ServiceCollectionExtensions.AddBackendEngines`.
+4. Optionally, version management on the Engines page: an `IEngineInstallHandler` (upstream repo, how to tell a ready install from a missing one, what to compare updates against), and a tab partial `Pages/Features/Engines/Tabs/_<Engine>.cshtml`. An engine that publishes prebuilt server binaries on GitHub releases only needs an `EngineReleaseProfile` (repo, asset patterns per backend/OS, executable name — see `SdCppReleaseProfile`) to reuse the release install/update pipeline and the shared `_ReleaseBuilds` table; anything else gets its install/update jobs in an `EngineBuildService` partial (see `EngineBuildService.Strata.cs`). Installs are rows in `EngineBuilds` with their `Engine` set, so servers bind to them the same way for every engine.
 
 The server pages, Engines tabs, provider factory, routing, and dashboards pick the new engine up from the catalog. Implementing `IServerCapacityProvider` (which the base class does) opts it into slot-based concurrency gating.
 

@@ -47,7 +47,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     private volatile LlamaRuntimeUsage? _runtimeUsage;
 
     /// <inheritdoc />
-    public int? MaxConcurrentRequests => _serverProps?.TotalSlots is int n && n > 0 ? n : null;
+    public virtual int? MaxConcurrentRequests => _serverProps?.TotalSlots is int n && n > 0 ? n : null;
 
     /// <inheritdoc />
     public LlamaServerProps? ServerProps => _serverProps;
@@ -120,7 +120,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
         _httpClient = new HttpClient(handler);
         // Timeout for the entire request (send + receive). Streaming responses use this as a
         // per-chunk timeout — if no data arrives within this window, the read will cancel.
-        _httpClient.Timeout = TimeSpan.FromMinutes(5);
+        _httpClient.Timeout = RequestTimeout;
 
         using (var scope = scopeFactory.CreateScope())
         {
@@ -177,6 +177,28 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     /// as failed. Engines that load very large models from disk can raise this.
     /// </summary>
     protected virtual TimeSpan StartupTimeout => TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// How long a single request may take end to end (a streamed one: between chunks). Read once,
+    /// from the constructor — overrides must return a constant.
+    /// </summary>
+    protected virtual TimeSpan RequestTimeout => TimeSpan.FromMinutes(5);
+
+    /// <summary>Path polled by <see cref="HealthCheckAsync"/>; a 2xx answer means healthy.</summary>
+    protected virtual string HealthCheckPath => "/health";
+
+    /// <summary>
+    /// Whether the server has llama.cpp's <c>/props</c> and <c>/slots</c> endpoints (slot count,
+    /// context occupancy). Engines without them skip those reads entirely.
+    /// </summary>
+    protected virtual bool HasLlamaServerEndpoints => true;
+
+    /// <summary>
+    /// Rewrites a <see cref="SendRawRequestAsync"/> payload into the engine's own dialect just
+    /// before it's posted — e.g. folding OpenAI-extension fields into engine-specific ones. The
+    /// payload is routed and queued unchanged; only the copy sent to this engine is rewritten.
+    /// </summary>
+    protected virtual string PrepareRawRequestPayload(string endpoint, string payload) => payload;
 
     /// <summary>
     /// Runs before every start, ahead of <see cref="BuildLaunchSpec"/>: an engine that must prepare
@@ -290,13 +312,14 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             // Use a short-lived HttpClient for the health check instead of modifying
             // the shared client's timeout, which would affect subsequent requests.
             using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            var response = await httpClient.GetAsync($"{ServerUrl}/health", cancellationToken);
+            using var request = CreateRequest(HttpMethod.Get, HealthCheckPath);
+            using var response = await httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
                 return false;
 
             // Now that the server is up, read its /props once — slot count (the resolved -np,
             // used by the router to cap concurrency), context window, modalities, build info.
-            if (_serverProps is null)
+            if (_serverProps is null && HasLlamaServerEndpoints)
                 await TryRefreshServerPropsAsync(httpClient, cancellationToken);
 
             return true;
@@ -377,7 +400,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     /// </summary>
     public async Task RefreshRuntimeUsageAsync(CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(ServerUrl))
+        if (string.IsNullOrEmpty(ServerUrl) || !HasLlamaServerEndpoints)
             return;
 
         try
@@ -499,7 +522,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         using var httpRequest = CreateRequest(HttpMethod.Post, endpoint);
-        httpRequest.Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+        httpRequest.Content = new StringContent(PrepareRawRequestPayload(endpoint, payload), System.Text.Encoding.UTF8, "application/json");
         using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         sw.Stop();

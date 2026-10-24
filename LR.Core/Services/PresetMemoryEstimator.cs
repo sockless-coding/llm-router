@@ -1,4 +1,5 @@
 using LR.Core.Models;
+using LR.Core.Services.EngineBuilds;
 
 namespace LR.Core.Services;
 
@@ -13,17 +14,24 @@ namespace LR.Core.Services;
 /// linked library model's metadata; omitted when that metadata is unknown or <c>--no-kv-offload</c>.</item>
 /// <item>Overhead: 5% of weights plus 512 MB of compute buffers.</item>
 /// </list>
+/// A stable-diffusion.cpp preset is its model files (main model, VAE, text encoders — or only the
+/// largest of them with <c>--offload-to-cpu</c>, which moves weights to the device as needed) plus
+/// 5% and 2 GB of compute buffers for the image latents.
 /// </summary>
 public static class PresetMemoryEstimator
 {
     private const long Mb = 1024 * 1024;
     private const long ComputeBufferBytes = 512 * Mb;
     private const double ExpertShare = 0.75;
+    private const long DiffusionComputeBufferBytes = 2048 * Mb;
 
-    public static long EstimateBytes(ModelPreset preset, LocalModel? model, Func<string, long?> fileSize)
+    public static long EstimateBytes(ModelPreset preset, LocalModel? model, Func<string, long?> fileSize, ServerEngine engine = ServerEngine.LlamaCpp)
     {
         if (preset.MemoryEstimateMb is > 0)
             return preset.MemoryEstimateMb.Value * Mb;
+
+        if (engine == ServerEngine.StableDiffusionCpp)
+            return DiffusionBytes(preset, fileSize);
 
         long weights = ModelFileBytes(preset.ModelPath, fileSize);
         int? layers = model?.BlockCount;
@@ -42,6 +50,15 @@ public static class PresetMemoryEstimator
             weights += fileSize(preset.Mmproj) ?? 0;
 
         return weights + KvCacheBytes(preset, model) + (long)(weights * 0.05) + ComputeBufferBytes;
+    }
+
+    private static long DiffusionBytes(ModelPreset preset, Func<string, long?> fileSize)
+    {
+        var files = StableDiffusionPresetSettings.ModelFiles(preset).Select(f => ModelFileBytes(f, fileSize)).ToList();
+        bool offload = preset.EngineSettings.TryGetValue(StableDiffusionPresetSettings.OffloadToCpu, out var raw)
+            && bool.TryParse(raw, out var on) && on;
+        long weights = offload ? files.DefaultIfEmpty(0).Max() : files.Sum();
+        return weights + (long)(weights * 0.05) + DiffusionComputeBufferBytes;
     }
 
     /// <summary>Bytes per KV-cache element for a <c>-ctk</c>/<c>-ctv</c> type (block-quant sizes included).</summary>

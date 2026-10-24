@@ -18,6 +18,19 @@ public interface IEngineDescriptor
     string DisplayName { get; }
 
     /// <summary>
+    /// What the engine generates, and so which API endpoints its presets serve (chat for
+    /// <see cref="EngineModality.Text"/>, <c>/v1/images/*</c> for <see cref="EngineModality.Image"/>).
+    /// </summary>
+    EngineModality Modality { get; }
+
+    /// <summary>
+    /// Id of the preset-form section holding this engine's own settings (stored in
+    /// <see cref="ModelPreset.EngineSettings"/>); the form then shows only Identity and that section.
+    /// Null for llama.cpp, whose settings are the form's typed sections.
+    /// </summary>
+    string? PresetFormSection { get; }
+
+    /// <summary>
     /// Concrete <see cref="IBackendProvider"/> type, created per server instance via DI
     /// (constructor dependencies are resolved from the container).
     /// </summary>

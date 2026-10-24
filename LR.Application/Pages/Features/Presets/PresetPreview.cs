@@ -53,6 +53,9 @@ public static class PresetPreview
         if (engine == ServerEngine.Strata)
             return BuildStrata(preset);
 
+        if (engine == ServerEngine.StableDiffusionCpp)
+            return BuildStableDiffusion(preset);
+
         var args = new LlamaCppArgBuilder { Port = 8080 }.Build(preset);
         var commandLine = "llama-server " + string.Join(' ', args.Select(QuoteIfNeeded));
 
@@ -90,6 +93,23 @@ public static class PresetPreview
             "# every start\n" +
             "python serve/server.py --engine strata --config <prepared config> --host 127.0.0.1 --port <port>";
         return new Result(commandLine, setupArgs);
+    }
+
+    /// <summary>A stable-diffusion.cpp preset: the <c>sd-server</c> launch (the port is assigned at start).</summary>
+    private static Result BuildStableDiffusion(ModelPreset preset)
+    {
+        List<string> args;
+        try
+        {
+            args = StableDiffusionPresetSettings.ServerArgs(preset);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new Result(ex.Message, Array.Empty<string>());
+        }
+
+        args.AddRange(["--listen-ip", "127.0.0.1", "--listen-port", "<port>"]);
+        return new Result("sd-server " + string.Join(' ', args.Select(QuoteIfNeeded)), args);
     }
 
     private static string QuoteIfNeeded(string arg)

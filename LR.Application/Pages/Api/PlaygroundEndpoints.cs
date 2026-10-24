@@ -26,10 +26,11 @@ public static class PlaygroundEndpoints
 
         // Presets the Playground can chat with, plus whether each one's model is loaded right now —
         // the page re-reads this before every send to flag runs that include a model (re)load.
-        group.MapGet("/presets", (IPresetManager presetManager, IServerManager serverManager, IChatTemplateVariableExtractor templateVariableExtractor) =>
+        group.MapGet("/presets", (IPresetManager presetManager, IServerManager serverManager, IEngineCatalog engines, IChatTemplateVariableExtractor templateVariableExtractor) =>
         {
             var servers = serverManager.GetAllInstances().ToDictionary(s => s.Id);
             var presets = presetManager.GetAllPresets()
+                .OfModality(servers.Values, engines, EngineModality.Text)
                 .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
                 .Select(p =>
                 {
