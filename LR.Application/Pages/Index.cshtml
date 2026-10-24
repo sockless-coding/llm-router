@@ -380,9 +380,10 @@
                 if (dotEl) setDot(dotEl, 'bg-neon-green animate-pulse shadow-neon-green', '');
                 if (textEl) textEl.textContent = 'Running';
                 if (msgEl) msgEl.classList.add('hidden');
-                // Update button: swap Start for Stop
+                // Update button: swap Start for Stop (re-enable — startServer disabled it)
                 const startBtn = document.getElementById('btn-start-' + instanceId);
                 if (startBtn) {
+                    startBtn.disabled = false;
                     startBtn.id = 'btn-stop-' + instanceId;
                     startBtn.onclick = () => stopServer(instanceId);
                     startBtn.className = 'px-3 py-1.5 rounded-lg bg-neon-red/10 text-neon-red border border-neon-red/20 hover:bg-neon-red/20 transition-all text-xs font-medium';
@@ -393,8 +394,16 @@
                 if (dotEl) setDot(dotEl, 'bg-neon-red animate-pulse shadow-neon-red', '');
                 if (textEl) textEl.textContent = 'Error';
                 if (msgEl) { msgEl.textContent = message; msgEl.classList.remove('hidden'); }
+                resetStartButton(instanceId);
                 break;
         }
+    }
+
+    function resetStartButton(instanceId) {
+        const btn = document.getElementById('btn-start-' + instanceId);
+        if (!btn) return;
+        btn.disabled = false;
+        btn.innerHTML = '<span>Start</span>';
     }
 
     function setDot(el, classes, removeClasses) {
@@ -461,11 +470,11 @@
             const result = await response.json();
             if (!result.success) {
                 alert('Failed to start server: ' + result.message);
-                if (btn) btn.disabled = false;
+                resetStartButton(instanceId);
             }
         } catch (err) {
             alert('Error starting server: ' + err.message);
-            if (btn) btn.disabled = false;
+            resetStartButton(instanceId);
         }
     };
 
