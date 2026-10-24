@@ -15,6 +15,10 @@
         {
             <p class="text-xs text-neon-red mt-0.5">File missing on disk</p>
         }
+        else if (lm.Status == ModelStatus.Error && !string.IsNullOrEmpty(lm.StatusMessage))
+        {
+            <p class="text-xs text-neon-red mt-0.5 max-w-xl break-words">@lm.StatusMessage</p>
+        }
     </td>
     <td class="px-4 py-3">
         @if (lm.Source == ModelSource.HuggingFace)

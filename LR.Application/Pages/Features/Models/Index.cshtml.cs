@@ -22,6 +22,13 @@ public class ModelsIndexModel : PageModel
     [BindProperty]
     public string? HuggingFaceApiToken { get; set; }
 
+    [BindProperty]
+    public bool ClearHuggingFaceApiToken { get; set; }
+
+    /// <summary>Last characters of the saved token, or null when none is saved. Password inputs never
+    /// render their value, so this is how the page shows that a token is set.</summary>
+    public string? SavedTokenHint { get; set; }
+
     public string? StatusMessage { get; set; }
 
     public ModelsIndexModel(IModelLibrary modelLibrary, IPresetManager presetManager, IModelLibrarySettingsService settings)
@@ -35,7 +42,7 @@ public class ModelsIndexModel : PageModel
     {
         var settings = await _settings.GetAsync();
         RootFolder = settings.RootFolder;
-        HuggingFaceApiToken = settings.HuggingFaceApiToken;
+        SavedTokenHint = TokenHint(settings.HuggingFaceApiToken);
         await LoadModelsAsync();
     }
 
@@ -43,7 +50,13 @@ public class ModelsIndexModel : PageModel
     {
         try
         {
-            await _settings.SaveAsync(RootFolder ?? string.Empty, HuggingFaceApiToken);
+            // The token field always posts back blank unless a new token was typed, so blank keeps
+            // the saved one; removing it takes the explicit checkbox.
+            var savedToken = (await _settings.GetAsync()).HuggingFaceApiToken;
+            var token = ClearHuggingFaceApiToken ? null
+                : string.IsNullOrWhiteSpace(HuggingFaceApiToken) ? savedToken
+                : HuggingFaceApiToken.Trim();
+            await _settings.SaveAsync(RootFolder ?? string.Empty, token);
             StatusMessage = "Library settings saved.";
         }
         catch (Exception ex)
@@ -51,9 +64,19 @@ public class ModelsIndexModel : PageModel
             StatusMessage = $"Failed to save settings: {ex.Message}";
         }
 
+        HuggingFaceApiToken = null;
+        ClearHuggingFaceApiToken = false;
+        ModelState.Clear();
+        SavedTokenHint = TokenHint((await _settings.GetAsync()).HuggingFaceApiToken);
+
         await LoadModelsAsync();
         return Page();
     }
+
+    private static string? TokenHint(string? token) =>
+        string.IsNullOrWhiteSpace(token) ? null
+        : token.Length > 8 ? $"{token[..3]}…{token[^4..]}"
+        : "•••";
 
     private async Task LoadModelsAsync()
     {
