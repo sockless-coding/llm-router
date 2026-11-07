@@ -24,7 +24,7 @@ public class ModelLibraryManager : IModelLibrary
 
     public async Task<IReadOnlyList<LocalModel>> GetAllAsync()
     {
-        var list = await _context.LocalModels.OrderBy(m => m.Name).ToListAsync();
+        var list = await _context.LocalModels.Include(m => m.Agent).OrderBy(m => m.Name).ToListAsync();
         return list.AsReadOnly();
     }
 
@@ -39,7 +39,7 @@ public class ModelLibraryManager : IModelLibrary
             throw new FileNotFoundException($"Model file not found: {filePath}", filePath);
 
         var normalizedPath = Path.GetFullPath(filePath);
-        var existing = await _context.LocalModels.FirstOrDefaultAsync(m => m.FilePath == normalizedPath);
+        var existing = await _context.LocalModels.FirstOrDefaultAsync(m => m.FilePath == normalizedPath && m.AgentId == null);
         if (existing is not null)
             throw new InvalidOperationException($"A model already exists for path: {normalizedPath}");
 
@@ -65,7 +65,7 @@ public class ModelLibraryManager : IModelLibrary
         if (!Directory.Exists(folder))
             return Array.Empty<string>();
 
-        var registered = await _context.LocalModels.Select(m => m.FilePath).ToListAsync();
+        var registered = await _context.LocalModels.Where(m => m.AgentId == null).Select(m => m.FilePath).ToListAsync();
         var registeredSet = new HashSet<string>(registered, StringComparer.OrdinalIgnoreCase);
 
         return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
@@ -82,6 +82,10 @@ public class ModelLibraryManager : IModelLibrary
     {
         var model = await _context.LocalModels.FindAsync(id);
         if (model is null) return false;
+
+        // A model on a remote agent is read by that agent (see AgentDeploymentService), never from this disk.
+        if (model.AgentId is not null)
+            throw new InvalidOperationException("This model lives on a remote agent — refresh it from the agent.");
 
         if (!File.Exists(model.FilePath))
         {
@@ -130,7 +134,8 @@ public class ModelLibraryManager : IModelLibrary
         _context.LocalModels.Remove(model);
         await _context.SaveChangesAsync();
 
-        if (deleteFile)
+        // A remote agent's file is deleted by that agent; never touch a same-named path here.
+        if (deleteFile && model.AgentId is null)
         {
             // every shard of a split model
             foreach (var path in SplitGguf.AllShards(model.FilePath).Where(File.Exists))
@@ -162,6 +167,15 @@ public class ModelLibraryManager : IModelLibrary
         if (metadata is null)
             return;
 
+        ApplyGgufMetadata(model, metadata, MmprojLocator.FindSiblingMmproj(filePath));
+    }
+
+    /// <summary>
+    /// Copies GGUF metadata onto a library entry. Public so metadata read elsewhere (a remote agent
+    /// reads the file on its own disk) lands on the row exactly as a local read would.
+    /// </summary>
+    public static void ApplyGgufMetadata(LocalModel model, GgufMetadata metadata, string? detectedMmprojPath)
+    {
         model.Architecture = metadata.Architecture;
         model.GgufModelName = metadata.ModelName;
         model.ParameterSize = metadata.ParameterSize;
@@ -182,7 +196,7 @@ public class ModelLibraryManager : IModelLibrary
         model.AllKvPairsJson = metadata.AllKvPairs is not null
             ? JsonSerializer.Serialize(metadata.AllKvPairs)
             : null;
-        model.DetectedMmprojPath = MmprojLocator.FindSiblingMmproj(filePath);
+        model.DetectedMmprojPath = detectedMmprojPath;
 
         if (string.IsNullOrWhiteSpace(model.Name) && !string.IsNullOrWhiteSpace(metadata.ModelName))
             model.Name = metadata.ModelName!;

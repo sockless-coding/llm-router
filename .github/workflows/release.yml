@@ -63,6 +63,12 @@ jobs:
           -o publish/self-contained
           -p:Version=${{ steps.version.outputs.version }}
 
+      # Self-contained agent builds (Windows/Linux, x64/arm64) the router serves to install
+      # scripts and to agents updating themselves — same version as the router.
+      - name: Publish agent packages
+        shell: pwsh
+        run: ./publish-agents.ps1 -Version '${{ steps.version.outputs.version }}' -Output publish/agent-packages
+
       - name: Package release archives
         shell: pwsh
         run: |
@@ -70,6 +76,7 @@ jobs:
           $extras = 'install-service.ps1', 'uninstall-service.ps1', 'README.md', 'LICENSE'
           foreach ($dir in 'framework-dependent', 'self-contained') {
             Copy-Item $extras "publish/$dir"
+            Copy-Item -Recurse publish/agent-packages "publish/$dir/agent-packages"
           }
           Compress-Archive publish/framework-dependent/* "llm-router-$v-win-x64.zip"
           Compress-Archive publish/self-contained/*   "llm-router-$v-win-x64-self-contained.zip"

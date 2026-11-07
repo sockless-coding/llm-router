@@ -27,6 +27,21 @@
             <span asp-validation-for="ViewModel.Name" class="text-xs text-neon-red mt-1"></span>
         </div>
 
+        <!-- Host -->
+        <div>
+            <label for="ViewModel_AgentId" class="block text-sm font-medium text-text-secondary mb-2">Runs on</label>
+            <select asp-for="ViewModel.AgentId" onchange="toggleEngineFields()"
+                    class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all">
+                <option value="">This machine (the router)</option>
+                @foreach (var agent in Model.Agents)
+                {
+                    <option value="@agent.Id">Agent: @agent.Name@(agent.EffectiveHost is { } h ? $" ({h})" : "")</option>
+                }
+            </select>
+            <p class="text-xs text-gray-500 mt-1">On an agent, folders and model paths are paths on that machine. Manage agents on the <a href="/Features/Agents/Index" class="text-neon-cyan/70 hover:text-neon-cyan">Agents</a> page.</p>
+            <span asp-validation-for="ViewModel.AgentId" class="text-xs text-neon-red mt-1"></span>
+        </div>
+
         <!-- Server Engine -->
         <div>
             <label for="ViewModel_Engine" class="block text-sm font-medium text-text-secondary mb-2">Server Engine</label>
@@ -38,6 +53,7 @@
                     <option value="@engine.Engine"
                             data-display-name="@engine.DisplayName"
                             data-managed-builds="@(engine.SupportsManagedBuilds ? "true" : "false")"
+                            data-remote="@(engine.SupportsRemoteAgents ? "true" : "false")"
                             data-folder-label="@engine.InstallFolderLabel"
                             data-folder-help="@engine.InstallFolderHelp"
                             data-folder-placeholder="@engine.InstallFolderPlaceholder">@engine.DisplayName</option>
@@ -71,7 +87,7 @@
                     <option value="">— custom folder (enter path below) —</option>
                     @foreach (var build in Model.AvailableBuilds)
                     {
-                        <option value="@build.Id" data-engine="@build.Engine">@build.Name — @build.BackendType (@(build.VersionTag ?? "?"))</option>
+                        <option value="@build.Id" data-engine="@build.Engine" data-agent="@(build.AgentId?.ToString() ?? "")">@build.Name — @build.BackendType (@(build.VersionTag ?? "?"))</option>
                     }
                 </select>
                 <span asp-validation-for="ViewModel.EngineBuildId" class="text-xs text-neon-red mt-1"></span>
@@ -129,6 +145,15 @@
 <script>
 function toggleEngineFields() {
     const engineSelect = document.getElementById('ViewModel_Engine');
+    const agentId = document.getElementById('ViewModel_AgentId').value;
+
+    // Engines that can't run on an agent (Strata) are hidden while an agent is picked.
+    for (const opt of engineSelect.options) opt.hidden = !!agentId && opt.dataset.remote !== 'true';
+    if (engineSelect.selectedOptions[0]?.hidden) {
+        const firstVisible = [...engineSelect.options].find(o => !o.hidden);
+        if (firstVisible) engineSelect.value = firstVisible.value;
+    }
+
     const option = engineSelect.options[engineSelect.selectedIndex];
     if (!option) return;
 
@@ -145,7 +170,7 @@ function toggleEngineFields() {
     document.getElementById('enginesLink').href = '/Features/Engines/Index?engine=' + engineSelect.value;
     if (buildSelect) {
         for (const opt of buildSelect.options) {
-            if (opt.dataset.engine) opt.hidden = opt.dataset.engine !== engineSelect.value;
+            if (opt.dataset.engine) opt.hidden = opt.dataset.engine !== engineSelect.value || (opt.dataset.agent || '') !== agentId;
         }
         if (!supportsBuilds || buildSelect.selectedOptions[0]?.hidden) buildSelect.value = '';
     }

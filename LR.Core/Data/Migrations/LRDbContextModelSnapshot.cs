@@ -17,6 +17,25 @@ namespace LR.Core.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
 
+            modelBuilder.Entity("LR.Core.Models.AgentSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnrollmentToken")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublicUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AgentSettings", (string)null);
+                });
+
             modelBuilder.Entity("LR.Core.Models.ApiKey", b =>
                 {
                     b.Property<Guid>("Id")
@@ -208,6 +227,9 @@ namespace LR.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("AgentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("BackendType")
                         .HasColumnType("INTEGER");
 
@@ -263,6 +285,8 @@ namespace LR.Core.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AgentId");
 
                     b.HasIndex("InstallPath")
                         .IsUnique();
@@ -367,6 +391,9 @@ namespace LR.Core.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AgentId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("AllKvPairsJson")
@@ -481,6 +508,8 @@ namespace LR.Core.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AgentId");
 
                     b.HasIndex("FilePath")
                         .IsUnique();
@@ -1309,6 +1338,99 @@ namespace LR.Core.Migrations
                     b.ToTable("PlaygroundRuns", (string)null);
                 });
 
+            modelBuilder.Entity("LR.Core.Models.RemoteAgent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Arch")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("AutoUpdate")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DataDirectory")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EngineRoot")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HostOverride")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Hostname")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastConnectedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastRemoteAddress")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MachineId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelRoot")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Os")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OsDescription")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Rid")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SecretHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SystemInfoJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Version")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MachineId");
+
+                    b.ToTable("RemoteAgents", (string)null);
+                });
+
             modelBuilder.Entity("LR.Core.Models.RoutingRule", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1345,6 +1467,9 @@ namespace LR.Core.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("ActivePresetId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AgentId")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Engine")
@@ -1391,6 +1516,8 @@ namespace LR.Core.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ActivePresetId");
+
+                    b.HasIndex("AgentId");
 
                     b.HasIndex("Name")
                         .IsUnique();
@@ -1558,12 +1685,29 @@ namespace LR.Core.Migrations
 
             modelBuilder.Entity("LR.Core.Models.EngineBuild", b =>
                 {
+                    b.HasOne("LR.Core.Models.RemoteAgent", "Agent")
+                        .WithMany()
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("LR.Core.Models.LlamaCppBuildRecipe", "Recipe")
                         .WithMany()
                         .HasForeignKey("RecipeId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.Navigation("Agent");
+
                     b.Navigation("Recipe");
+                });
+
+            modelBuilder.Entity("LR.Core.Models.LocalModel", b =>
+                {
+                    b.HasOne("LR.Core.Models.RemoteAgent", "Agent")
+                        .WithMany()
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Agent");
                 });
 
             modelBuilder.Entity("LR.Core.Models.ModelPreset", b =>
@@ -1651,7 +1795,14 @@ namespace LR.Core.Migrations
                         .HasForeignKey("ActivePresetId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("LR.Core.Models.RemoteAgent", "Agent")
+                        .WithMany("Servers")
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("ActivePreset");
+
+                    b.Navigation("Agent");
                 });
 
             modelBuilder.Entity("LR.Core.Models.ServerLog", b =>
@@ -1673,6 +1824,11 @@ namespace LR.Core.Migrations
             modelBuilder.Entity("LR.Core.Models.LocalModel", b =>
                 {
                     b.Navigation("Presets");
+                });
+
+            modelBuilder.Entity("LR.Core.Models.RemoteAgent", b =>
+                {
+                    b.Navigation("Servers");
                 });
 
             modelBuilder.Entity("LR.Core.Models.ServerInstance", b =>

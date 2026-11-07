@@ -83,4 +83,12 @@ public interface IServerManager
     /// Updates the health status of a server instance (used by the health monitor).
     /// </summary>
     Task UpdateHealthAsync(Guid instanceId, bool isHealthy);
+
+    /// <summary>
+    /// Re-attaches to the still-running backend of a server whose wrapper connection was lost — a
+    /// server on a remote agent after the router restarted or the agent's link dropped. On success
+    /// the server is marked Running; when nothing is running, a server that was believed to be up
+    /// (Running/Starting/Reconnecting) is marked Error. Returns whether it re-attached.
+    /// </summary>
+    Task<bool> TryReattachAsync(Guid instanceId, CancellationToken cancellationToken = default);
 }

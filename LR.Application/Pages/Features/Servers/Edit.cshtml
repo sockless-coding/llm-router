@@ -33,6 +33,20 @@
                 <p class="text-lg text-text-primary font-medium">@Model.Server.Name</p>
             </div>
 
+            <!-- Host -->
+            <div>
+                <p class="text-sm font-medium text-text-secondary mb-1">Runs on</p>
+                @if (Model.Server.AgentId is { } agentId)
+                {
+                    <a href="/Features/Agents/Detail?id=@agentId" class="text-text-primary hover:text-neon-cyan">Agent: @(Model.AgentName ?? "(deleted)")</a>
+                    <p class="text-xs text-gray-500 mt-1">Folders below are paths on that machine.</p>
+                }
+                else
+                {
+                    <p class="text-text-primary">This machine (the router)</p>
+                }
+            </div>
+
             <!-- Engine -->
             <div>
                 <p class="text-sm font-medium text-text-secondary mb-1">Server Engine</p>

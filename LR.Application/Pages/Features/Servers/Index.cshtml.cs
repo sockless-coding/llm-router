@@ -8,17 +8,23 @@ namespace LR.Application.Pages.Features.Servers;
 public class ServersListModel : PageModel
 {
     private readonly IServerManager _serverManager;
+    private readonly LR.Core.Data.LRDbContext _context;
 
     public IReadOnlyList<Core.Models.ServerInstance> Servers { get; set; } = new List<Core.Models.ServerInstance>();
 
-    public ServersListModel(IServerManager serverManager)
+    /// <summary>Names of the remote agents servers run on, by agent id.</summary>
+    public Dictionary<Guid, string> AgentNames { get; set; } = new();
+
+    public ServersListModel(IServerManager serverManager, LR.Core.Data.LRDbContext context)
     {
         _serverManager = serverManager;
+        _context = context;
     }
 
     public void OnGet()
     {
         Servers = _serverManager.GetAllInstances();
+        AgentNames = _context.RemoteAgents.Select(a => new { a.Id, a.Name }).ToDictionary(a => a.Id, a => a.Name);
     }
 
     [BindProperty(SupportsGet = true)]

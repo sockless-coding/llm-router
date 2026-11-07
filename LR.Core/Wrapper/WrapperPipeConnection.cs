@@ -7,9 +7,9 @@ namespace LR.Core.Wrapper;
 /// Thin NDJSON framing helper shared by both ends of the router&lt;-&gt;wrapper named pipe,
 /// so the wire format is defined in exactly one place.
 /// </summary>
-public sealed class WrapperPipeConnection : IAsyncDisposable
+public sealed class WrapperPipeConnection : IWrapperTransport
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    public static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };

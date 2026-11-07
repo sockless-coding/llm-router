@@ -28,6 +28,9 @@ public partial class EditModel : PageModel
 
     public ServerInstance? Server { get; set; }
 
+    /// <summary>Name of the remote agent the server runs on; null for this machine.</summary>
+    public string? AgentName { get; set; }
+
     /// <summary>The server's engine, or null if it has no registered provider.</summary>
     public IEngineDescriptor? Engine => Server is null ? null : _engines.Get(Server.Engine);
 
@@ -60,7 +63,8 @@ public partial class EditModel : PageModel
         var group = Server.MemoryGroup is null ? null : await _context.MemoryGroups.FindAsync(Server.MemoryGroup);
         ViewModel.GroupBudgetGb = group is { BudgetMb: > 0 } ? Math.Round(group.BudgetMb / 1024.0, 1) : null;
 
-        AvailableBuilds = await LoadAvailableBuildsAsync(Server.Engine);
+        AvailableBuilds = await LoadAvailableBuildsAsync(Server.Engine, Server.AgentId);
+        AgentName = Server.AgentId is { } aid ? (await _context.RemoteAgents.FindAsync(aid))?.Name : null;
         await LoadMemoryInfoAsync();
 
         // Get the start command for display
@@ -78,7 +82,8 @@ public partial class EditModel : PageModel
         if (Server is null)
             return NotFound();
 
-        AvailableBuilds = await LoadAvailableBuildsAsync(Server.Engine);
+        AvailableBuilds = await LoadAvailableBuildsAsync(Server.Engine, Server.AgentId);
+        AgentName = Server.AgentId is { } aid ? (await _context.RemoteAgents.FindAsync(aid))?.Name : null;
         await LoadMemoryInfoAsync();
 
         if (!ModelState.IsValid)
@@ -90,6 +95,7 @@ public partial class EditModel : PageModel
 
         // A managed build supplies the folder path; only validate a manually-entered one.
         if (boundBuild is null
+            && Server.AgentId is null // a folder on a remote agent can't be checked from here
             && Engine is not null
             && !string.IsNullOrWhiteSpace(ViewModel.InstallFolderPath)
             && Engine.ValidateInstallFolder(ViewModel.InstallFolderPath) is { } folderError)
@@ -161,10 +167,10 @@ public partial class EditModel
         await _context.SaveChangesAsync();
     }
 
-    /// <summary>Ready installs of <paramref name="engine"/> — the only ones a server of that engine can bind to.</summary>
-    private Task<List<EngineBuild>> LoadAvailableBuildsAsync(ServerEngine engine) =>
+    /// <summary>Ready installs of <paramref name="engine"/> on the server's own machine — the only ones it can bind to.</summary>
+    private Task<List<EngineBuild>> LoadAvailableBuildsAsync(ServerEngine engine, Guid? agentId) =>
         _context.EngineBuilds
-            .Where(b => b.Status == EngineBuildStatus.Ready && b.Engine == engine)
+            .Where(b => b.Status == EngineBuildStatus.Ready && b.Engine == engine && b.AgentId == agentId)
             .OrderByDescending(b => b.CreatedAt)
             .ToListAsync();
 }

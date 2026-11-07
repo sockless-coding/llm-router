@@ -28,13 +28,14 @@ public class ModelLibraryReconciliationService
     public async Task ReconcileAsync(CancellationToken ct = default)
     {
         var unlinkedPresets = await _context.ModelPresets
-            .Where(p => p.ModelId == null && p.ModelPath != "")
+            // Only this machine's servers: a preset of a server on a remote agent names a file on that machine.
+            .Where(p => p.ModelId == null && p.ModelPath != "" && p.ServerInstance!.AgentId == null)
             .ToListAsync(ct);
 
         if (unlinkedPresets.Count == 0)
             return;
 
-        var existingModels = await _context.LocalModels.ToListAsync(ct);
+        var existingModels = await _context.LocalModels.Where(m => m.AgentId == null).ToListAsync(ct);
         var byPath = existingModels.ToDictionary(m => m.FilePath, StringComparer.OrdinalIgnoreCase);
 
         var groups = unlinkedPresets.GroupBy(p => NormalizePath(p.ModelPath));

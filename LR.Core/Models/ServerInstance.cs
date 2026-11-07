@@ -71,6 +71,16 @@ public class ServerInstance
     public int? IdleUnloadMinutes { get; set; }
 
     /// <summary>
+    /// The remote agent whose machine runs this server's backend, or null for this router's own
+    /// machine. Fixed at creation — install folders and model paths are paths on that machine.
+    /// </summary>
+    public Guid? AgentId { get; set; }
+
+    /// <summary>Navigation: the remote agent hosting this server, if any.</summary>
+    [ForeignKey(nameof(AgentId))]
+    public RemoteAgent? Agent { get; set; }
+
+    /// <summary>
     /// Whether an auto-restart is currently in progress (prevents concurrent restart attempts).
     /// </summary>
     [NotMapped]

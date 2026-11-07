@@ -12,6 +12,10 @@
     hidden="@Model.HiddenByDefault">
     <td class="px-4 py-3@(Model.Indented ? " pl-10" : "")">
         <a href="/Features/Models/Details?id=@lm.Id" class="text-text-primary font-medium hover:text-neon-magenta transition-colors">@ModelDisplayFormat.Truncate(lm.Name, 48)</a>
+        @if (lm.Agent is { } agent)
+        {
+            <a href="/Features/Agents/Detail?id=@agent.Id" class="ml-1 text-xs px-2 py-0.5 rounded-full border border-neon-magenta/30 text-neon-magenta bg-neon-magenta/10 hover:bg-neon-magenta/20" title="Stored on this agent">@agent.Name</a>
+        }
         @if (lm.Status == ModelStatus.Missing)
         {
             <p class="text-xs text-neon-red mt-0.5">File missing on disk</p>

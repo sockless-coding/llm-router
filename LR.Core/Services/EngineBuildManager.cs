@@ -33,6 +33,7 @@ public class EngineBuildManager : IEngineBuildManager
     {
         var list = await _context.EngineBuilds
             .Include(b => b.Recipe)
+            .Include(b => b.Agent)
             .OrderByDescending(b => b.CreatedAt)
             .ToListAsync();
         return list.AsReadOnly();
@@ -42,6 +43,7 @@ public class EngineBuildManager : IEngineBuildManager
     {
         var list = await _context.EngineBuilds
             .Include(b => b.Recipe)
+            .Include(b => b.Agent)
             .Where(b => b.Engine == engine)
             .OrderByDescending(b => b.CreatedAt)
             .ToListAsync();
@@ -74,7 +76,8 @@ public class EngineBuildManager : IEngineBuildManager
                 cfg.InstallFolderPath = null;
         }
 
-        if (deleteFiles && !string.IsNullOrWhiteSpace(build.InstallPath) && Directory.Exists(build.InstallPath))
+        // A remote agent's install is deleted by that agent; never touch a same-named path here.
+        if (deleteFiles && build.AgentId is null && !string.IsNullOrWhiteSpace(build.InstallPath) && Directory.Exists(build.InstallPath))
         {
             try { Directory.Delete(build.InstallPath, recursive: true); }
             catch { /* leave the folder; the row is going away regardless */ }
@@ -197,7 +200,8 @@ public class EngineBuildManager : IEngineBuildManager
 
     public async Task ReconcileAsync(CancellationToken ct = default)
     {
-        var builds = await _context.EngineBuilds.ToListAsync(ct);
+        // Only this machine's installs — an agent's are reconciled against its disk when it connects.
+        var builds = await _context.EngineBuilds.Where(b => b.AgentId == null).ToListAsync(ct);
         var changed = false;
 
         foreach (var build in builds)

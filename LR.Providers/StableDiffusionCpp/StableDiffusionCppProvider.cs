@@ -70,15 +70,10 @@ public partial class StableDiffusionCppProvider : ManagedServerProviderBase, IGe
 
     protected override ServerLaunchSpec BuildLaunchSpec(ModelPreset preset)
     {
-        if (string.IsNullOrEmpty(InstallFolderPath))
-            throw new InvalidOperationException("Server executable path is not set — configure the server's stable-diffusion.cpp folder or bind it to a managed build.");
-
-        string executablePath = Path.Combine(InstallFolderPath, ServerExecutableName);
-        if (!File.Exists(executablePath))
-            throw new FileNotFoundException($"Server executable not found at: {executablePath}");
+        string executablePath = ResolveServerExecutable("sd-server");
 
         var args = StableDiffusionPresetSettings.ServerArgs(preset);
-        args.AddRange(["--listen-ip", "127.0.0.1", "--listen-port", Port.ToString(CultureInfo.InvariantCulture)]);
+        args.AddRange(["--listen-ip", ListenAddress, "--listen-port", Port.ToString(CultureInfo.InvariantCulture)]);
         return new ServerLaunchSpec(executablePath, args, InstallFolderPath);
     }
 

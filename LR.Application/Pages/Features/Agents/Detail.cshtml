@@ -1,0 +1,430 @@
+@page
+@using LR.Application.Pages.Features.Agents
+@using LR.Core.Models
+@model AgentDetailModel
+@{
+    var a = Model.Agent;
+    ViewData["Title"] = $"Agent — {a.Name}";
+    var outdated = Model.PackageVersion is not null && a.Version is not null && !a.Version.Equals(Model.PackageVersion, StringComparison.OrdinalIgnoreCase);
+    var pill = "text-xs px-2.5 py-1 rounded-full border";
+    var btn = "text-xs px-3 py-1.5 rounded-md transition-all font-medium";
+    var input = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan outline-none text-sm";
+    string StatusClass(string s) => s switch
+    {
+        "Ready" or "Running" => "bg-neon-green/10 text-neon-green border-neon-green/30",
+        "Error" or "Missing" => "bg-red-500/10 text-neon-red border-red-500/30",
+        "Downloading" or "Building" or "Starting" or "Pending" or "Reconnecting" => "bg-neon-cyan/10 text-neon-cyan border-neon-cyan/30",
+        _ => "bg-gray-700/30 text-text-secondary border-gray-600/30",
+    };
+}
+
+<div class="max-w-6xl mx-auto px-4 py-6 space-y-6">
+    <form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+    <!-- One poll refreshes every live section below; the forms stay untouched. -->
+    <div hx-get="/Features/Agents/Detail?id=@a.Id" hx-trigger="every 4s" hx-select="#liveHeader" hx-target="#liveHeader" hx-swap="outerHTML"
+         hx-select-oob="#liveInfo,#liveServers,#liveEngines,#liveModels,#liveActivity" aria-hidden="true"></div>
+
+    <a href="/Features/Agents/Index" class="text-sm text-text-secondary hover:text-neon-cyan">← All agents</a>
+
+    <!-- Header -->
+    <div id="liveHeader" class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+            <h1 class="text-3xl font-bold text-neon-cyan">@a.Name</h1>
+            <div class="flex items-center gap-2 mt-2 flex-wrap">
+                @if (!a.IsEnabled)
+                {
+                    <span class="@pill bg-gray-700/30 text-text-secondary border-gray-600/30">Disabled</span>
+                }
+                else if (Model.Online)
+                {
+                    <span class="@pill bg-neon-green/10 text-neon-green border-neon-green/30">Online</span>
+                }
+                else
+                {
+                    <span class="@pill bg-red-500/10 text-neon-red border-red-500/30">Offline</span>
+                }
+                <span class="text-sm text-text-secondary font-mono">@(a.EffectiveHost ?? "no address yet")</span>
+                <span class="text-sm text-text-secondary">· agent <span class="font-mono">@(a.Version ?? "?")</span></span>
+                @if (outdated)
+                {
+                    <span class="@pill border-yellow-500/30 text-yellow-300 bg-yellow-500/10">router ships @Model.PackageVersion</span>
+                }
+            </div>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+            @if (Model.Online && Model.HasPackageForAgent)
+            {
+                <button type="button" onclick="agentAction({ Command: 'update', Flag: @(outdated ? "false" : "true") }, @(outdated ? "null" : "'Reinstall the same agent version?'"))"
+                        class="@btn bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20">@(outdated ? "Update now" : "Reinstall agent")</button>
+            }
+            @if (Model.Online)
+            {
+                <button type="button" onclick="agentAction({ Command: 'restart' }, 'Restart the agent? Running backends keep running.')"
+                        class="@btn bg-gray-700/30 text-text-secondary hover:bg-gray-700/50">Restart agent</button>
+            }
+            <button type="button" onclick="agentAction({ Command: 'setenabled', Flag: @(a.IsEnabled ? "false" : "true") }, @(a.IsEnabled ? "'Disable this agent? It will be disconnected and its servers can\\'t start.'" : "null"))"
+                    class="@btn bg-gray-700/30 text-text-secondary hover:bg-gray-700/50">@(a.IsEnabled ? "Disable" : "Enable")</button>
+            <button type="button" onclick="deleteAgent()" class="@btn bg-red-500/10 text-neon-red hover:bg-red-500/20">Delete</button>
+        </div>
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-6">
+        <!-- Machine -->
+        <section id="liveInfo" class="bg-cyber-card rounded-xl border border-gray-700/30 p-5" aria-labelledby="machine-heading">
+            <h2 id="machine-heading" class="text-lg font-semibold text-text-primary mb-3">Machine</h2>
+            <dl class="grid grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                <dt class="text-text-secondary">Host name</dt><dd class="col-span-2 text-text-primary">@(a.Hostname ?? "—")</dd>
+                <dt class="text-text-secondary">System</dt><dd class="col-span-2 text-text-primary">@(a.OsDescription ?? "—") <span class="text-text-secondary font-mono text-xs">@a.Rid</span></dd>
+                <dt class="text-text-secondary">Data folder</dt><dd class="col-span-2 text-text-primary font-mono text-xs break-all">@(a.DataDirectory ?? "—")</dd>
+                <dt class="text-text-secondary">Connected</dt>
+                <dd class="col-span-2 text-text-primary">
+                    @if (Model.Live is { } live) { <text>since </text>@Html.Timestamp(live.ConnectedAt, "datetime")<text> from </text><span class="font-mono text-xs">@live.RemoteAddress</span> }
+                    else if (a.LastSeenAt is { } seen) { <text>last seen </text>@Html.Timestamp(seen, "datetime") }
+                    else { <text>never</text> }
+                </dd>
+                @if (Model.Info is { } info)
+                {
+                    <dt class="text-text-secondary">CPU</dt><dd class="col-span-2 text-text-primary">@info.ProcessorCount cores@(info.CpuPercent is { } cpu ? $" · {cpu:0}% busy" : "")</dd>
+                    <dt class="text-text-secondary">Memory</dt><dd class="col-span-2 text-text-primary">@AgentsIndexModel.FormatBytes(info.TotalMemoryBytes - info.AvailableMemoryBytes) used of @AgentsIndexModel.FormatBytes(info.TotalMemoryBytes)</dd>
+                    <dt class="text-text-secondary">Disk (data)</dt><dd class="col-span-2 text-text-primary">@AgentsIndexModel.FormatBytes(info.DiskFreeBytes) free of @AgentsIndexModel.FormatBytes(info.DiskTotalBytes)</dd>
+                    <dt class="text-text-secondary">Addresses</dt><dd class="col-span-2 text-text-primary font-mono text-xs">@(info.IpAddresses.Count > 0 ? string.Join(", ", info.IpAddresses) : "—")</dd>
+                    <dt class="text-text-secondary">GPUs</dt>
+                    <dd class="col-span-2 text-text-primary">
+                        @if (info.Gpus.Count == 0) { <span class="text-text-secondary">none reported (NVIDIA GPUs are listed via nvidia-smi)</span> }
+                        @foreach (var gpu in info.Gpus)
+                        {
+                            <div>@gpu.Name <span class="text-text-secondary text-xs">@AgentsIndexModel.FormatBytes(gpu.MemoryUsedBytes) / @AgentsIndexModel.FormatBytes(gpu.MemoryTotalBytes)@(gpu.UtilizationPercent is { } u ? $" · {u}%" : "")</span></div>
+                        }
+                    </dd>
+                }
+            </dl>
+        </section>
+
+        <!-- Settings -->
+        <section class="bg-cyber-card rounded-xl border border-gray-700/30 p-5 space-y-3" aria-labelledby="settings-heading">
+            <h2 id="settings-heading" class="text-lg font-semibold text-text-primary">Settings</h2>
+            <div>
+                <label for="setName" class="block text-sm text-text-secondary mb-1">Name</label>
+                <input id="setName" value="@a.Name" class="@input" />
+            </div>
+            <div>
+                <label for="setHost" class="block text-sm text-text-secondary mb-1">Address the router reaches its servers on</label>
+                <input id="setHost" value="@a.HostOverride" placeholder="@(a.LastRemoteAddress ?? "host name or IP")" class="@input font-mono" />
+                <p class="text-xs text-gray-500 mt-1">Empty = the address the agent connects from (@(a.LastRemoteAddress ?? "not known yet")).</p>
+            </div>
+            <div class="grid sm:grid-cols-2 gap-3">
+                <div>
+                    <label for="setEngineRoot" class="block text-sm text-text-secondary mb-1">Engines folder</label>
+                    <input id="setEngineRoot" value="@a.EngineRoot" placeholder="@Model.EngineRoot" class="@input font-mono text-xs" />
+                </div>
+                <div>
+                    <label for="setModelRoot" class="block text-sm text-text-secondary mb-1">Models folder</label>
+                    <input id="setModelRoot" value="@a.ModelRoot" placeholder="@Model.ModelRoot" class="@input font-mono text-xs" />
+                </div>
+            </div>
+            <label class="flex items-center gap-2 text-sm text-text-primary">
+                <input id="setAutoUpdate" type="checkbox" @(a.AutoUpdate ? "checked" : "") class="accent-cyan-400" />
+                Update automatically when the router ships a new agent version
+            </label>
+            <button type="button" onclick="saveSettings()" class="px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">Save settings</button>
+        </section>
+    </div>
+
+    <!-- Servers -->
+    <section class="bg-cyber-card rounded-xl border border-gray-700/30 p-5" aria-labelledby="servers-heading">
+        <div class="flex items-center justify-between mb-3">
+            <h2 id="servers-heading" class="text-lg font-semibold text-text-primary">Servers</h2>
+            <a href="/Features/Servers/Create?agentId=@a.Id" class="@btn bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20">New server on this agent</a>
+        </div>
+        <div id="liveServers">
+            @if (Model.Servers.Count == 0)
+            {
+                <p class="text-sm text-text-secondary">No servers run here yet. Install an engine and a model below, then create a server on this agent.</p>
+            }
+            else
+            {
+                <table class="w-full text-sm">
+                    <thead><tr class="border-b border-gray-700/50 text-text-secondary">
+                        <th class="text-left py-2 font-medium">Name</th><th class="text-left py-2 font-medium">Engine</th><th class="text-left py-2 font-medium">Status</th><th class="text-left py-2 font-medium">URL</th>
+                    </tr></thead>
+                    <tbody>
+                        @foreach (var s in Model.Servers)
+                        {
+                            <tr class="border-b border-gray-700/20">
+                                <td class="py-2"><a href="/Features/Servers/Detail?id=@s.Id" class="text-text-primary hover:text-neon-cyan">@s.Name</a></td>
+                                <td class="py-2 text-text-secondary">@AgentDetailModel.EngineName(s.Engine)</td>
+                                <td class="py-2"><span class="@pill @StatusClass(s.Status.ToString())">@s.Status@(s.Status == ServerStatus.Running && !s.IsHealthy ? " (unhealthy)" : "")</span></td>
+                                <td class="py-2 text-text-secondary font-mono text-xs">@($"http://{a.EffectiveHost}:{s.Port}")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </section>
+
+    <!-- Engines -->
+    <section class="bg-cyber-card rounded-xl border border-gray-700/30 p-5 space-y-4" aria-labelledby="engines-heading">
+        <h2 id="engines-heading" class="text-lg font-semibold text-text-primary">Engines</h2>
+        <div id="liveEngines">
+            @if (Model.Builds.Count == 0)
+            {
+                <p class="text-sm text-text-secondary">No engines installed on this agent.</p>
+            }
+            else
+            {
+                <table class="w-full text-sm">
+                    <thead><tr class="border-b border-gray-700/50 text-text-secondary">
+                        <th class="text-left py-2 font-medium">Build</th><th class="text-left py-2 font-medium">Status</th><th class="text-left py-2 font-medium">Folder</th><th class="text-right py-2 font-medium">Actions</th>
+                    </tr></thead>
+                    <tbody>
+                        @foreach (var b in Model.Builds)
+                        {
+                            var busy = b.Status is EngineBuildStatus.Downloading or EngineBuildStatus.Building or EngineBuildStatus.Pending;
+                            var progress = Model.ProgressOf(b.Id);
+                            <tr class="border-b border-gray-700/20 align-top">
+                                <td class="py-2">
+                                    <a href="/Features/Engines/Detail?id=@b.Id" class="text-text-primary hover:text-neon-cyan">@b.Name</a>
+                                    <div class="text-xs text-text-secondary">@AgentDetailModel.EngineName(b.Engine) · @b.BackendType · @(b.VersionTag ?? "?") · @AgentsIndexModel.FormatBytes(b.SizeBytes)</div>
+                                </td>
+                                <td class="py-2">
+                                    <span class="@pill @StatusClass(b.Status.ToString())">@b.Status@(progress?.Percent is { } pct ? $" {pct:0}%" : "")</span>
+                                    @if (busy && progress?.Message is { } pm) { <div class="text-xs text-text-secondary mt-1 max-w-xs truncate" title="@pm">@pm</div> }
+                                    @if (!busy && b.StatusMessage is { } sm) { <div class="text-xs text-text-secondary mt-1 max-w-xs">@sm</div> }
+                                </td>
+                                <td class="py-2 font-mono text-xs text-text-secondary break-all">@b.InstallPath</td>
+                                <td class="py-2 text-right whitespace-nowrap space-x-1">
+                                    @if (busy)
+                                    {
+                                        <button type="button" onclick="agentAction({ Command: 'canceljob', TargetId: '@b.Id' }, 'Cancel this job?')" class="@btn bg-gray-700/30 text-text-secondary hover:bg-gray-700/50">Cancel</button>
+                                    }
+                                    else
+                                    {
+                                        @if (b.Status == EngineBuildStatus.Ready)
+                                        {
+                                            <button type="button" onclick="updateEngine('@b.Id', @(b.Source == EngineBuildSource.SourceCompile ? "true" : "false"))" class="@btn bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20">Update</button>
+                                        }
+                                        <button type="button" onclick="deleteEngine('@b.Id')" class="@btn bg-red-500/10 text-neon-red hover:bg-red-500/20">Delete</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4 pt-2 border-t border-gray-700/30">
+            <div class="space-y-2">
+                <h3 class="text-sm font-semibold text-gray-200 pt-2">Install a prebuilt release</h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <select id="relEngine" onchange="refreshBackends()" class="@input" aria-label="Engine">
+                        <option value="LlamaCpp">llama.cpp</option>
+                        <option value="StableDiffusionCpp">stable-diffusion.cpp</option>
+                    </select>
+                    <select id="relBackend" class="@input" aria-label="Backend"></select>
+                </div>
+                <input id="relTag" placeholder="Release tag (empty = latest)" class="@input font-mono" aria-label="Release tag" />
+                <button type="button" onclick="installRelease()" class="px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">Install on @a.Name</button>
+                <p class="text-xs text-gray-500">Only backends with a published archive for @(a.Rid ?? "this platform") are listed; compile from source for the others.</p>
+            </div>
+            <div class="space-y-2">
+                <h3 class="text-sm font-semibold text-gray-200 pt-2">Compile from a recipe</h3>
+                <select id="srcRecipe" class="@input" aria-label="Recipe">
+                    @foreach (var r in Model.Recipes)
+                    {
+                        <option value="@r.Id">@r.Name (@AgentDetailModel.EngineName(r.Engine), @r.BackendType)</option>
+                    }
+                </select>
+                <input id="srcRef" placeholder="Git ref (empty = recipe default)" class="@input font-mono" aria-label="Git ref" />
+                <button type="button" onclick="buildSource()" class="px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">Compile on @a.Name</button>
+                <p class="text-xs text-gray-500">Needs git, CMake and a compiler toolchain on the agent. Recipes are edited on the <a href="/Features/Engines/Index" class="underline hover:text-neon-cyan">Engines</a> page.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Models -->
+    <section class="bg-cyber-card rounded-xl border border-gray-700/30 p-5 space-y-4" aria-labelledby="models-heading">
+        <h2 id="models-heading" class="text-lg font-semibold text-text-primary">Models</h2>
+        <div id="liveModels">
+            @if (Model.Models.Count == 0)
+            {
+                <p class="text-sm text-text-secondary">No models on this agent.</p>
+            }
+            else
+            {
+                <table class="w-full text-sm">
+                    <thead><tr class="border-b border-gray-700/50 text-text-secondary">
+                        <th class="text-left py-2 font-medium">Model</th><th class="text-left py-2 font-medium">Status</th><th class="text-left py-2 font-medium">File</th><th class="text-right py-2 font-medium">Actions</th>
+                    </tr></thead>
+                    <tbody>
+                        @foreach (var m in Model.Models)
+                        {
+                            var progress = Model.ProgressOf(m.Id);
+                            <tr class="border-b border-gray-700/20 align-top">
+                                <td class="py-2">
+                                    <a href="/Features/Models/Details?id=@m.Id" class="text-text-primary hover:text-neon-cyan">@m.Name</a>
+                                    <div class="text-xs text-text-secondary">@(m.ParameterSize ?? "") @(m.QuantizationLevel ?? "") · @AgentsIndexModel.FormatBytes(m.FileSizeBytes)</div>
+                                </td>
+                                <td class="py-2">
+                                    <span class="@pill @StatusClass(m.Status.ToString())">@m.Status@(m.Status == ModelStatus.Downloading && progress?.Percent is { } pct ? $" {pct:0}%" : "")</span>
+                                    @if (m.Status == ModelStatus.Downloading && progress?.Message is { } pm) { <div class="text-xs text-text-secondary mt-1">@pm</div> }
+                                    @if (m.Status != ModelStatus.Downloading && m.StatusMessage is { } sm) { <div class="text-xs text-text-secondary mt-1 max-w-xs">@sm</div> }
+                                </td>
+                                <td class="py-2 font-mono text-xs text-text-secondary break-all">@m.FilePath</td>
+                                <td class="py-2 text-right whitespace-nowrap space-x-1">
+                                    @if (m.Status == ModelStatus.Downloading)
+                                    {
+                                        <button type="button" onclick="agentAction({ Command: 'canceljob', TargetId: '@m.Id' }, 'Cancel this transfer?')" class="@btn bg-gray-700/30 text-text-secondary hover:bg-gray-700/50">Cancel</button>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" onclick="agentAction({ Command: 'refreshmodel', TargetId: '@m.Id' })" class="@btn bg-gray-700/30 text-text-secondary hover:bg-gray-700/50">Refresh</button>
+                                        @if (m.Source == ModelSource.HuggingFace && !string.IsNullOrEmpty(m.HfRepoId))
+                                        {
+                                            <button type="button" onclick="agentAction({ Command: 'updatemodel', TargetId: '@m.Id' }, 'Re-download this model at the repo\'s latest revision?')" class="@btn bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20">Update</button>
+                                        }
+                                        <button type="button" onclick="deleteModel('@m.Id')" class="@btn bg-red-500/10 text-neon-red hover:bg-red-500/20">Delete</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-4 pt-2 border-t border-gray-700/30">
+            <div class="space-y-2">
+                <h3 class="text-sm font-semibold text-gray-200 pt-2">Download from Hugging Face</h3>
+                <input id="hfRepo" placeholder="owner/repo" class="@input font-mono" aria-label="Hugging Face repo" />
+                <input id="hfFile" placeholder="file.gguf (first shard for split models)" class="@input font-mono" aria-label="File name" />
+                <input id="hfRev" placeholder="Revision (empty = main)" class="@input font-mono" aria-label="Revision" />
+                <button type="button" onclick="downloadModel()" class="px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">Download on @a.Name</button>
+            </div>
+            <div class="space-y-2">
+                <h3 class="text-sm font-semibold text-gray-200 pt-2">Copy from the router's library</h3>
+                <select id="pullModel" class="@input" aria-label="Router model">
+                    @foreach (var m in Model.RouterLibrary)
+                    {
+                        <option value="@m.Id">@m.Name (@AgentsIndexModel.FormatBytes(m.FileSizeBytes))</option>
+                    }
+                </select>
+                <button type="button" onclick="pullModel()" @(Model.RouterLibrary.Count == 0 ? "disabled" : "") class="px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium disabled:opacity-40">Copy to @a.Name</button>
+                <p class="text-xs text-gray-500">Streams the file from this router to the agent.</p>
+            </div>
+            <div class="space-y-2">
+                <h3 class="text-sm font-semibold text-gray-200 pt-2">Register a file already there</h3>
+                <input id="importPath" placeholder="@(a.IsWindows ? "D:\\models\\model.gguf" : "/srv/models/model.gguf")" class="@input font-mono" aria-label="File path on the agent" />
+                <button type="button" onclick="importModel()" class="px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">Register</button>
+                <p class="text-xs text-gray-500">Files go to <span class="font-mono">@Model.ModelRoot</span> unless registered from elsewhere.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Activity -->
+    <section class="bg-cyber-card rounded-xl border border-gray-700/30 p-5" aria-labelledby="activity-heading">
+        <div class="flex items-center justify-between mb-3">
+            <h2 id="activity-heading" class="text-lg font-semibold text-text-primary">Activity</h2>
+            @if (Model.Online)
+            {
+                <button type="button" onclick="agentAction({ Command: 'reconcile' })" class="@btn bg-gray-700/30 text-text-secondary hover:bg-gray-700/50">Re-check files</button>
+            }
+        </div>
+        <div id="liveActivity" class="max-h-72 overflow-y-auto text-xs font-mono space-y-1">
+            @if (Model.Activity.Count == 0)
+            {
+                <p class="text-text-secondary font-sans text-sm">Nothing since the router started.</p>
+            }
+            @foreach (var e in Model.Activity)
+            {
+                <div class="@(e.Level == "error" ? "text-neon-red" : e.Level == "warning" ? "text-yellow-300" : "text-text-secondary")">
+                    <span class="text-gray-500">@Html.Timestamp(e.At, "time", false)</span> @e.Message
+                </div>
+            }
+        </div>
+    </section>
+</div>
+
+@section Scripts {
+<script>
+(function () {
+    const agentId = '@a.Id';
+    const releaseBackends = {
+        LlamaCpp: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ReleaseBackends[ServerEngine.LlamaCpp].Select(b => b.ToString()))),
+        StableDiffusionCpp: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ReleaseBackends[ServerEngine.StableDiffusionCpp].Select(b => b.ToString()))),
+    };
+    const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+    const val = (id) => document.getElementById(id).value.trim();
+
+    async function post(fields) {
+        const formData = new FormData();
+        formData.append('AgentId', agentId);
+        for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+        formData.append('__RequestVerificationToken', token());
+        const resp = await fetch('/Features/Agents/Actions', { method: 'POST', body: formData });
+        return resp.json();
+    }
+
+    window.agentAction = async function (fields, confirmText) {
+        if (confirmText && !confirm(confirmText)) return;
+        const result = await post(fields);
+        if (!result.success) { alert(result.message || 'Failed.'); return; }
+        location.reload();
+    };
+
+    window.refreshBackends = function () {
+        const select = document.getElementById('relBackend');
+        select.innerHTML = '';
+        for (const b of releaseBackends[val('relEngine')] || []) {
+            const opt = document.createElement('option');
+            opt.value = b; opt.textContent = b;
+            select.appendChild(opt);
+        }
+        if (!select.options.length) {
+            const opt = document.createElement('option');
+            opt.value = ''; opt.textContent = 'no prebuilt archive for this platform';
+            select.appendChild(opt);
+        }
+    };
+    refreshBackends();
+
+    window.saveSettings = () => agentAction({
+        Command: 'savesettings', Name: val('setName'), HostOverride: val('setHost'),
+        EngineRoot: val('setEngineRoot'), ModelRoot: val('setModelRoot'),
+        Flag: document.getElementById('setAutoUpdate').checked,
+    });
+
+    window.installRelease = () => {
+        if (!val('relBackend')) { alert('Pick a backend.'); return; }
+        agentAction({ Command: 'installengine', Engine: val('relEngine'), Backend: val('relBackend'), Value: val('relTag') });
+    };
+    window.buildSource = () => agentAction({ Command: 'buildengine', TargetId: val('srcRecipe'), GitRef: val('srcRef') });
+    window.updateEngine = (id, isSource) => {
+        const ref = prompt(isSource ? 'Git ref to build (empty = the recipe default):' : 'Release tag to update to (empty = latest):', '');
+        if (ref === null) return;
+        agentAction({ Command: 'updateengine', TargetId: id, Value: ref });
+    };
+    window.deleteEngine = (id) => {
+        if (!confirm('Remove this engine build? Servers bound to it lose the link.')) return;
+        agentAction({ Command: 'deleteengine', TargetId: id, Flag: confirm('Also delete its folder on the agent?') });
+    };
+
+    window.downloadModel = () => agentAction({ Command: 'downloadmodel', RepoId: val('hfRepo'), Filename: val('hfFile'), Revision: val('hfRev') });
+    window.pullModel = () => agentAction({ Command: 'pullmodel', TargetId: val('pullModel') });
+    window.importModel = () => agentAction({ Command: 'importmodel', FilePath: val('importPath') });
+    window.deleteModel = (id) => {
+        if (!confirm('Remove this model from the agent\'s library? Presets using it keep their path but lose the link.')) return;
+        agentAction({ Command: 'deletemodel', TargetId: id, Flag: confirm('Also delete the file on the agent?') });
+    };
+
+    window.deleteAgent = async function () {
+        if (!confirm('Delete this agent? Its engine and model records are removed (files stay on the machine). Servers on it must be deleted first.')) return;
+        const result = await post({ Command: 'delete' });
+        if (result.success) { alert(result.message); location.href = '/Features/Agents/Index'; }
+        else alert(result.message);
+    };
+})();
+</script>
+}

@@ -61,8 +61,13 @@ public partial class StrataProvider : ManagedServerProviderBase
     // reading tens of GB of experts from disk — give the whole start a bit more than that.
     protected override TimeSpan StartupTimeout => TimeSpan.FromMinutes(20);
 
+    /// <summary>Strata prepares models with its own Python tooling against local files, which an agent doesn't run yet.</summary>
+    private const string RemoteNotSupported = "Strata servers can't run on remote agents yet — use llama.cpp or stable-diffusion.cpp there.";
+
     protected override ServerLaunchSpec BuildLaunchSpec(ModelPreset preset)
     {
+        if (IsRemote)
+            throw new InvalidOperationException(RemoteNotSupported);
         if (string.IsNullOrEmpty(InstallFolderPath))
             throw new InvalidOperationException("Strata folder is not set — configure the server's Strata folder.");
 
@@ -206,6 +211,8 @@ public partial class StrataProvider : ManagedServerProviderBase
     /// </summary>
     protected override async Task PrepareAsync(ModelPreset preset, Func<StartupProgressEvent, Task>? onProgress, CancellationToken cancellationToken)
     {
+        if (IsRemote)
+            throw new InvalidOperationException(RemoteNotSupported);
         if (IsRunConfig(preset.ModelPath))
             return;
 

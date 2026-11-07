@@ -45,6 +45,7 @@ public class ServerManager : IServerManager
             Engine = engine,
             Status = ServerStatus.Idle,
             Port = port ?? await GetNextAvailablePort(),
+            AgentId = configData.AgentId,
         };
 
         // Create the backend config entity alongside the server instance
@@ -100,12 +101,32 @@ public class ServerManager : IServerManager
     {
         var provider = GetOrCreateProvider(instance);
 
+        // A server on a remote agent can only start while that agent is connected and enabled.
+        if (instance.AgentId is { } agentId)
+        {
+            var agent = await _context.RemoteAgents.FindAsync([agentId], cancellationToken)
+                ?? throw new InvalidOperationException("The agent this server runs on no longer exists.");
+            if (!agent.IsEnabled)
+                throw new InvalidOperationException($"Agent '{agent.Name}' is disabled — enable it on the Agents page first.");
+            using var connectorScope = _scopeFactory.CreateScope();
+            var connector = connectorScope.ServiceProvider.GetService<IRemoteWrapperConnector>();
+            if (connector is null || !connector.IsAgentOnline(agentId))
+                throw new InvalidOperationException($"Agent '{agent.Name}' is offline.");
+            if (string.IsNullOrWhiteSpace(agent.EffectiveHost))
+                throw new InvalidOperationException($"Agent '{agent.Name}' has no address to reach its servers on — set a host on its page.");
+        }
+
         // Re-configure the provider with the latest config from the database
         // in case it was updated while the server was stopped
+        BackendConfigData? resolvedConfig = null;
         if (instance.Config is not null)
         {
-            provider.Configure(await ResolveConfigDataAsync(instance.Config));
+            resolvedConfig = await ResolveConfigDataAsync(instance.Config);
+            provider.Configure(resolvedConfig);
         }
+        var urlHost = resolvedConfig?.AgentId is not null && !string.IsNullOrWhiteSpace(resolvedConfig.RemoteHost)
+            ? resolvedConfig.RemoteHost
+            : "localhost";
 
         ModelPreset? preset = null;
         if (instance.ActivePresetId.HasValue)
@@ -177,7 +198,7 @@ public class ServerManager : IServerManager
                             if (inst != null)
                             {
                                 inst.Status = ServerStatus.Running;
-                                inst.Url = $"http://localhost:{instance.Port}";
+                                inst.Url = $"http://{urlHost}:{instance.Port}";
                                 inst.IsHealthy = true;
                                 // Idle-unload clock starts once the model is actually loaded.
                                 limiter.Touch(instance.Id);
@@ -373,6 +394,7 @@ public class ServerManager : IServerManager
             ActivePresetId = i.ActivePresetId,
             Url = i.Url,
             Port = i.Port,
+            AgentId = i.AgentId,
         }).ToList().AsReadOnly();
     }
 
@@ -388,6 +410,7 @@ public class ServerManager : IServerManager
             ActivePresetId = i.ActivePresetId,
             Url = i.Url,
             Port = i.Port,
+            AgentId = i.AgentId,
         }).ToList().AsReadOnly();
     }
 
@@ -421,13 +444,26 @@ public class ServerManager : IServerManager
                 folderPath = build.InstallPath;
         }
 
-        return new BackendConfigData
+        var data = new BackendConfigData
         {
             InstallFolderPath = folderPath,
             CompanionAppPath = config.CompanionAppPath,
             EnvironmentSetupCommand = config.EnvironmentSetupCommand,
             EngineBuildId = config.EngineBuildId,
         };
+
+        var agentId = await _context.ServerInstances
+            .Where(s => s.Id == config.ServerInstanceId)
+            .Select(s => s.AgentId)
+            .FirstOrDefaultAsync();
+        if (agentId is { } id && await _context.RemoteAgents.FindAsync(id) is { } agent)
+        {
+            data.AgentId = agent.Id;
+            data.RemoteHost = agent.EffectiveHost;
+            data.RemoteIsWindows = agent.IsWindows;
+        }
+
+        return data;
     }
 
     public async Task RemoveInstanceAsync(Guid instanceId, CancellationToken cancellationToken = default)
@@ -510,6 +546,52 @@ public class ServerManager : IServerManager
             instance.IsHealthy = isHealthy;
             await _context.SaveChangesAsync();
         }
+    }
+
+    public async Task<bool> TryReattachAsync(Guid instanceId, CancellationToken cancellationToken = default)
+    {
+        var instance = await _context.ServerInstances
+            .Include(s => s.Config)
+            .FirstOrDefaultAsync(s => s.Id == instanceId, cancellationToken);
+        if (instance is null) return false;
+
+        var provider = GetOrCreateProvider(instance);
+        if (instance.Config is not null)
+            provider.Configure(await ResolveConfigDataAsync(instance.Config));
+
+        var previous = instance.Status;
+        bool reattached;
+        try
+        {
+            reattached = await provider.TryReconnectAsync(cancellationToken);
+        }
+        catch
+        {
+            reattached = false;
+        }
+
+        if (reattached)
+        {
+            instance.Status = ServerStatus.Running;
+            instance.IsHealthy = await provider.HealthCheckAsync(cancellationToken);
+            if (instance.Config is not null && (await ResolveConfigDataAsync(instance.Config)).RemoteHost is { Length: > 0 } host)
+                instance.Url = $"http://{host}:{instance.Port}";
+            await _context.SaveChangesAsync(cancellationToken);
+            if (previous != ServerStatus.Running)
+                await LogLifecycleEvent(instance, ServerLogLevel.Info, $"Re-attached to server '{instance.Name}', which kept running.");
+            return true;
+        }
+
+        if (previous is ServerStatus.Running or ServerStatus.Starting or ServerStatus.Reconnecting)
+        {
+            instance.Status = ServerStatus.Error;
+            instance.IsHealthy = false;
+            instance.LastErrorMessage = "The server was no longer running when its host reconnected.";
+            instance.LastErrorTime = DateTime.UtcNow;
+            await _context.SaveChangesAsync(cancellationToken);
+            await LogLifecycleEvent(instance, ServerLogLevel.Warning, instance.LastErrorMessage);
+        }
+        return false;
     }
 
     private async Task<ServerInstance> GetInstanceOrThrow(Guid instanceId)

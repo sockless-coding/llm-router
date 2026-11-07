@@ -8,7 +8,7 @@ namespace LR.Core.Services;
 /// (when a model is refreshed) so both paths keep every preset referencing that model in sync
 /// instead of only the one being edited.
 /// </summary>
-internal static class PresetGgufSync
+public static class PresetGgufSync
 {
     public static void ApplyFromModel(ModelPreset preset, LocalModel model)
     {

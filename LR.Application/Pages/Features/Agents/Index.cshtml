@@ -1,0 +1,212 @@
+@page
+@using LR.Application.Pages.Features.Agents
+@model AgentsIndexModel
+@{
+    ViewData["Title"] = "Agents";
+    var anyPackage = Model.Packages.Any(p => p.Entry is not null);
+}
+
+<div class="max-w-6xl mx-auto px-4 py-6">
+    <form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-3xl font-bold text-neon-cyan">Agents</h1>
+            <p class="text-text-secondary mt-1">Machines that run servers for this router. Each agent installs engines and models, supervises its backends, and updates itself from here.</p>
+        </div>
+    </div>
+
+    <!-- Install panel -->
+    <section class="bg-cyber-card rounded-xl border border-neon-cyan/10 p-5 mb-6 space-y-4" aria-labelledby="install-heading">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+            <h2 id="install-heading" class="text-lg font-semibold text-text-primary">Add a machine</h2>
+            <span class="text-xs text-text-secondary">
+                @if (Model.PackageVersion is not null)
+                {
+                    <text>Agent package <span class="font-mono text-neon-cyan">@Model.PackageVersion</span> ·</text>
+                }
+                @foreach (var (rid, entry) in Model.Packages)
+                {
+                    <span class="inline-block ml-1 px-2 py-0.5 rounded-full border text-xs @(entry is not null ? "border-neon-green/30 text-neon-green bg-neon-green/10" : "border-gray-600/30 text-gray-500")"
+                          title="@(entry is not null ? $"{AgentsIndexModel.FormatBytes(entry.Size)}" : "not packaged")">@rid</span>
+                }
+            </span>
+        </div>
+
+        @if (!anyPackage)
+        {
+            <div class="rounded-lg p-3 border border-yellow-500/30 bg-yellow-500/10 text-sm text-yellow-300" role="alert">
+                No agent packages found in <code class="font-mono text-xs">@Model.PackageFolder</code>. Release downloads include them; for a
+                local build run <code class="font-mono text-xs">.\publish-agents.ps1</code> from the repository root, then reload this page.
+            </div>
+        }
+
+        <p class="text-sm text-text-secondary">Run one command on the machine you want to add. It downloads the agent from this router, installs it as a service, and the machine shows up below by itself. Running it again on the same machine upgrades it in place.</p>
+
+        <div>
+            <label for="publicUrl" class="block text-sm font-medium text-text-secondary mb-1">Router URL as seen from the agent machines</label>
+            <div class="flex gap-2">
+                <input id="publicUrl" value="@(Model.PublicUrl ?? Model.RouterUrl)" placeholder="http://router.lan:5000"
+                       class="flex-1 px-4 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan outline-none font-mono text-sm" />
+                <button type="button" onclick="savePublicUrl()"
+                        class="px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">Save</button>
+            </div>
+            @if (Model.RouterUrlIsLoopback)
+            {
+                <p class="text-xs text-yellow-400/90 mt-1">This address only works on the router's own machine — enter its LAN host name or IP so other machines can reach it.</p>
+            }
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+            <div>
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-sm font-medium text-text-secondary">Linux (x64 / arm64) — as root</span>
+                    <button type="button" onclick="copyText('cmdLinux', this)" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20">Copy</button>
+                </div>
+                <pre id="cmdLinux" class="bg-cyber-bg-dark border border-gray-600/30 rounded-lg p-3 text-xs text-neon-green font-mono whitespace-pre-wrap break-all">@Model.LinuxCommand</pre>
+            </div>
+            <div>
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-sm font-medium text-text-secondary">Windows (x64 / arm64) — elevated PowerShell</span>
+                    <button type="button" onclick="copyText('cmdWindows', this)" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20">Copy</button>
+                </div>
+                <pre id="cmdWindows" class="bg-cyber-bg-dark border border-gray-600/30 rounded-lg p-3 text-xs text-neon-green font-mono whitespace-pre-wrap break-all">@Model.WindowsCommand</pre>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-between gap-4 flex-wrap text-xs text-text-secondary">
+            <span>The commands carry this router's enrollment token. Each agent swaps it for its own secret on first contact.</span>
+            <button type="button" onclick="regenerateToken()" class="px-3 py-1.5 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Regenerate token</button>
+        </div>
+    </section>
+
+    <!-- Agent list (refreshes itself) -->
+    <div id="agentTable" hx-get="/Features/Agents/Index" hx-trigger="every 5s" hx-select="#agentTable" hx-swap="outerHTML">
+        @if (Model.Agents.Count == 0)
+        {
+            <div class="text-center py-16 bg-cyber-card rounded-xl border border-neon-cyan/10">
+                <p class="text-text-secondary">No agents yet</p>
+                <p class="text-text-secondary text-sm mt-1">Run one of the commands above on a machine to add it.</p>
+            </div>
+        }
+        else
+        {
+            <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                            <th class="text-left px-4 py-3 text-text-secondary font-medium">Agent</th>
+                            <th class="text-left px-4 py-3 text-text-secondary font-medium">Status</th>
+                            <th class="text-left px-4 py-3 text-text-secondary font-medium">Platform</th>
+                            <th class="text-left px-4 py-3 text-text-secondary font-medium">Version</th>
+                            <th class="text-left px-4 py-3 text-text-secondary font-medium">Load</th>
+                            <th class="text-left px-4 py-3 text-text-secondary font-medium">Servers</th>
+                            <th class="text-left px-4 py-3 text-text-secondary font-medium">Engines / Models</th>
+                            <th class="text-left px-4 py-3 text-text-secondary font-medium">Last seen</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in Model.Agents)
+                        {
+                            var a = row.Agent;
+                            <tr class="border-b border-gray-700/20 hover:bg-gray-800/20">
+                                <td class="px-4 py-3">
+                                    <a href="/Features/Agents/Detail?id=@a.Id" class="text-text-primary font-medium hover:text-neon-cyan">@a.Name</a>
+                                    <div class="text-xs text-text-secondary font-mono">@(a.EffectiveHost ?? "—")</div>
+                                </td>
+                                <td class="px-4 py-3">
+                                    @if (!a.IsEnabled)
+                                    {
+                                        <span class="text-xs px-2.5 py-1 rounded-full border bg-gray-700/30 text-text-secondary border-gray-600/30">Disabled</span>
+                                    }
+                                    else if (row.Online)
+                                    {
+                                        <span class="text-xs px-2.5 py-1 rounded-full border bg-neon-green/10 text-neon-green border-neon-green/30">Online</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-xs px-2.5 py-1 rounded-full border bg-red-500/10 text-neon-red border-red-500/30">Offline</span>
+                                    }
+                                </td>
+                                <td class="px-4 py-3 text-text-secondary text-xs">
+                                    <div>@(a.Rid ?? "—")</div>
+                                    <div class="text-gray-500 truncate max-w-[14rem]" title="@a.OsDescription">@a.OsDescription</div>
+                                </td>
+                                <td class="px-4 py-3 text-xs">
+                                    <span class="font-mono text-text-primary">@(row.Version ?? "—")</span>
+                                    @if (row.Outdated)
+                                    {
+                                        <span class="ml-1 px-2 py-0.5 rounded-full border border-yellow-500/30 text-yellow-300 bg-yellow-500/10" title="The router ships @Model.PackageVersion">@(a.AutoUpdate ? "updating" : "outdated")</span>
+                                    }
+                                </td>
+                                <td class="px-4 py-3 text-xs text-text-secondary">
+                                    @if (row.Info is { } info)
+                                    {
+                                        <div>CPU @(info.CpuPercent is { } cpu ? $"{cpu:0}%" : "—") · @info.ProcessorCount cores</div>
+                                        <div>RAM @AgentsIndexModel.FormatBytes(info.TotalMemoryBytes - info.AvailableMemoryBytes) / @AgentsIndexModel.FormatBytes(info.TotalMemoryBytes)</div>
+                                        @foreach (var gpu in info.Gpus)
+                                        {
+                                            <div class="truncate max-w-[16rem]" title="@gpu.Name">@gpu.Name · @AgentsIndexModel.FormatBytes(gpu.MemoryUsedBytes) / @AgentsIndexModel.FormatBytes(gpu.MemoryTotalBytes)</div>
+                                        }
+                                    }
+                                    else { <text>—</text> }
+                                </td>
+                                <td class="px-4 py-3 text-text-secondary">@row.RunningServers / @row.Servers running</td>
+                                <td class="px-4 py-3 text-text-secondary">@row.Engines / @row.Models</td>
+                                <td class="px-4 py-3 text-text-secondary text-xs">
+                                    @if (row.Online) { <text>now</text> }
+                                    else if (a.LastSeenAt is { } seen) { @Html.Timestamp(seen, "datetime") }
+                                    else { <text>never</text> }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(function () {
+    const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+    async function postAction(fields) {
+        const formData = new FormData();
+        for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+        formData.append('__RequestVerificationToken', token());
+        const resp = await fetch('/Features/Agents/Actions', { method: 'POST', body: formData });
+        return resp.json();
+    }
+
+    window.copyText = async function (id, button) {
+        const text = document.getElementById(id).textContent.trim();
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch {
+            // Clipboard API needs a secure context; fall back to a selection copy over plain http.
+            const area = document.createElement('textarea');
+            area.value = text;
+            document.body.appendChild(area);
+            area.select();
+            document.execCommand('copy');
+            area.remove();
+        }
+        const label = button.textContent;
+        button.textContent = 'Copied';
+        setTimeout(() => button.textContent = label, 1500);
+    };
+
+    window.savePublicUrl = async function () {
+        const result = await postAction({ Command: 'setpublicurl', Value: document.getElementById('publicUrl').value });
+        if (result.success) location.reload(); else alert(result.message);
+    };
+
+    window.regenerateToken = async function () {
+        if (!confirm('Generate a new enrollment token? Install commands copied earlier stop working; agents already enrolled are unaffected.')) return;
+        const result = await postAction({ Command: 'regeneratetoken' });
+        if (result.success) location.reload(); else alert(result.message);
+    };
+})();
+</script>
+}

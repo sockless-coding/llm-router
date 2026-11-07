@@ -38,6 +38,10 @@
                         <td class="px-6 py-4">
                             <div class="flex items-center gap-2">
                                 <a href="/Features/Servers/Detail?id=@server.Id" class="text-text-primary font-medium hover:text-neon-cyan transition-colors">@server.Name</a>
+                                @if (server.AgentId is { } agentId)
+                                {
+                                    <a href="/Features/Agents/Detail?id=@agentId" class="text-xs px-2 py-0.5 rounded-full border border-neon-magenta/30 text-neon-magenta bg-neon-magenta/10 hover:bg-neon-magenta/20" title="Runs on this agent">@(Model.AgentNames.GetValueOrDefault(agentId) ?? "agent")</a>
+                                }
                                 @if (server.LastErrorMessage != null)
                                 {
                                     <span class="cursor-help text-neon-red" tabindex="0" role="img" aria-label="Last error: @(server.LastErrorMessage) at @(server.LastErrorTime?.ToString("yyyy-MM-dd HH:mm:ss")) UTC" title="Last error: @(server.LastErrorMessage)&#10;@(server.LastErrorTime?.ToString("yyyy-MM-dd HH:mm:ss")) UTC">
