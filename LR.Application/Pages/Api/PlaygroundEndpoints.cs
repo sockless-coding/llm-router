@@ -30,7 +30,7 @@ public static class PlaygroundEndpoints
         {
             var servers = serverManager.GetAllInstances().ToDictionary(s => s.Id);
             var presets = presetManager.GetAllPresets()
-                .OfModality(servers.Values, engines, EngineModality.Text)
+                .ForChat(servers.Values, engines)
                 .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
                 .Select(p =>
                 {
@@ -122,6 +122,38 @@ public static class PlaygroundEndpoints
 
         // Image and video presets (the Generate page).
         group.MapPlaygroundGenerationEndpoints();
+
+        // Decision presets (the Decide page), plus whether each one's model is loaded right now.
+        group.MapGet("/decision/presets", (IPresetManager presetManager, IServerManager serverManager, IEngineCatalog engines) =>
+        {
+            var servers = serverManager.GetAllInstances().ToDictionary(s => s.Id);
+            var presets = presetManager.GetAllPresets()
+                .ForDecisions(servers.Values, engines)
+                .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(p =>
+                {
+                    servers.TryGetValue(p.ServerInstanceId, out var server);
+                    return new
+                    {
+                        id = p.Id,
+                        name = p.Name,
+                        serverName = server?.Name,
+                        serverStatus = server?.Status.ToString(),
+                        loaded = server is { Status: ServerStatus.Running } && server.ActivePresetId == p.Id,
+                        decisionType = p.GgufDecisionType,
+                        parameterSize = p.GgufParameterSize,
+                        quantization = p.GgufQuantizationLevel,
+                        // Image input needs the model's projector (--mmproj).
+                        vision = !string.IsNullOrEmpty(p.Mmproj) || !string.IsNullOrEmpty(p.MmprojUrl),
+                    };
+                });
+            return Results.Json(presets);
+        });
+
+        // Decisions go through the same pipeline as /v1/systemone (routing, model auto-start,
+        // request log), like chat does through /v1/chat/completions.
+        group.MapPost("/decide", (SystemOneGateway systemOne, HttpRequest httpRequest, CancellationToken ct) =>
+            systemOne.HandleAsync(httpRequest, ct));
 
         group.MapPost("/runs/delete", async (DeleteRunsInput input, LRDbContext db) =>
         {

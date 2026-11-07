@@ -132,6 +132,7 @@ public class PresetManager : IPresetManager
         preset.GgufEmbeddingLength = metadata.EmbeddingLength;
         preset.GgufRopeFreqBase = metadata.RopeFreqBase;
         preset.GgufChatTemplate = metadata.ChatTemplate;
+        preset.GgufDecisionType = metadata.DecisionType;
 
         if (string.IsNullOrEmpty(preset.Mmproj) && string.IsNullOrEmpty(preset.MmprojUrl))
         {

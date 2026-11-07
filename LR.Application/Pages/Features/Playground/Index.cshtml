@@ -22,7 +22,7 @@
             <div class="flex flex-wrap items-center gap-2">
                 <label for="pgPreset" class="sr-only">Preset</label>
                 <select id="pgPreset" class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg pl-3 pr-8 py-1.5 text-sm font-medium max-w-[16rem]">
-                    @if (Model.ImagePresets.Any())
+                    @if (Model.ImagePresets.Any() || Model.DecisionPresets.Any())
                     {
                         <optgroup label="Chat">
                             @foreach (var preset in Model.Presets)
@@ -30,13 +30,25 @@
                                 <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
                             }
                         </optgroup>
-                        <!-- Picking one of these switches to the Generate page -->
-                        <optgroup label="Image &amp; video">
-                            @foreach (var preset in Model.ImagePresets)
-                            {
-                                <option value="@preset.Id" data-generate="true">@preset.Name</option>
-                            }
-                        </optgroup>
+                        <!-- Picking one of these switches to the Generate or Decide page -->
+                        @if (Model.ImagePresets.Any())
+                        {
+                            <optgroup label="Image &amp; video">
+                                @foreach (var preset in Model.ImagePresets)
+                                {
+                                    <option value="@preset.Id" data-switch="/Features/Playground/Generate">@preset.Name</option>
+                                }
+                            </optgroup>
+                        }
+                        @if (Model.DecisionPresets.Any())
+                        {
+                            <optgroup label="Decision">
+                                @foreach (var preset in Model.DecisionPresets)
+                                {
+                                    <option value="@preset.Id" data-switch="/Features/Playground/Decide">@preset.Name</option>
+                                }
+                            </optgroup>
+                        }
                     }
                     else
                     {
@@ -196,7 +208,7 @@ function loadSettings() {
     try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch { }
     if (!s) return;
     // An explicit ?presetId= wins over the remembered preset.
-    if (s.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${s.preset}"]:not([data-generate])`))
+    if (s.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${s.preset}"]:not([data-switch])`))
         presetSelect.value = s.preset;
     $('pgLabel').value = s.label ?? '';
     $('pgRecord').checked = s.record ?? true;
@@ -730,10 +742,11 @@ document.querySelectorAll('aside input, aside select, aside textarea').forEach(e
 });
 let chatPresetId = presetSelect.value;
 presetSelect.addEventListener('change', () => {
-    if (presetSelect.selectedOptions[0]?.dataset.generate) {
+    const page = presetSelect.selectedOptions[0]?.dataset.switch;
+    if (page) {
         const target = presetSelect.value;
         presetSelect.value = chatPresetId; // so Back returns to the chat preset
-        location.href = '/Features/Playground/Generate?presetId=' + encodeURIComponent(target);
+        location.href = page + '?presetId=' + encodeURIComponent(target);
         return;
     }
     chatPresetId = presetSelect.value;

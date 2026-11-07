@@ -39,7 +39,17 @@
                             <optgroup label="Chat">
                                 @foreach (var preset in Model.ChatPresets)
                                 {
-                                    <option value="@preset.Id" data-chat="true">@preset.Name</option>
+                                    <option value="@preset.Id" data-switch="/Features/Playground/Index">@preset.Name</option>
+                                }
+                            </optgroup>
+                        }
+                        @if (Model.DecisionPresets.Any())
+                        {
+                            <!-- Picking one of these switches to the Decide page -->
+                            <optgroup label="Decision">
+                                @foreach (var preset in Model.DecisionPresets)
+                                {
+                                    <option value="@preset.Id" data-switch="/Features/Playground/Decide">@preset.Name</option>
                                 }
                             </optgroup>
                         }
@@ -233,7 +243,7 @@ function saveSettings() {
 function loadSettings() {
     try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch { }
     if (!saved) return;
-    if (saved.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${saved.preset}"]:not([data-chat])`))
+    if (saved.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${saved.preset}"]:not([data-switch])`))
         presetSelect.value = saved.preset;
     mode = saved.mode === 'video' ? 'video' : 'image';
     $('genNegative').value = saved.negative ?? '';
@@ -690,10 +700,11 @@ $('genResetParams').addEventListener('click', () => {
 
 let imagePresetId = presetSelect.value;
 presetSelect.addEventListener('change', () => {
-    if (presetSelect.selectedOptions[0]?.dataset.chat) {
+    const page = presetSelect.selectedOptions[0]?.dataset.switch;
+    if (page) {
         const target = presetSelect.value;
         presetSelect.value = imagePresetId; // so Back returns to the image preset
-        location.href = '/Features/Playground/Index?presetId=' + encodeURIComponent(target);
+        location.href = page + '?presetId=' + encodeURIComponent(target);
         return;
     }
     imagePresetId = presetSelect.value;

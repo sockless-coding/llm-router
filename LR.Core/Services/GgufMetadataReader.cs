@@ -151,6 +151,11 @@ public class GgufMetadataReader : IGgufMetadataReader
         if (TryGetInt(rawKvPairs, $"{arch}.attention.head_count_kv", out var kvHeads))
             metadata.KvHeadCount = kvHeads;
 
+        // Native decision models (/v1/systemone) — llama.cpp keys off this string alone.
+        metadata.DecisionType = GetString(rawKvPairs, $"{arch}.decision.type");
+        if (TryGetInt(rawKvPairs, $"{arch}.pooling_type", out var pooling))
+            metadata.PoolingType = pooling;
+
         // Rope freq base can be float or int depending on the GGUF version
         if (TryGetDouble(rawKvPairs, $"{arch}.rope.freq_base", out var ropeBase))
             metadata.RopeFreqBase = ropeBase;

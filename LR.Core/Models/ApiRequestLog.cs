@@ -139,6 +139,7 @@ public class ApiRequestLog
         ApiProtocol.OpenAI => "OpenAI",
         ApiProtocol.Claude => "Claude",
         ApiProtocol.Ollama => "Ollama",
+        ApiProtocol.SystemOne => "System One",
         _ => Protocol.ToString()
     };
 

@@ -30,6 +30,9 @@ public class GenerateModel : PageModel
     /// <summary>Chat presets, offered in the picker as a switch back to the chat Playground.</summary>
     public IReadOnlyList<ModelPreset> ChatPresets { get; set; } = new List<ModelPreset>();
 
+    /// <summary>Decision presets, offered in the picker as a switch to the Decide page.</summary>
+    public IReadOnlyList<ModelPreset> DecisionPresets { get; set; } = new List<ModelPreset>();
+
     /// <summary>Preset to preselect, e.g. when arriving from a preset's page.</summary>
     [BindProperty(SupportsGet = true)]
     public Guid? PresetId { get; set; }
@@ -43,10 +46,13 @@ public class GenerateModel : PageModel
         var servers = _serverManager.GetAllInstances();
         var all = _presetManager.GetAllPresets().OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
         Presets = all.OfModality(servers, _engines, EngineModality.Image).ToList();
-        ChatPresets = all.OfModality(servers, _engines, EngineModality.Text).ToList();
+        ChatPresets = all.ForChat(servers, _engines).ToList();
+        DecisionPresets = all.ForDecisions(servers, _engines).ToList();
 
         if (PresetId is Guid id && ChatPresets.Any(p => p.Id == id))
             return RedirectToPage("Index", new { presetId = id });
+        if (PresetId is Guid did && DecisionPresets.Any(p => p.Id == did))
+            return RedirectToPage("Decide", new { presetId = did });
         return Page();
     }
 }

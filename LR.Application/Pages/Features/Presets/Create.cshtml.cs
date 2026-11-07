@@ -38,7 +38,7 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
         Servers = _serverManager.GetAllInstances();
         FallbackCandidates = _presetManager.GetAllPresets();
         Models = await _modelLibrary.GetAllAsync();
-        MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
+        MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelType.Projector).ToList();
     }
 
     /// <summary>
@@ -88,7 +88,7 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
             Servers = _serverManager.GetAllInstances();
             FallbackCandidates = _presetManager.GetAllPresets();
             Models = await _modelLibrary.GetAllAsync();
-            MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
+            MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelType.Projector).ToList();
             return Page();
         }
 

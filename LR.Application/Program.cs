@@ -196,6 +196,7 @@ builder.Services.AddSingleton<IServerConcurrencyLimiter, ServerConcurrencyLimite
 // Protocol handlers (scoped — need DbContext access via preset manager)
 builder.Services.AddScoped<LR.Application.Pages.Api.EmbeddingsGateway>();
 builder.Services.AddScoped<LR.Application.Pages.Api.ImagesGateway>();
+builder.Services.AddScoped<LR.Application.Pages.Api.SystemOneGateway>();
 builder.Services.AddScoped<LR.Application.Pages.Api.OpenAiHandler>();
 builder.Services.AddScoped<LR.Application.Pages.Api.ClaudeHandler>();
 builder.Services.AddScoped<LR.Application.Pages.Api.OllamaHandler>();

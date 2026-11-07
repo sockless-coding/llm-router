@@ -276,6 +276,10 @@ public static class DiffusionModelGuide
         ["flux"] = "flux", ["sd1"] = "sd1", ["sdxl"] = "sdxl", ["sd3"] = "sd3", ["wan"] = "wan", ["qwen_image"] = "qwen-image",
     };
 
+    /// <summary>Whether <paramref name="architecture"/> is a diffusion model's general.architecture.</summary>
+    public static bool IsDiffusionArchitecture(string? architecture) =>
+        architecture is not null && FamilyByArchitecture.ContainsKey(architecture);
+
     /// <summary>The family the first of <paramref name="hints"/> (repo id, file path…) names, if any.</summary>
     public static DiffusionFamily? DetectFamily(params string?[] hints)
     {

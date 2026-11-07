@@ -40,7 +40,7 @@ public class PresetEditModel : PageModel, IPresetFormPageModel
 
         FallbackCandidates = _presetManager.GetAllPresets().Where(p => p.Id != Id).ToList();
         Models = await _modelLibrary.GetAllAsync();
-        MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
+        MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelType.Projector).ToList();
         PresetViewModelMapper.ToViewModel(preset, ViewModel);
         DetectedTemplateVariables = _templateVariableExtractor.Extract(preset.GgufChatTemplate);
 
@@ -91,7 +91,7 @@ public class PresetEditModel : PageModel, IPresetFormPageModel
             Servers = _serverManager.GetAllInstances();
             FallbackCandidates = _presetManager.GetAllPresets().Where(p => p.Id != Id).ToList();
             Models = await _modelLibrary.GetAllAsync();
-            MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelFileKind.MultimodalProjector).ToList();
+            MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelType.Projector).ToList();
             return Page();
         }
 

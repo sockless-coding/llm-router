@@ -1,4 +1,5 @@
 using LR.Core.Models;
+using LR.Core.Services;
 
 namespace LR.Application.Pages.Features.Models;
 
@@ -19,4 +20,14 @@ public class ModelRowViewModel
 
     /// <summary>The DOM id JS toggling matches against; null for a standalone (ungrouped) row.</summary>
     public string? GroupDomId { get; set; }
+
+    /// <summary>
+    /// The enclosing group's type. A nested row whose type matches it leaves its type badge out —
+    /// the group header already shows it — so only the odd ones out (a projector, a VAE) stand out.
+    /// </summary>
+    public ModelType? GroupType { get; set; }
 }
+
+/// <summary>What the <c>_ModelTypeBadge</c> partial renders: a type's colour, with its label.</summary>
+/// <param name="Detail">Secondary text after the label, e.g. the decision type ("openjev").</param>
+public sealed record ModelTypeBadgeViewModel(ModelType Type, string Label, string? Detail = null);

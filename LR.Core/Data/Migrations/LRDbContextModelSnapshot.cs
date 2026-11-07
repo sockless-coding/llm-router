@@ -391,6 +391,10 @@ namespace LR.Core.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DecisionType")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("DetectedMmprojPath")
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
@@ -452,6 +456,9 @@ namespace LR.Core.Migrations
                     b.Property<string>("ParameterSize")
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("PoolingType")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("QuantizationLevel")
                         .HasMaxLength(16)
@@ -683,6 +690,10 @@ namespace LR.Core.Migrations
 
                     b.Property<int?>("GgufContextLength")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("GgufDecisionType")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
 
                     b.Property<int?>("GgufEmbeddingLength")
                         .HasColumnType("INTEGER");
