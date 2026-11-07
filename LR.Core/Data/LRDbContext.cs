@@ -25,6 +25,8 @@ public class LRDbContext : DbContext
     public DbSet<Models.EngineBuildSettings> EngineBuildSettings => Set<Models.EngineBuildSettings>();
     public DbSet<Models.PlaygroundRun> PlaygroundRuns => Set<Models.PlaygroundRun>();
     public DbSet<Models.MemoryGroup> MemoryGroups => Set<Models.MemoryGroup>();
+    public DbSet<Models.RemoteAgent> RemoteAgents => Set<Models.RemoteAgent>();
+    public DbSet<Models.AgentSettings> AgentSettings => Set<Models.AgentSettings>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -33,6 +35,28 @@ public class LRDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // Remote agents. Deleting one removes the records of what lives on its disk (engine
+        // installs, models); servers are deliberately Restrict — they must be deleted first, since
+        // silently turning them into local servers would point them at paths on another machine.
+        modelBuilder.Entity<Models.RemoteAgent>(entity =>
+        {
+            entity.ToTable("RemoteAgents");
+            entity.HasIndex(e => e.MachineId);
+            entity.HasMany(a => a.Servers)
+                .WithOne(s => s.Agent)
+                .HasForeignKey(s => s.AgentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Models.EngineBuild>()
+            .HasOne(b => b.Agent).WithMany().HasForeignKey(b => b.AgentId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Models.LocalModel>()
+            .HasOne(m => m.Agent).WithMany().HasForeignKey(m => m.AgentId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Models.AgentSettings>(entity =>
+        {
+            entity.ToTable("AgentSettings");
+            entity.Property(e => e.Id).ValueGeneratedNever();
+        });
 
         // ServerInstance configurations
         modelBuilder.Entity<Models.ServerInstance>(entity =>

@@ -39,28 +39,36 @@ public partial class LlamaCppProvider : ManagedServerProviderBase
 
     protected override ServerLaunchSpec BuildLaunchSpec(ModelPreset preset)
     {
-        if (string.IsNullOrEmpty(InstallFolderPath))
-            throw new InvalidOperationException("Server executable path is not set — configure the server's llama.cpp folder or bind it to a managed build.");
-
-        string executablePath = Path.Combine(InstallFolderPath, ServerExecutableName);
-        if (!File.Exists(executablePath))
-            throw new FileNotFoundException($"Server executable not found at: {executablePath}");
+        string executablePath = ResolveServerExecutable("llama-server");
 
         _argBuilder.Port = Port;
-        return new ServerLaunchSpec(executablePath, _argBuilder.Build(preset), InstallFolderPath);
+        var args = _argBuilder.Build(preset);
+
+        // A remote llama-server must accept the router's connections from the network; it binds
+        // 127.0.0.1 by default. A preset that sets its own --host keeps it.
+        if (IsRemote && string.IsNullOrWhiteSpace(preset.Host))
+            args.AddRange(["--host", ListenAddress]);
+
+        return new ServerLaunchSpec(executablePath, args, InstallFolderPath);
     }
 
-    protected override bool IsModelLoadedLine(string line) =>
-        line.Contains("llama_server: model loaded");
+    // Older builds log "main: model loaded" / "llama_server: model loaded"; current ones (b12xxx)
+    // prefix a timestamp and a truncated function name: "... srv  server_run_i: model loaded".
+    // Matched on the ": model loaded" suffix so either format is recognised.
+    protected override bool IsModelLoadedLine(string line) => ModelLoadedRegex().IsMatch(line);
 
     protected override int? TryParseListeningPort(string line)
     {
-        if (!line.Contains("llama_server: listening on"))
-            return null;
-
         var match = ListeningOnRegex().Match(line);
         return match.Success ? int.Parse(match.Groups[1].Value) : null;
     }
+
+    /// <summary>Exposed for tests: whether a llama-server output line marks the model as loaded.</summary>
+    public static bool IsModelLoadedMarker(string line) => ModelLoadedRegex().IsMatch(line);
+
+    /// <summary>Exposed for tests: the port in a llama-server "listening on" line, or null.</summary>
+    public static int? ParseListeningPort(string line) =>
+        ListeningOnRegex().Match(line) is { Success: true } m ? int.Parse(m.Groups[1].Value) : null;
 
     protected override void OnOutputLine(string line)
     {
@@ -88,6 +96,9 @@ public partial class LlamaCppProvider : ManagedServerProviderBase
     // its Anthropic endpoint takes "stream" as a body field only (like the real Claude API).
     protected override string OpenAiStreamingEndpoint => "/v1/chat/completions?stream=true";
 
-    [GeneratedRegex(@"listening\s+on\s+http://[^:]+:(\d+)")]
+    [GeneratedRegex(@"\w+:\s+listening\s+on\s+https?://[^\s]*:(\d+)")]
     private static partial Regex ListeningOnRegex();
+
+    [GeneratedRegex(@"\w+:\s+model loaded\s*$")]
+    private static partial Regex ModelLoadedRegex();
 }

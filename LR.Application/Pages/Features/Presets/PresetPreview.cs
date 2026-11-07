@@ -42,6 +42,25 @@ public static class PresetPreview
         }
     }
 
+    /// <summary>
+    /// A user-facing error when a linked library model (main, draft or projector) lives on a
+    /// different machine than the preset's server — this router vs. a remote agent, or two agents —
+    /// since its path wouldn't exist where the server runs. Null when everything matches.
+    /// </summary>
+    public static async Task<string?> FindMachineMismatchAsync(PresetViewModel viewModel, IServerManager serverManager, IModelLibrary modelLibrary)
+    {
+        var server = serverManager.GetAllInstances().FirstOrDefault(s => s.Id == viewModel.ServerInstanceId);
+        if (server is null) return null;
+
+        foreach (var (id, role) in new[] { (viewModel.ModelId, "model"), (viewModel.SpecDraftModelId, "draft model"), (viewModel.MmprojId, "projector") })
+        {
+            if (id is not { } modelId) continue;
+            if (await modelLibrary.GetByIdAsync(modelId) is { } model && model.AgentId != server.AgentId)
+                return $"The selected {role} '{model.Name}' is on a different machine than server '{server.Name}'. Pick one from the same machine, or copy it there from the Agents page.";
+        }
+        return null;
+    }
+
     /// <summary>The generated command line, plus the raw argument list it was built from.</summary>
     public sealed record Result(string CommandLine, IReadOnlyList<string> Args);
 

@@ -16,6 +16,8 @@
     var modelPathHelpJson = System.Text.Json.JsonSerializer.Serialize(
         Model.Servers.ToDictionary(s => s.Id.ToString(), s => EngineCatalog.Get(s.Engine)?.ModelPathHelp ?? "")
     ).Replace("</", "<\\/");
+    var agentByServerJson = System.Text.Json.JsonSerializer.Serialize(
+        Model.Servers.ToDictionary(s => s.Id.ToString(), s => s.AgentId?.ToString() ?? ""));
     var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500";
     var selCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all";
     var detectedVarsJson = System.Text.Json.JsonSerializer.Serialize(
@@ -131,6 +133,7 @@
                     @foreach (var m in Model.Models)
                     {
                         <option value="@m.Id"
+                                data-agent="@(m.AgentId?.ToString() ?? "")"
                                 data-arch="@m.Architecture"
                                 data-params="@m.ParameterSize"
                                 data-quant="@m.QuantizationLevel"
@@ -165,6 +168,20 @@
             <script>
                 (() => {
                     const helpByServer = @Html.Raw(modelPathHelpJson);
+                    // A server on a remote agent can only use that agent's models (and a local one only local models).
+                    const agentByServer = @Html.Raw(agentByServerJson);
+                    const filterModelsForServer = () => {
+                        const agent = agentByServer[serverSelect.value] || '';
+                        document.querySelectorAll('#model-select option[data-agent], #spec-draft-model-select option[data-agent], #mmproj-select option[data-agent], #sd-model-files option[data-agent]').forEach(opt => {
+                            const foreign = (opt.dataset.agent || '') !== agent;
+                            opt.hidden = foreign;
+                            opt.disabled = foreign;
+                        });
+                        for (const id of ['model-select', 'spec-draft-model-select', 'mmproj-select']) {
+                            const sel = document.getElementById(id);
+                            if (sel && sel.selectedOptions[0]?.disabled) sel.value = '';
+                        }
+                    };
                     const serverSelect = document.getElementById('ViewModel_ServerInstanceId');
                     const help = document.getElementById('model-path-help');
                     const sectionByServer = @Html.Raw(sectionByServerJson);
@@ -174,6 +191,7 @@
                     // with its own section shows just that one; llama.cpp shows every other section.
                     const update = () => {
                         help.textContent = helpByServer[serverSelect.value] || '';
+                        filterModelsForServer();
                         const own = sectionByServer[serverSelect.value] || '';
                         const visible = id => id === 'section-identity' || (own ? id === own : !engineSections.has(id));
                         document.querySelectorAll('[id^="section-"]').forEach(el => el.classList.toggle('hidden', !visible(el.id)));
@@ -269,7 +287,7 @@
                 @foreach (var m in Model.Models)
                 {
                     var role = DiffusionModelGuide.ClassifyFile(m);
-                    <option value="@m.FilePath">@m.Name@(role is DiffusionFileRole.Model or DiffusionFileRole.Other ? "" : $" ({DiffusionModelGuide.Label(role)})")</option>
+                    <option value="@m.FilePath" data-agent="@(m.AgentId?.ToString() ?? "")">@m.Name@(role is DiffusionFileRole.Model or DiffusionFileRole.Other ? "" : $" ({DiffusionModelGuide.Label(role)})")</option>
                 }
             </datalist>
 
@@ -1009,7 +1027,7 @@
                         <option value="">— none —</option>
                         @foreach (var m in Model.Models)
                         {
-                            <option value="@m.Id" selected="@(Model.ViewModel.SpecDraftModelId == m.Id)">@m.Name</option>
+                            <option value="@m.Id" data-agent="@(m.AgentId?.ToString() ?? "")" selected="@(Model.ViewModel.SpecDraftModelId == m.Id)">@m.Name</option>
                         }
                     </select>
                     <p class="text-xs text-text-secondary mt-1">
@@ -1245,7 +1263,7 @@
                         <option value="">— none / auto-detect —</option>
                         @foreach (var m in Model.MmprojCandidates)
                         {
-                            <option value="@m.Id" selected="@(Model.ViewModel.MmprojId == m.Id)">@m.Name</option>
+                            <option value="@m.Id" data-agent="@(m.AgentId?.ToString() ?? "")" selected="@(Model.ViewModel.MmprojId == m.Id)">@m.Name</option>
                         }
                     </select>
                     <p class="text-xs text-text-secondary mt-1">

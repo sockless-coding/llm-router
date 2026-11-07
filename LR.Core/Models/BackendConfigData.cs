@@ -27,4 +27,16 @@ public class BackendConfigData
     /// resolved from that build and <see cref="InstallFolderPath"/> is only a fallback.
     /// </summary>
     public Guid? EngineBuildId { get; set; }
+
+    /// <summary>
+    /// The remote agent the server runs on (null = this machine). Set by the server manager from
+    /// <see cref="ServerInstance.AgentId"/>; on create it also assigns the new server to that agent.
+    /// </summary>
+    public Guid? AgentId { get; set; }
+
+    /// <summary>Host name/IP the router reaches the agent's backends on (resolved from the agent row).</summary>
+    public string? RemoteHost { get; set; }
+
+    /// <summary>Whether the agent's machine runs Windows — decides path separators and executable names.</summary>
+    public bool RemoteIsWindows { get; set; }
 }

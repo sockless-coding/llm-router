@@ -35,6 +35,10 @@ else
                     <tr class="border-b border-gray-700/30 hover:bg-gray-800/20">
                         <td class="px-4 py-3">
                             <a href="/Features/Engines/Detail?id=@b.Id" class="text-text-primary font-medium hover:text-neon-cyan transition-colors">@b.Name</a>
+                            @if (b.Agent is { } agent)
+                            {
+                                <a href="/Features/Agents/Detail?id=@agent.Id" class="ml-2 text-xs px-2 py-0.5 rounded-full border border-neon-magenta/30 text-neon-magenta bg-neon-magenta/10 hover:bg-neon-magenta/20" title="Installed on this agent">@agent.Name</a>
+                            }
                             <p class="text-xs text-text-secondary mt-0.5 font-mono">@b.InstallPath</p>
                         </td>
                         <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded border @EngineDisplay.BackendBadge(b.BackendType)">@EngineDisplay.BackendLabel(b.BackendType)</span></td>

@@ -110,6 +110,16 @@ public class EngineBuild
     /// <summary>When the download/compile finished successfully.</summary>
     public DateTime? BuildCompletedAt { get; set; }
 
+    /// <summary>
+    /// The remote agent this install lives on (its <see cref="InstallPath"/> is a path on that
+    /// machine), or null for this router's machine. Only servers on the same machine can bind it.
+    /// </summary>
+    public Guid? AgentId { get; set; }
+
+    /// <summary>Navigation: the agent this install lives on, if any.</summary>
+    [ForeignKey(nameof(AgentId))]
+    public RemoteAgent? Agent { get; set; }
+
     /// <summary>Navigation: the recipe this build was compiled with, if any.</summary>
     [ForeignKey(nameof(RecipeId))]
     public LlamaCppBuildRecipe? Recipe { get; set; }

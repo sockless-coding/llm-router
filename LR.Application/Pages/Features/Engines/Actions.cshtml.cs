@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
+using LR.Application.Agents;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Services;
@@ -13,12 +14,17 @@ public class EngineActionsModel : PageModel
 {
     private readonly IEngineBuildManager _manager;
     private readonly EngineBuildService _buildService;
+    private readonly AgentDeploymentService _agents;
 
-    public EngineActionsModel(IEngineBuildManager manager, EngineBuildService buildService)
+    public EngineActionsModel(IEngineBuildManager manager, EngineBuildService buildService, AgentDeploymentService agents)
     {
         _manager = manager;
         _buildService = buildService;
+        _agents = agents;
     }
+
+    /// <summary>Whether the build lives on a remote agent — its jobs and files are handled there.</summary>
+    private async Task<bool> IsRemoteAsync(Guid buildId) => (await _manager.GetBuildAsync(buildId))?.AgentId is not null;
 
     [BindProperty] public string? Command { get; set; }
     [BindProperty] public Guid BuildId { get; set; }
@@ -52,7 +58,7 @@ public class EngineActionsModel : PageModel
             "installrelease" => await InstallReleaseAsync(),
             "update" => await UpdateAsync(),
             "startbuild" => await StartBuildAsync(),
-            "cancel" => Cancel(),
+            "cancel" => await CancelAsync(),
             "delete" => await DeleteAsync(),
             "checkupdate" => await CheckUpdateAsync(),
             "saverecipe" => await SaveRecipeAsync(),
@@ -97,7 +103,9 @@ public class EngineActionsModel : PageModel
             var refOverride = !string.IsNullOrWhiteSpace(ReleaseTag) ? ReleaseTag!.Trim()
                 : !string.IsNullOrWhiteSpace(GitRef) ? GitRef!.Trim()
                 : null;
-            var id = await _buildService.StartUpdateAsync(BuildId, refOverride);
+            var id = await IsRemoteAsync(BuildId)
+                ? await _agents.StartEngineUpdateAsync(BuildId, refOverride)
+                : await _buildService.StartUpdateAsync(BuildId, refOverride);
             return new JsonResult(new { success = true, buildId = id, message = "Update started." });
         }
         catch (Exception ex)
@@ -119,16 +127,25 @@ public class EngineActionsModel : PageModel
         }
     }
 
-    private IActionResult Cancel()
+    private async Task<IActionResult> CancelAsync()
     {
-        var ok = _buildService.Cancel(BuildId);
+        var ok = await IsRemoteAsync(BuildId) ? await _agents.CancelAsync(BuildId) : _buildService.Cancel(BuildId);
         return new JsonResult(new { success = ok, message = ok ? "Cancelling…" : "That build is not running." });
     }
 
     private async Task<IActionResult> DeleteAsync()
     {
-        var ok = await _manager.DeleteBuildAsync(BuildId, DeleteFiles);
-        return new JsonResult(new { success = ok, message = ok ? "Build deleted." : "Build not found." });
+        try
+        {
+            var ok = await IsRemoteAsync(BuildId)
+                ? await _agents.DeleteBuildAsync(BuildId, DeleteFiles)
+                : await _manager.DeleteBuildAsync(BuildId, DeleteFiles);
+            return new JsonResult(new { success = ok, message = ok ? "Build deleted." : "Build not found." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new JsonResult(new { success = false, message = ex.Message });
+        }
     }
 
     private async Task<IActionResult> CheckUpdateAsync()

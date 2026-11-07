@@ -138,6 +138,19 @@ public class LocalModel
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastVerifiedAt { get; set; }
 
+    // ==================== LOCATION ====================
+
+    /// <summary>
+    /// The remote agent whose disk holds this file (<see cref="FilePath"/> is a path on that
+    /// machine), or null for this router's machine. Presets of servers on an agent pick from that
+    /// agent's models.
+    /// </summary>
+    public Guid? AgentId { get; set; }
+
+    /// <summary>Navigation: the agent this file lives on, if any.</summary>
+    [ForeignKey(nameof(AgentId))]
+    public RemoteAgent? Agent { get; set; }
+
     /// <summary>
     /// Navigation: presets that reference this model.
     /// </summary>

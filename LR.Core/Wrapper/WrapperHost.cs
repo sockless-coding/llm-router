@@ -1,8 +1,6 @@
 using System.Diagnostics;
 
-using LR.Core.Wrapper;
-
-namespace LR.Wrapper;
+namespace LR.Core.Wrapper;
 
 /// <summary>
 /// Owns the companion process and main server process for one server instance, independent of
@@ -120,12 +118,10 @@ public sealed class WrapperHost
 
         if (!string.IsNullOrEmpty(environmentSetupCommand))
         {
-            // Going through a batch file means a single flattened, correctly-quoted command
+            // Going through a shell script means a single flattened, correctly-quoted command
             // line rather than ArgumentList (which only applies to a direct Process.Start).
-            string quotedArguments = WindowsCommandLine.Join(arguments);
-            _pendingTempBatchToCleanup = await CreateTempBatchScriptAsync(executablePath, quotedArguments, environmentSetupCommand);
-            startInfo.FileName = "cmd.exe";
-            startInfo.Arguments = "/c \"" + _pendingTempBatchToCleanup + "\"";
+            _pendingTempBatchToCleanup = await CreateTempScriptAsync(executablePath, arguments, environmentSetupCommand);
+            ApplyScriptLauncher(startInfo, _pendingTempBatchToCleanup);
         }
         else
         {
@@ -212,18 +208,54 @@ public sealed class WrapperHost
         CleanupPendingTempBatch();
     }
 
-    private async Task<string> CreateTempBatchScriptAsync(string executablePath, string arguments, string environmentSetupCommand)
+    /// <summary>
+    /// Writes a throwaway script that runs <paramref name="environmentSetupCommand"/> and then the
+    /// executable in the same shell, so the variables it sets are inherited — a batch file run via
+    /// <c>cmd.exe /c</c> on Windows, a POSIX <c>sh</c> script (sourcing the setup command) elsewhere.
+    /// </summary>
+    private static async Task<string> CreateTempScriptAsync(string executablePath, IReadOnlyList<string> arguments, string environmentSetupCommand)
     {
-        string tempBatchPath = Path.Combine(Path.GetTempPath(), $"llm-router-init-{Guid.NewGuid():N}.bat");
-        var lines = new List<string>
+        if (OperatingSystem.IsWindows())
         {
-            "@echo off",
-            $"call {environmentSetupCommand}",
-            $"call \"{executablePath}\" {arguments}",
-        };
-        await File.WriteAllLinesAsync(tempBatchPath, lines);
-        return tempBatchPath;
+            string tempBatchPath = Path.Combine(Path.GetTempPath(), $"llm-router-init-{Guid.NewGuid():N}.bat");
+            var lines = new List<string>
+            {
+                "@echo off",
+                $"call {environmentSetupCommand}",
+                $"call \"{executablePath}\" {WindowsCommandLine.Join(arguments)}",
+            };
+            await File.WriteAllLinesAsync(tempBatchPath, lines);
+            return tempBatchPath;
+        }
+
+        string tempScriptPath = Path.Combine(Path.GetTempPath(), $"llm-router-init-{Guid.NewGuid():N}.sh");
+        var script = string.Join("\n",
+            "#!/bin/sh",
+            $". {environmentSetupCommand}",
+            "exec " + string.Join(" ", new[] { executablePath }.Concat(arguments).Select(PosixQuote)),
+            "");
+        await File.WriteAllTextAsync(tempScriptPath, script);
+        return tempScriptPath;
     }
+
+    /// <summary>Points <paramref name="startInfo"/> at the shell that runs a script from <see cref="CreateTempScriptAsync"/>.</summary>
+    private static void ApplyScriptLauncher(ProcessStartInfo startInfo, string scriptPath)
+    {
+        startInfo.ArgumentList.Clear();
+        if (OperatingSystem.IsWindows())
+        {
+            startInfo.FileName = "cmd.exe";
+            startInfo.Arguments = "/c \"" + scriptPath + "\"";
+        }
+        else
+        {
+            startInfo.FileName = "/bin/sh";
+            startInfo.ArgumentList.Add(scriptPath);
+        }
+    }
+
+    /// <summary>Single-quotes one word for a POSIX shell (<c>it's</c> → <c>'it'\''s'</c>).</summary>
+    public static string PosixQuote(string value) => "'" + value.Replace("'", "'\\''") + "'";
 
     private void CleanupPendingTempBatch()
     {
@@ -276,16 +308,8 @@ public sealed class WrapperHost
 
             if (!string.IsNullOrEmpty(environmentSetupCommand))
             {
-                string tempBatchPath = Path.Combine(Path.GetTempPath(), $"llm-router-companion-{Guid.NewGuid():N}.bat");
-                var lines = new List<string>
-                {
-                    "@echo off",
-                    $"call {environmentSetupCommand}",
-                    $"call \"{companionAppPath}\"",
-                };
-                await File.WriteAllLinesAsync(tempBatchPath, lines);
-                startInfo.FileName = "cmd.exe";
-                startInfo.Arguments = "/c \"" + tempBatchPath + "\"";
+                string scriptPath = await CreateTempScriptAsync(companionAppPath, Array.Empty<string>(), environmentSetupCommand);
+                ApplyScriptLauncher(startInfo, scriptPath);
             }
 
             _companionProcess = new Process { StartInfo = startInfo };

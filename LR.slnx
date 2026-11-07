@@ -3,5 +3,6 @@
   <Project Path="LR.Core/LR.Core.csproj" />
   <Project Path="LR.Providers/LR.Providers.csproj" />
   <Project Path="LR.Wrapper/LR.Wrapper.csproj" />
+  <Project Path="LR.Agent/LR.Agent.csproj" />
   <Project Path="LR.Application/LR.Application.csproj" />
 </Solution>

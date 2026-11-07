@@ -592,7 +592,7 @@ public partial class EngineBuildService
         return name;
     }
 
-    private static long? TryGetDirectorySize(string dir)
+    public static long? TryGetDirectorySize(string dir)
     {
         try
         {
@@ -615,7 +615,7 @@ public partial class EngineBuildService
     /// <paramref name="source"/> is removed — so a renamed or dropped binary from the previous
     /// version doesn't linger. The folder itself (the path servers bind to) is kept.
     /// </summary>
-    private static void MirrorDirectory(string source, string dest)
+    public static void MirrorDirectory(string source, string dest)
     {
         Directory.CreateDirectory(dest);
 

@@ -12,6 +12,7 @@ using LR.Core.Services;
 using LR.Providers;
 using LR.Application.Services;
 using LR.Application.Pages.Api;
+using LR.Application.Agents;
 
 // Force invariant number/date formatting on every thread this process creates — including
 // Kestrel's request-handling threads — regardless of the host OS's regional settings. Without
@@ -211,6 +212,15 @@ builder.Services.AddHostedService<LR.Application.Services.IdleUnloadService>();
 // Self-update from the router's GitHub releases (Singleton — holds check/download state)
 builder.Services.AddSingleton<AppUpdateService>();
 
+// --- Remote agents (LR.Agent on other machines: backends, engines and models there) ---
+// The connection manager holds every live agent WebSocket and is also the remote wrapper
+// connector the providers' process managers use for servers that run on an agent.
+builder.Services.AddSingleton<AgentPackageCatalog>();
+builder.Services.AddSingleton<AgentSettingsService>();
+builder.Services.AddSingleton<AgentConnectionManager>();
+builder.Services.AddSingleton<IRemoteWrapperConnector>(sp => sp.GetRequiredService<AgentConnectionManager>());
+builder.Services.AddSingleton<AgentDeploymentService>();
+
 // Retention cleanup for request logs (runs hourly)
 builder.Services.AddHostedService<RetentionCleanupService>();
 
@@ -229,6 +239,20 @@ using (var scope = app.Services.CreateScope())
 {
     var reconciliation = scope.ServiceProvider.GetRequiredService<LR.Application.Services.WrapperReconciliationService>();
     await reconciliation.ReconcileAsync();
+}
+
+// Servers on remote agents can't be checked until their agent connects (it re-attaches them
+// then) — show them as reconnecting rather than with stale pre-restart state.
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
+    var remoteUp = await context.ServerInstances
+        .Where(s => s.AgentId != null && (s.Status == ServerStatus.Running || s.Status == ServerStatus.Starting))
+        .ToListAsync();
+    foreach (var server in remoteUp)
+        server.Status = ServerStatus.Reconnecting;
+    if (remoteUp.Count > 0)
+        await context.SaveChangesAsync();
 }
 
 // Register existing preset model files into the model library so it's populated without a
@@ -283,7 +307,11 @@ app.Use(async (context, next) =>
 });
 
 app.UseStaticFiles();
+app.UseWebSockets();
 app.MapRazorPages();
+
+// Agent enrollment, WebSocket, packages, model copies and install scripts
+app.MapAgentEndpoints();
 
 // SignalR hub for server lifecycle events
 app.MapHub<LR.Application.Hubs.ServerHub>("/serverHub");

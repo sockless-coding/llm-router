@@ -77,6 +77,10 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
         if (!ViewModel.ModelId.HasValue && string.IsNullOrWhiteSpace(ViewModel.ModelPath))
             ModelState.AddModelError("ViewModel.ModelPath", "Select a model from the library, or enter a path manually.");
 
+        // Library models live on one machine; the preset's server must run on that same machine.
+        if (await PresetPreview.FindMachineMismatchAsync(ViewModel, _serverManager, _modelLibrary) is { } mismatch)
+            ModelState.AddModelError("ViewModel.ModelId", mismatch);
+
         foreach (var alias in ModelAliasMatcher.ParseAliases(ViewModel.Aliases))
         {
             if (_presetManager.GetAllPresets().Any(p => p.Name == alias))

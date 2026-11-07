@@ -33,6 +33,12 @@ public class WrapperProcessManager
     private readonly IServerOutputHandler _outputHandler;
 
     public string? CompanionAppPath { get; set; }
+
+    /// <summary>
+    /// The remote agent whose machine runs this server, or null for this machine. When set, the
+    /// wrapper is reached through the agent's connection instead of a local named pipe.
+    /// </summary>
+    public Guid? AgentId { get; set; }
     public string? EnvironmentSetupCommand { get; set; }
     public int Port { get; set; }
 
@@ -40,7 +46,7 @@ public class WrapperProcessManager
     public TimeSpan StartupTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
     private ServerInstance? _serverInstance;
-    private volatile WrapperPipeConnection? _connection;
+    private volatile IWrapperTransport? _connection;
     private CancellationTokenSource? _pumpCts;
     private Task? _pumpTask;
     private volatile TaskCompletionSource<CommandAckEvent>? _pendingAck;
@@ -121,18 +127,24 @@ public class WrapperProcessManager
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                bool exited, modelLoaded;
+                bool exited, modelLoaded, connectionLost;
                 int exitCode;
                 int? detectedPort;
                 string recentOutput;
                 lock (startup.Lock)
                 {
                     exited = startup.ProcessExited;
+                    connectionLost = startup.ConnectionLost;
                     exitCode = startup.ExitCode;
                     modelLoaded = startup.ModelLoadedDetected;
                     detectedPort = startup.DetectedPort;
                     recentOutput = string.Join("\n", startup.RecentLines);
                 }
+
+                if (connectionLost && !exited)
+                    throw new InvalidOperationException(AgentId is null
+                        ? "Lost the connection to the wrapper process while the server was starting."
+                        : "Lost the connection to the agent while the server was starting.");
 
                 if (exited)
                 {
@@ -197,6 +209,30 @@ public class WrapperProcessManager
     public async Task StopAllProcessesAsync(CancellationToken ct)
     {
         var connection = _connection;
+
+        // A remote server keeps running when its agent's link drops; if the relay was lost, attach
+        // again (without launching anything) so the stop actually reaches the wrapper.
+        if (connection is null && AgentId is { } agentId && _serverInstance is not null)
+        {
+            try
+            {
+                var transport = await ResolveConnector().AttachAsync(agentId, _serverInstance.Id, launch: false, ct);
+                if (transport is not null && await transport.ReceiveAsync(ct) is HelloEvent)
+                {
+                    _connection = connection = transport;
+                    StartPumpTask();
+                }
+                else if (transport is not null)
+                {
+                    await transport.DisposeAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not reach the wrapper of {InstanceId} on agent {AgentId} to stop it.", _serverInstance.Id, agentId);
+            }
+        }
+
         if (connection is null) return;
 
         try
@@ -236,6 +272,9 @@ public class WrapperProcessManager
     {
         if (_serverInstance is null || _connection is not null)
             return false;
+
+        if (AgentId is { } agentId)
+            return await TryReconnectRemoteAsync(agentId, ct);
 
         string stateFilePath = WrapperConventions.GetStateFilePath(StateDirectory, _serverInstance.Id);
         if (!File.Exists(stateFilePath))
@@ -318,6 +357,61 @@ public class WrapperProcessManager
         return true;
     }
 
+    /// <summary>
+    /// Remote counterpart of the state-file reconnect: asks the agent to relay the wrapper of this
+    /// instance if one is alive there. Same outcome rules — an idle wrapper is shut down.
+    /// </summary>
+    private async Task<bool> TryReconnectRemoteAsync(Guid agentId, CancellationToken ct)
+    {
+        IWrapperTransport? transport;
+        try
+        {
+            transport = await ResolveConnector().AttachAsync(agentId, _serverInstance!.Id, launch: false, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Agent {AgentId} could not attach to the wrapper of {InstanceId}.", agentId, _serverInstance!.Id);
+            return false;
+        }
+        if (transport is null)
+            return false;
+
+        HelloEvent? hello;
+        try { hello = await transport.ReceiveAsync(ct) as HelloEvent; }
+        catch { hello = null; }
+
+        if (hello is null)
+        {
+            await transport.DisposeAsync();
+            return false;
+        }
+
+        if (!hello.ServerRunning)
+        {
+            try { await transport.SendAsync(new StopCommand { StopCompanion = true, ShutdownWrapper = true }, ct); }
+            catch { /* best effort */ }
+            await transport.DisposeAsync();
+            return false;
+        }
+
+        _logger.LogInformation("Reattached to the wrapper of {InstanceId} on agent {AgentId} (server pid {ServerPid}).",
+            _serverInstance.Id, agentId, hello.ServerPid);
+        if (hello.Port.HasValue)
+            Port = hello.Port.Value;
+        _wrapperPid = hello.WrapperPid;
+        _serverPid = hello.ServerPid;
+        _connection = transport;
+        StartPumpTask();
+        return true;
+    }
+
+    private IRemoteWrapperConnector ResolveConnector()
+    {
+        using var scope = _scopeFactory.CreateScope();
+        return scope.ServiceProvider.GetService<IRemoteWrapperConnector>()
+            ?? throw new InvalidOperationException("Remote agents aren't available in this host.");
+    }
+
     private async Task EnsureWrapperConnectedAsync(CancellationToken ct)
     {
         if (_connection is not null)
@@ -325,6 +419,22 @@ public class WrapperProcessManager
 
         if (_serverInstance is null)
             throw new InvalidOperationException("Cannot start a wrapper-managed process without a server instance reference.");
+
+        if (AgentId is { } agentId)
+        {
+            var transport = await ResolveConnector().AttachAsync(agentId, _serverInstance.Id, launch: true, ct)
+                ?? throw new InvalidOperationException("The agent this server runs on is offline.");
+            if (await transport.ReceiveAsync(ct) is not HelloEvent remoteHello)
+            {
+                await transport.DisposeAsync();
+                throw new InvalidOperationException("The agent's wrapper did not send an initial handshake.");
+            }
+            _wrapperPid = remoteHello.WrapperPid;
+            _serverPid = remoteHello.ServerPid;
+            _connection = transport;
+            StartPumpTask();
+            return;
+        }
 
         Directory.CreateDirectory(StateDirectory);
 
@@ -423,6 +533,8 @@ public class WrapperProcessManager
         finally
         {
             _connection = null;
+            if (_activeStartup is { } startup)
+                lock (startup.Lock) startup.ConnectionLost = true;
         }
     }
 
@@ -532,6 +644,7 @@ public class WrapperProcessManager
         public bool ModelLoadedDetected;
         public int? DetectedPort;
         public bool ProcessExited;
+        public bool ConnectionLost;
         public int ExitCode;
         public readonly List<string> RecentLines = new();
     }

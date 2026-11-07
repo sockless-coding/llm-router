@@ -17,6 +17,7 @@ LLM Router provides a unified interface to route requests across heterogeneous b
 - **Health monitoring & auto-restart** — Background health checks detect failed or crashed backends and route around them.
 - **Model library with Hugging Face integration** — A local registry of GGUF models with metadata inspection, folder scanning, and search/download directly from the Hugging Face Hub (with live progress).
 - **Model presets** — Reusable llama.cpp launch configurations (sampling, context, GPU/threading, speculative decoding, LoRA, multimodal, etc.), optionally linked to a model-library entry so paths and metadata stay in sync.
+- **Remote agents** — Run servers on other machines (Windows, Linux x64 and arm64). A one-line install command sets up an agent that connects back to the router, installs engines and models on its own disk when told to, supervises its backends, and updates itself whenever the router ships a new version. See [Remote agents](#remote-agents).
 - **Resilient backend supervision** — A separate wrapper process supervises each `llama-server` child process, so the router can restart without killing (or losing track of) running backends, and can live-swap models.
 - **Request logging & stats dashboard** — Per-request API log with filtering, plus charts for throughput, latency, and context usage.
 - **Playground** — Chat with any preset from the dashboard, with per-reply time to first token, prompt/generation speed, cache hits and speculative-decoding acceptance; every reply can be recorded with a snapshot of the preset's launch settings, so runs under different settings can be compared side by side and exported as CSV.
@@ -66,7 +67,8 @@ flowchart TB
 | **LR.Application** | ASP.NET Core web app — Razor Pages UI, API endpoint mappings (OpenAI/Claude/Ollama/Responses), SignalR hubs, background services, Windows Service hosting |
 | **LR.Core** | Core interfaces, EF Core models/migrations (SQLite), and services — routing engine, server/preset/model-library managers, Hugging Face client, request logging, wrapper protocol |
 | **LR.Providers** | Backend engine providers: a shared base (`ManagedServerProviderBase` — wrapper process management, health, OpenAI/Anthropic request + SSE handling) with one folder per engine (`LlamaCpp/`, `Strata/`) |
-| **LR.Wrapper** | Standalone process that launches and supervises a `llama-server` child process over a named-pipe protocol, so a router restart doesn't kill the backend |
+| **LR.Wrapper** | Standalone process that launches and supervises a `llama-server` child process over a named-pipe protocol, so a router restart doesn't kill the backend (the supervisor itself lives in `LR.Core/Wrapper`) |
+| **LR.Agent** | Self-contained service for remote machines: connects out to the router over a WebSocket, relays the wrapper protocol to per-server wrapper processes it launches (`LR.Agent wrapper …`), runs engine-install and model-download jobs locally, and updates itself from the router |
 
 ## API
 
@@ -214,6 +216,63 @@ The response is OpenAI's `{"created": ..., "data": [{"b64_json": "..."}]}` (imag
 Image presets are kept apart from chat: they don't appear in `/api/tags` or `/v1/models/capabilities`, a chat request naming one gets a 400 pointing at the images endpoint, and unresolved chat models are never round-robined onto an image server (or the reverse). `sd-server` generates one image job at a time, so the router sends each server one request at a time and queues the rest. A preset's memory-group footprint is its model files plus compute buffers (only the largest file with CPU offload). Request-log entries keep the request and a summary of the response, with the base64 image data left out.
 
 **Playground → Generate**: picking an image or video preset in the Playground opens the Generate page, which runs on stable-diffusion.cpp's native job API rather than the OpenAI endpoint, so it can show sampling progress with live previews and take image inputs. It offers image mode (batch size, image-to-image with strength, inpainting masks) and video mode (frames, FPS, start/end frames; Wan, LTX, HunyuanVideo and other video models), plus size, steps, CFG, guidance, sampler, scheduler, seed, LoRAs from the server's LoRA folder, output format and preview mode. Once the model is loaded, the page reads the server's capabilities to show only the modes and inputs it supports, list its samplers and LoRAs, and use its defaults as placeholders. A generation goes through routing like any request (model auto-start, fallback, memory groups) and holds the server's slot until the job ends, so idle unload and memory-group eviction leave it alone mid-job; Stop (or leaving the page) cancels the job on the server. Results stay on the page until you leave; download the ones to keep. Each generation is written to the request log with images left out.
+
+### Remote agents
+
+An agent is a small service on another machine that runs servers for this router. Everything is
+controlled from the router: the agent installs llama.cpp / stable-diffusion.cpp builds and models
+on its own disk, starts and stops backends, and updates itself.
+
+**Adding a machine.** Open **Agents**, check the router URL (it must be reachable from the other
+machine; a `localhost` address is flagged), and copy one command:
+
+```sh
+# Linux (x86_64 or aarch64), as root — installs to /opt/lr-agent, data in /var/lib/lr-agent, systemd unit lr-agent
+curl -fsSL http://router:5053/agent/install.sh | sudo sh -s -- <enrollment-token>
+```
+
+```powershell
+# Windows (x64 or arm64), elevated PowerShell — installs to Program Files\LR Agent, data in ProgramData\LR Agent, service LRAgent
+& ([scriptblock]::Create((irm 'http://router:5053/agent/install.ps1'))) -Token '<enrollment-token>'
+```
+
+The script downloads the right package from the router, registers a service, and the machine
+appears on the Agents page within seconds. The enrollment token is only used for first contact:
+each agent gets its own secret (stored hashed on the router). Running the command again on the same
+machine upgrades it in place and keeps its identity. Regenerating the token doesn't affect enrolled agents.
+
+**Using it.** On an agent's page you can install a prebuilt engine release (only backends published
+for that machine's OS/arch are offered) or compile one from a recipe, download a model from Hugging
+Face straight onto the agent, copy one from the router's library, or register a file already there.
+Then create a server with **Runs on: Agent …**, bind it to the agent's build, and give it a preset
+with one of the agent's models. The preset form only offers models on the server's machine. Routing,
+fallbacks, idle unload, memory groups and stats work exactly as for local servers. Engine/model rows
+of agents also show up (with a badge) on the Engines and Models pages, and their progress and build
+logs are live there too.
+
+**How it works.**
+
+- The agent dials out to `/agent/connect` (WebSocket), so it works from behind NAT. The router relays
+  the same wrapper protocol it uses locally over that socket. Each server gets its own wrapper process
+  on the agent, so restarting or updating the agent, or losing the connection, never stops a backend.
+  When the agent reconnects, the router re-attaches to whatever kept running. Likewise after a router
+  restart, where agent servers show as *Reconnecting* until their agent is back.
+- Inference traffic goes **directly** from the router to the backend at `http://<agent address>:<port>`.
+  Remote backends listen on `0.0.0.0`, so make sure the router can reach the servers' ports (8080 and
+  up by default). The Windows installer opens 8080-8199 in the firewall. The address defaults to the
+  one the agent connects from and can be overridden per agent.
+- **Auto-update:** the router serves agent packages from `agent-packages/` next to the app. Release
+  downloads include them, built at the router's version. An agent with auto-update on (the default)
+  that reports a different version is sent the package on connect. It verifies the SHA-256, swaps its
+  files and restarts (systemd `Restart=always` / service recovery). **Update now** on an agent's page
+  does the same on demand.
+- For a local build, run `.\publish-agents.ps1` from the repository root. It publishes the agent for
+  win-x64, win-arm64, linux-x64 and linux-arm64 into the dev router's `agent-packages/` with a unique
+  dev version, so connected agents pick the build up right away. Use `-Rids linux-x64` to build only one.
+
+Limitations: Strata servers can't run on agents yet (its model preparation runs Python against local
+files). Agent traffic uses the admin port. With a separate routing port, agents connect to `Gateway:Port`.
+The backends' HTTP port has no authentication of its own, so keep agents on a trusted network.
 
 ### Adding another engine
 

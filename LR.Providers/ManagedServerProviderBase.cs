@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
+using LR.Core.Agents;
 using LR.Core.Interfaces;
 using LR.Core.Models;
 using LR.Core.Models.OpenAI;
@@ -76,7 +77,52 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     /// IPv6 connection attempts before falling back to IPv4 — several seconds of pure overhead
     /// per request that real Ollama doesn't have, since it listens on both stacks.
     /// </summary>
-    protected virtual string? ServerUrl => $"http://127.0.0.1:{Port}";
+    protected virtual string? ServerUrl => $"http://{UrlHost}:{Port}";
+
+    /// <summary>The host part of <see cref="ServerUrl"/>: loopback locally, the agent's address for a remote server.</summary>
+    private string UrlHost => RemoteHost is { Length: > 0 } host
+        ? (host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host)
+        : "127.0.0.1";
+
+    /// <summary>The base URL clients of this server would use (shown in the UI).</summary>
+    public string? BaseUrl => ServerUrl;
+
+    /// <summary>The remote agent running this server, or null when it runs on this machine.</summary>
+    protected Guid? AgentId { get; private set; }
+
+    /// <summary>Address the agent's backends are reached on; null for a local server.</summary>
+    protected string? RemoteHost { get; private set; }
+
+    /// <summary>True when the backend runs on a remote agent: paths are on that machine and can't be checked from here.</summary>
+    protected bool IsRemote => AgentId is not null;
+
+    /// <summary>Whether the machine the backend runs on is Windows (this machine, or the agent's).</summary>
+    protected bool TargetIsWindows { get; private set; } = OperatingSystem.IsWindows();
+
+    /// <summary>
+    /// Address the backend should listen on: loopback for a local server; all interfaces for a
+    /// remote one, which the router reaches over the network.
+    /// </summary>
+    protected string ListenAddress => IsRemote ? "0.0.0.0" : "127.0.0.1";
+
+    /// <summary>
+    /// Full path of <paramref name="executableBaseName"/> (e.g. <c>llama-server</c>) in the install
+    /// folder on the machine the backend runs on. Checked for existence only when that's this
+    /// machine; a remote wrapper reports a missing file when it tries to launch it.
+    /// </summary>
+    protected string ResolveServerExecutable(string executableBaseName)
+    {
+        if (string.IsNullOrEmpty(InstallFolderPath))
+            throw new InvalidOperationException("Server executable path is not set — configure the server's install folder or bind it to a managed build.");
+
+        if (IsRemote)
+            return AgentPaths.Combine(TargetIsWindows, InstallFolderPath, AgentPaths.Executable(TargetIsWindows, executableBaseName));
+
+        string executablePath = Path.Combine(InstallFolderPath, AgentPaths.Executable(OperatingSystem.IsWindows(), executableBaseName));
+        if (!File.Exists(executablePath))
+            throw new FileNotFoundException($"Server executable not found at: {executablePath}");
+        return executablePath;
+    }
 
     private readonly WrapperProcessManager _processManager;
 
@@ -235,6 +281,10 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     public virtual void Configure(BackendConfigData configData)
     {
         InstallFolderPath = configData.InstallFolderPath;
+        AgentId = configData.AgentId;
+        RemoteHost = configData.AgentId is null ? null : configData.RemoteHost;
+        TargetIsWindows = configData.AgentId is null ? OperatingSystem.IsWindows() : configData.RemoteIsWindows;
+        _processManager.AgentId = configData.AgentId;
         _processManager.CompanionAppPath = configData.CompanionAppPath;
         _processManager.EnvironmentSetupCommand = configData.EnvironmentSetupCommand;
     }

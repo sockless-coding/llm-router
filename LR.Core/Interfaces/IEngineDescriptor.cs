@@ -42,6 +42,9 @@ public interface IEngineDescriptor
     /// </summary>
     bool SupportsManagedBuilds { get; }
 
+    /// <summary>Whether servers of this engine can run on a remote agent (install folder and models on that machine).</summary>
+    bool SupportsRemoteAgents => true;
+
     /// <summary>Label for the install folder field (<see cref="BackendConfig.InstallFolderPath"/>).</summary>
     string InstallFolderLabel { get; }
 

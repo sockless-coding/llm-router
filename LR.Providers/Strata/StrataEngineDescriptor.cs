@@ -18,6 +18,9 @@ public class StrataEngineDescriptor : IEngineDescriptor
 
     public bool SupportsManagedBuilds => true;
 
+    /// <summary>Strata's model preparation runs its own Python tooling on local files — not on agents yet.</summary>
+    public bool SupportsRemoteAgents => false;
+
     public string InstallFolderLabel => "Strata Folder Path";
 
     public string InstallFolderHelp =>

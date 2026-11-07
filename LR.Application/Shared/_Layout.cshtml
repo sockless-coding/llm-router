@@ -61,6 +61,7 @@
     var path = Context.Request.Path.ToString();
     bool isDashboard = path == "/" || path == "";
     bool isServers = path.StartsWith("/Features/Servers");
+    bool isAgents = path.StartsWith("/Features/Agents");
     bool isModels = path.StartsWith("/Features/Models");
     bool isEngines = path.StartsWith("/Features/Engines");
     bool isPresets = path.StartsWith("/Features/Presets");
@@ -85,6 +86,11 @@
                 <a href="/Features/Servers/Index" aria-current="@(isServers ? "page" : null)" class="@(isServers ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isServers ? activeStyle : inactiveStyle)">
                     <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" /></svg>
                     <span class="text-sm font-medium">Servers</span>
+                </a>
+
+                <a href="/Features/Agents/Index" aria-current="@(isAgents ? "page" : null)" class="@(isAgents ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isAgents ? activeStyle : inactiveStyle)">
+                    <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" /></svg>
+                    <span class="text-sm font-medium">Agents</span>
                 </a>
 
                 <a href="/Features/Models/Index" aria-current="@(isModels ? "page" : null)" class="@(isModels ? activeClasses : inactiveClasses) flex items-center gap-3 px-3 py-2 rounded-lg transition-all" style="@(isModels ? activeStyle : inactiveStyle)">

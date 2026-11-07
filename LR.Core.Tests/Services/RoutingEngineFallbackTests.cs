@@ -302,5 +302,6 @@ public class RoutingEngineFallbackTests : IDisposable
         public Task StopAsync(Guid instanceId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task RemoveInstanceAsync(Guid instanceId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task UpdateHealthAsync(Guid instanceId, bool isHealthy) => throw new NotImplementedException();
+        public Task<bool> TryReattachAsync(Guid instanceId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 }
