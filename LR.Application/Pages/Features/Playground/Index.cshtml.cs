@@ -25,6 +25,9 @@ public class IndexModel : PageModel
     /// <summary>Image/video presets, offered in the picker as a switch to the Generate page.</summary>
     public IReadOnlyList<ModelPreset> ImagePresets { get; set; } = new List<ModelPreset>();
 
+    /// <summary>Decision presets, offered in the picker as a switch to the Decide page.</summary>
+    public IReadOnlyList<ModelPreset> DecisionPresets { get; set; } = new List<ModelPreset>();
+
     /// <summary>Preset to preselect, e.g. when arriving from a preset's page.</summary>
     [BindProperty(SupportsGet = true)]
     public Guid? PresetId { get; set; }
@@ -34,13 +37,19 @@ public class IndexModel : PageModel
         // This page chats; image and video presets have their own Generate page.
         var servers = _serverManager.GetAllInstances();
         var all = _presetManager.GetAllPresets().OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
-        Presets = all.OfModality(servers, _engines, EngineModality.Text).ToList();
+        Presets = all.ForChat(servers, _engines).ToList();
         ImagePresets = all.OfModality(servers, _engines, EngineModality.Image).ToList();
+
+        DecisionPresets = all.ForDecisions(servers, _engines).ToList();
 
         if (PresetId is Guid id && ImagePresets.Any(p => p.Id == id))
             return RedirectToPage("Generate", new { presetId = id });
+        if (PresetId is Guid did && Presets.All(p => p.Id != did) && DecisionPresets.Any(p => p.Id == did))
+            return RedirectToPage("Decide", new { presetId = did });
         if (Presets.Count == 0 && ImagePresets.Count > 0)
             return RedirectToPage("Generate");
+        if (Presets.Count == 0 && DecisionPresets.Count > 0)
+            return RedirectToPage("Decide");
         return Page();
     }
 }

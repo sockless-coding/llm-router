@@ -13,6 +13,7 @@ public static class OpenAiEndpoints
     /// - POST /v1/chat/completions
     /// - POST /v1/embeddings
     /// - POST /v1/images/generations
+    /// - POST /v1/systemone (decision models)
     /// - GET  /v1/models
     /// </summary>
     public static IEndpointRouteBuilder MapOpenAiEndpoints(this IEndpointRouteBuilder app)
@@ -42,6 +43,14 @@ public static class OpenAiEndpoints
                 CancellationToken ct) =>
             {
                 return await images.HandleGenerationsAsync(httpRequest, ct);
+            });
+
+        group.MapPost(SystemOneGateway.Path, async (
+                SystemOneGateway systemOne,
+                HttpRequest httpRequest,
+                CancellationToken ct) =>
+            {
+                return await systemOne.HandleAsync(httpRequest, ct);
             });
 
         group.MapGet("/v1/models", async (

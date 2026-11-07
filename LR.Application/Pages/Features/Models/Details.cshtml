@@ -14,7 +14,13 @@
 
 <div class="max-w-4xl mx-auto space-y-6">
     <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-text-primary">@Model.LocalModel.Name</h1>
+        <div class="flex items-center gap-3 min-w-0">
+            <h1 class="text-2xl font-bold text-text-primary truncate">@Model.LocalModel.Name</h1>
+            <partial name="_ModelTypeBadge" model="@(new LR.Application.Pages.Features.Models.ModelTypeBadgeViewModel(
+                LR.Core.Services.ModelKindClassifier.Classify(Model.LocalModel),
+                LR.Core.Services.ModelKindClassifier.DetailedLabel(Model.LocalModel),
+                Model.LocalModel.DecisionType))" />
+        </div>
         <a href="/Features/Models/Index" class="px-4 py-2 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all text-sm font-medium">
             Back to Models
         </a>
@@ -58,6 +64,14 @@
             <div><dt class="text-text-secondary">Head Count</dt><dd class="text-text-primary">@(Model.LocalModel.HeadCount?.ToString() ?? "—")</dd></div>
             <div><dt class="text-text-secondary">KV Head Count</dt><dd class="text-text-primary">@(Model.LocalModel.KvHeadCount?.ToString() ?? "—")</dd></div>
             <div><dt class="text-text-secondary">RoPE Freq Base</dt><dd class="text-text-primary">@(Model.LocalModel.RopeFreqBase?.ToString() ?? "—")</dd></div>
+            @if (!string.IsNullOrEmpty(Model.LocalModel.DecisionType))
+            {
+                <div><dt class="text-text-secondary">Decision Type</dt><dd class="text-text-primary font-mono">@Model.LocalModel.DecisionType</dd></div>
+            }
+            @if (Model.LocalModel.PoolingType is { } pooling)
+            {
+                <div><dt class="text-text-secondary">Pooling Type</dt><dd class="text-text-primary">@(pooling switch { 0 => "none", 1 => "mean", 2 => "cls", 3 => "last", 4 => "rank", _ => pooling.ToString() })</dd></div>
+            }
             <div><dt class="text-text-secondary">BOS / EOS Token</dt><dd class="text-text-primary">@(Model.LocalModel.BosTokenId?.ToString() ?? "—") / @(Model.LocalModel.EosTokenId?.ToString() ?? "—")</dd></div>
         </dl>
 

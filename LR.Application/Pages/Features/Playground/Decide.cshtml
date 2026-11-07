@@ -1,0 +1,643 @@
+@page
+@model LR.Application.Pages.Features.Playground.DecideModel
+@{
+    ViewData["Title"] = "Playground";
+    var fieldClass = "w-full bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-1.5 text-sm";
+    var labelClass = "block text-xs font-medium text-text-secondary mb-1";
+    var ghostBtn = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-600 text-text-secondary hover:text-neon-cyan hover:border-neon-cyan transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-text-secondary disabled:hover:border-gray-600";
+    var cardClass = "bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3";
+    var headingClass = "text-sm font-semibold text-neon-cyan uppercase tracking-wider";
+}
+
+<form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
+
+<!-- Same frame as the chat Playground: results scroll on their own, composer and questions stay put. -->
+<div class="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-7rem)]">
+
+    <section class="flex-1 min-w-0 flex flex-col bg-cyber-card rounded-xl border border-gray-700/30 min-h-[70vh]" aria-label="Decide">
+
+        <div class="flex items-start gap-4 px-4 py-3 border-b border-gray-700/30">
+            <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                    <label for="dcPreset" class="sr-only">Preset</label>
+                    <select id="dcPreset" class="bg-cyber-surface text-text-primary border border-gray-600 rounded-lg pl-3 pr-8 py-1.5 text-sm font-medium max-w-[16rem]">
+                        <optgroup label="Decision">
+                            @foreach (var preset in Model.Presets)
+                            {
+                                <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
+                            }
+                        </optgroup>
+                        <!-- Picking one of these switches to the chat Playground or the Generate page -->
+                        @if (Model.ChatPresets.Any())
+                        {
+                            <optgroup label="Chat">
+                                @foreach (var preset in Model.ChatPresets)
+                                {
+                                    <option value="@preset.Id" data-switch="/Features/Playground/Index">@preset.Name</option>
+                                }
+                            </optgroup>
+                        }
+                        @if (Model.ImagePresets.Any())
+                        {
+                            <optgroup label="Image &amp; video">
+                                @foreach (var preset in Model.ImagePresets)
+                                {
+                                    <option value="@preset.Id" data-switch="/Features/Playground/Generate">@preset.Name</option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                    <span id="dcPresetStatus" class="inline-flex items-center gap-1.5 text-xs whitespace-nowrap"></span>
+                    <button type="button" id="dcLoad" class="hidden text-xs px-2.5 py-1 rounded-md border border-tint-magenta text-neon-magenta hover:tint-magenta transition-colors disabled:opacity-50"
+                            title="Load this preset's model now, so the first request isn't a cold start">Load model</button>
+                </div>
+                <p id="dcPresetDetails" class="text-xs text-text-secondary truncate mt-1"></p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+                <button type="button" id="dcExample" class="@ghostBtn" title="Replace the state and questions with an example">Example</button>
+                <button type="button" id="dcClear" class="@ghostBtn" title="Remove this session's results">Clear</button>
+            </div>
+        </div>
+
+        <div id="dcFeed" class="flex-1 overflow-y-auto px-5 py-5 space-y-5" aria-live="polite">
+            <div id="dcEmpty" class="h-full flex flex-col items-center justify-center text-center gap-2 text-text-secondary">
+                <span class="text-4xl" aria-hidden="true">⚖️</span>
+                @if (!Model.Presets.Any())
+                {
+                    <p class="text-sm max-w-md">
+                        No decision presets yet. Import a decision model (e.g. <span class="font-mono">ggml-org/Laya-GGUF</span>) on the
+                        <a href="/Features/Models?type=decision" class="text-neon-cyan underline">Models page</a>, then create a preset for it on a llama.cpp server.
+                    </p>
+                }
+                else
+                {
+                    <p class="text-lg font-semibold text-text-primary">Ask typed questions about a state</p>
+                    <p class="text-sm max-w-md">
+                        A decision model doesn't write an answer. It scores each option in one pass: <span class="font-mono">choice</span> picks an option,
+                        <span class="font-mono">score</span> rates on a scale, <span class="font-mono">noul</span> gives the probability of yes.
+                        Build the questions on the right, or load the example.
+                    </p>
+                }
+            </div>
+        </div>
+
+        <form id="dcForm" hx-boost="false" class="p-4 border-t border-gray-700/30 space-y-2">
+            <div class="bg-cyber-surface border border-gray-600 rounded-xl px-3 py-2 focus-within:border-tint-cyan transition-colors space-y-2">
+                <div class="flex items-end gap-2">
+                    <label for="dcState" class="sr-only">State</label>
+                    <textarea id="dcState" rows="3" placeholder="The state to evaluate, e.g. a customer message, a document, a transcript…"
+                              class="flex-1 bg-transparent text-text-primary text-sm resize-none outline-none focus-visible:!outline-none py-1.5 max-h-72 overflow-y-auto"></textarea>
+                    <button type="submit" id="dcGo" class="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium tint-cyan-20 text-neon-cyan border border-neon-cyan hover:tint-cyan-30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                        <span id="dcGoLabel">Decide</span>
+                    </button>
+                </div>
+                <div id="dcImages" class="flex flex-wrap gap-2 empty:hidden"></div>
+            </div>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-text-secondary">
+                <label class="inline-flex items-center gap-1.5 cursor-pointer" title="Send the state as parsed JSON (an object, an array, or chat messages) instead of a string">
+                    <input type="checkbox" id="dcStateJson" class="accent-neon-cyan" /> State is JSON
+                </label>
+                <label class="inline-flex items-center gap-1.5 cursor-pointer hover:text-neon-cyan" title="Image input needs a model that supports it and its projector (--mmproj)">
+                    <input type="file" id="dcFiles" accept="image/*,audio/*" multiple class="sr-only" />
+                    <span aria-hidden="true">📎</span> Attach images
+                </label>
+                <span><kbd class="font-mono">Ctrl+Enter</kbd> to decide · <kbd class="font-mono">Esc</kbd> to stop</span>
+                <span id="dcError" class="text-neon-red" role="alert"></span>
+            </div>
+        </form>
+    </section>
+
+    <aside class="w-full lg:w-96 shrink-0 flex flex-col gap-4 lg:overflow-y-auto" aria-label="Questions">
+        <div class="@cardClass">
+            <div class="flex items-center justify-between">
+                <h2 class="@headingClass">Questions</h2>
+                <button type="button" id="dcAddQuestion" class="text-xs text-text-secondary hover:text-neon-cyan underline">+ Add question</button>
+            </div>
+            <p class="text-xs text-text-secondary -mt-1">Each question is answered on its own; clef models answer them together.</p>
+            <div id="dcQuestions" class="space-y-3"></div>
+        </div>
+
+        <div class="@cardClass">
+            <div class="flex items-center justify-between">
+                <h2 class="@headingClass">Request</h2>
+                <div class="flex items-center gap-3">
+                    <button type="button" id="dcApplyJson" class="hidden text-xs text-neon-cyan underline" title="Load this JSON into the state and questions">Apply</button>
+                    <button type="button" id="dcCopyCurl" class="text-xs text-text-secondary hover:text-neon-cyan underline" title="Copy a curl command for the routing API">Copy curl</button>
+                </div>
+            </div>
+            <label for="dcJson" class="sr-only">Request JSON</label>
+            <textarea id="dcJson" rows="10" spellcheck="false"
+                      class="w-full bg-cyber-bg-dark text-text-primary border border-gray-700/50 rounded-lg px-3 py-2 text-xs font-mono resize-y"></textarea>
+            <p class="text-xs text-text-secondary">
+                What's sent to <span class="font-mono">POST /v1/systemone</span>. Edit it and press Apply to load a request into the builder.
+                Attached images are left out here.
+            </p>
+        </div>
+    </aside>
+</div>
+
+<script>
+// IIFE: this script re-runs on every htmx-boosted navigation to this page.
+(function () {
+const $ = id => document.getElementById(id);
+const feed = $('dcFeed');
+const presetSelect = $('dcPreset');
+const stateEl = $('dcState');
+const stateJsonEl = $('dcStateJson');
+const jsonEl = $('dcJson');
+const goBtn = $('dcGo');
+
+const DRAFT_KEY = 'playground.decide.draft';
+const ROUTING_PORT = @(Model.RoutingPort);
+const TYPES = ['choice', 'score', 'noul'];
+const TYPE_HINTS = {
+    choice: 'Pick one option. Descriptions are optional.',
+    score: 'Rate on a scale of 2 to 10 levels, lowest first.',
+    noul: 'The probability that the answer is true. Descriptions are optional.',
+};
+const EXAMPLE = {
+    state: 'Customer message: I was charged twice for my order last week and nobody has replied.',
+    questions: {
+        route: { type: 'choice', instructions: 'Which team should handle this?', criteria: { billing: null, shipping: null, technical: null } },
+        angry: { type: 'noul', instructions: 'Is the customer angry?' },
+        urgency: { type: 'score', instructions: 'How urgent is this?', criteria: ['can wait', 'this week', 'today', 'right now'] },
+    },
+};
+
+let questions = [];   // [{ id, type, instructions, options: [{ name, desc }], levels: [string], yes, no }]
+let files = [];       // [{ name, url }] data URLs; not kept across reloads
+let presetState = null;
+let busy = false;
+let abortController = null;
+let loadPoll = null;
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+const fmtMs = ms => ms == null ? '—' : ms >= 10000 ? `${(ms / 1000).toFixed(1)} s` : ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${Math.round(ms)} ms`;
+const pct = p => typeof p === 'number' ? `${(p * 100).toFixed(p >= 0.995 || p < 0.001 ? 2 : 1)}%` : '—';
+function chip(label, value, title) {
+    return `<span class="inline-flex items-baseline gap-1 px-2 py-0.5 rounded-md bg-gray-800/30 border border-gray-700/40"${title ? ` title="${esc(title)}"` : ''}>` +
+           `<span class="text-text-secondary">${esc(label)}</span><span class="font-mono text-text-primary">${esc(value)}</span></span>`;
+}
+const readAsDataUrl = file => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+});
+
+// ── Questions model ⇄ request JSON ──
+function newQuestion(type = 'choice') {
+    const taken = new Set(questions.map(q => q.id));
+    let n = questions.length + 1;
+    while (taken.has(`q${n}`)) n++;
+    return { id: `q${n}`, type, instructions: '', options: [{ name: '', desc: '' }, { name: '', desc: '' }], levels: ['', ''], yes: '', no: '' };
+}
+
+function fromRequest(req) {
+    if (!req || typeof req !== 'object' || !req.questions || typeof req.questions !== 'object') throw new Error("The JSON needs a 'questions' object.");
+    if (typeof req.state === 'string') { stateEl.value = req.state; stateJsonEl.checked = false; }
+    else if (req.state !== undefined) { stateEl.value = JSON.stringify(req.state, null, 2); stateJsonEl.checked = true; }
+    questions = Object.entries(req.questions).map(([id, q]) => {
+        const type = TYPES.includes(q?.type) ? q.type : 'choice';
+        const base = { id, type, instructions: typeof q?.instructions === 'string' ? q.instructions : JSON.stringify(q?.instructions ?? ''),
+                       options: [{ name: '', desc: '' }, { name: '', desc: '' }], levels: ['', ''], yes: '', no: '' };
+        const c = q?.criteria;
+        if (type === 'choice' && c && typeof c === 'object') base.options = Object.entries(c).map(([name, desc]) => ({ name, desc: desc ?? '' }));
+        if (type === 'score' && Array.isArray(c)) base.levels = c.map(String);
+        if (type === 'noul' && c && typeof c === 'object') { base.yes = c.true ?? ''; base.no = c.false ?? ''; }
+        return base;
+    });
+}
+
+function buildState() {
+    const text = stateEl.value;
+    if (!stateJsonEl.checked) return text;
+    try { return JSON.parse(text); }
+    catch { throw new Error('The state is marked as JSON but does not parse.'); }
+}
+
+function buildQuestions() {
+    const out = {};
+    for (const q of questions) {
+        const id = q.id.trim();
+        if (!id) throw new Error('Every question needs an id.');
+        if (out[id]) throw new Error(`Two questions share the id '${id}'.`);
+        const entry = { type: q.type, instructions: q.instructions };
+        if (q.type === 'choice') {
+            const opts = q.options.filter(o => o.name.trim());
+            if (opts.length < 2) throw new Error(`'${id}' needs at least 2 options.`);
+            entry.criteria = Object.fromEntries(opts.map(o => [o.name.trim(), o.desc.trim() || null]));
+        } else if (q.type === 'score') {
+            const levels = q.levels.map(l => l.trim()).filter(Boolean);
+            if (levels.length < 2 || levels.length > 10) throw new Error(`'${id}' needs 2 to 10 levels.`);
+            entry.criteria = levels;
+        } else if (q.yes.trim() || q.no.trim()) {
+            entry.criteria = { true: q.yes.trim() || null, false: q.no.trim() || null };
+        }
+        out[id] = entry;
+    }
+    if (!Object.keys(out).length) throw new Error('Add at least one question.');
+    return out;
+}
+
+function buildRequest({ withFiles = true } = {}) {
+    const req = { model: presetSelect.selectedOptions[0]?.dataset.name ?? '', state: buildState(), questions: buildQuestions() };
+    if (withFiles && files.length) req.files = files.map(f => f.url);
+    return req;
+}
+
+// The JSON panel follows the builder until it's edited by hand; then Apply loads it back.
+let jsonDirty = false;
+function syncJson() {
+    if (jsonDirty) return;
+    try {
+        const req = buildRequest({ withFiles: false });
+        if (files.length) req.files = files.map(f => `<${f.name}>`);
+        jsonEl.value = JSON.stringify(req, null, 2);
+    } catch (e) {
+        jsonEl.value = `// ${e.message}`;
+    }
+}
+function setJsonDirty(dirty) {
+    jsonDirty = dirty;
+    $('dcApplyJson').classList.toggle('hidden', !dirty);
+    if (!dirty) syncJson();
+}
+
+// ── Draft persistence (per browser; attached images aren't kept) ──
+function saveDraft() {
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ preset: presetSelect.value, state: stateEl.value, stateJson: stateJsonEl.checked, questions })); } catch { }
+}
+function loadDraft() {
+    let d = null;
+    try { d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { }
+    if (d?.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${d.preset}"]:not([data-switch])`))
+        presetSelect.value = d.preset;
+    if (Array.isArray(d?.questions) && d.questions.length) {
+        stateEl.value = d.state ?? '';
+        stateJsonEl.checked = !!d.stateJson;
+        questions = d.questions;
+    } else {
+        fromRequest(EXAMPLE);
+    }
+}
+function changed() { saveDraft(); syncJson(); setBusy(busy); }
+
+// ── Question editors ──
+function renderQuestions() {
+    const box = $('dcQuestions');
+    box.innerHTML = questions.map((q, i) => {
+        let criteria = '';
+        if (q.type === 'choice') {
+            criteria = q.options.map((o, j) => `
+                <div class="flex gap-1.5">
+                    <input data-q="${i}" data-opt="${j}" data-k="name" value="${esc(o.name)}" placeholder="option" aria-label="Option ${j + 1}" class="dc-in w-28 shrink-0 bg-cyber-surface text-text-primary border border-gray-600 rounded-md px-2 py-1 text-xs font-mono" />
+                    <input data-q="${i}" data-opt="${j}" data-k="desc" value="${esc(o.desc)}" placeholder="description (optional)" aria-label="Option ${j + 1} description" class="dc-in min-w-0 flex-1 bg-cyber-surface text-text-primary border border-gray-600 rounded-md px-2 py-1 text-xs" />
+                    <button type="button" data-q="${i}" data-del-opt="${j}" class="text-text-secondary hover:text-neon-red text-xs px-1" aria-label="Remove option">✕</button>
+                </div>`).join('') +
+                `<button type="button" data-q="${i}" data-add="opt" class="text-xs text-text-secondary hover:text-neon-cyan underline">+ option</button>`;
+        } else if (q.type === 'score') {
+            criteria = q.levels.map((l, j) => `
+                <div class="flex items-center gap-1.5">
+                    <span class="w-5 text-right text-xs font-mono text-text-secondary">${j}</span>
+                    <input data-q="${i}" data-lvl="${j}" value="${esc(l)}" placeholder="${j === 0 ? 'lowest level' : 'level'}" aria-label="Level ${j}" class="dc-in min-w-0 flex-1 bg-cyber-surface text-text-primary border border-gray-600 rounded-md px-2 py-1 text-xs" />
+                    <button type="button" data-q="${i}" data-del-lvl="${j}" class="text-text-secondary hover:text-neon-red text-xs px-1" aria-label="Remove level">✕</button>
+                </div>`).join('') +
+                (q.levels.length < 10 ? `<button type="button" data-q="${i}" data-add="lvl" class="text-xs text-text-secondary hover:text-neon-cyan underline">+ level</button>` : '');
+        } else {
+            criteria = `
+                <input data-q="${i}" data-k="yes" value="${esc(q.yes)}" placeholder="what true means (optional)" aria-label="True description" class="dc-in w-full bg-cyber-surface text-text-primary border border-gray-600 rounded-md px-2 py-1 text-xs" />
+                <input data-q="${i}" data-k="no" value="${esc(q.no)}" placeholder="what false means (optional)" aria-label="False description" class="dc-in w-full bg-cyber-surface text-text-primary border border-gray-600 rounded-md px-2 py-1 text-xs" />`;
+        }
+        return `
+            <div class="rounded-lg border border-gray-700/40 bg-gray-800/20 p-3 space-y-2">
+                <div class="flex items-center gap-1.5">
+                    <input data-q="${i}" data-k="id" value="${esc(q.id)}" aria-label="Question id" class="dc-in w-24 bg-cyber-surface text-text-primary border border-gray-600 rounded-md px-2 py-1 text-xs font-mono" />
+                    <select data-q="${i}" data-k="type" aria-label="Question type" class="dc-type bg-cyber-surface text-text-primary border border-gray-600 rounded-md px-2 py-1 text-xs">
+                        ${TYPES.map(t => `<option value="${t}"${t === q.type ? ' selected' : ''}>${t}</option>`).join('')}
+                    </select>
+                    <span class="flex-1"></span>
+                    <button type="button" data-del-q="${i}" class="text-text-secondary hover:text-neon-red text-xs px-1" aria-label="Remove question" title="Remove question">✕</button>
+                </div>
+                <textarea data-q="${i}" data-k="instructions" rows="2" placeholder="The question, e.g. Which team should handle this?" aria-label="Instructions"
+                          class="dc-in w-full bg-cyber-surface text-text-primary border border-gray-600 rounded-md px-2 py-1 text-xs resize-y">${esc(q.instructions)}</textarea>
+                <p class="text-[11px] text-text-secondary">${TYPE_HINTS[q.type]}</p>
+                <div class="space-y-1.5">${criteria}</div>
+            </div>`;
+    }).join('') || '<p class="text-xs text-text-secondary">No questions yet.</p>';
+}
+
+$('dcQuestions').addEventListener('input', e => {
+    const el = e.target;
+    if (!el.classList.contains('dc-in')) return;
+    const q = questions[+el.dataset.q];
+    if (el.dataset.opt !== undefined) q.options[+el.dataset.opt][el.dataset.k] = el.value;
+    else if (el.dataset.lvl !== undefined) q.levels[+el.dataset.lvl] = el.value;
+    else q[el.dataset.k] = el.value;
+    changed();
+});
+$('dcQuestions').addEventListener('change', e => {
+    if (!e.target.classList.contains('dc-type')) return;
+    questions[+e.target.dataset.q].type = e.target.value;
+    renderQuestions(); changed();
+});
+$('dcQuestions').addEventListener('click', e => {
+    const el = e.target.closest('button');
+    if (!el) return;
+    const q = questions[+el.dataset.q];
+    if (el.dataset.delQ !== undefined) questions.splice(+el.dataset.delQ, 1);
+    else if (el.dataset.delOpt !== undefined) q.options.splice(+el.dataset.delOpt, 1);
+    else if (el.dataset.delLvl !== undefined) q.levels.splice(+el.dataset.delLvl, 1);
+    else if (el.dataset.add === 'opt') q.options.push({ name: '', desc: '' });
+    else if (el.dataset.add === 'lvl') q.levels.push('');
+    else return;
+    renderQuestions(); changed();
+});
+$('dcAddQuestion').addEventListener('click', () => { questions.push(newQuestion()); renderQuestions(); changed(); });
+
+// ── Attachments ──
+function renderFiles() {
+    $('dcImages').innerHTML = files.map((f, i) => {
+        const media = f.url.startsWith('data:image/')
+            ? `<img src="${f.url}" alt="${esc(f.name)}" class="h-14 rounded-md border border-gray-700/50" />`
+            : `<span class="inline-flex items-center h-14 px-3 rounded-md border border-gray-700/50 text-xs text-text-secondary">🔊 ${esc(f.name)}</span>`;
+        return `<div class="relative">${media}<button type="button" data-del-file="${i}" class="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-cyber-surface border border-gray-600 text-text-secondary hover:text-neon-red text-[10px]" aria-label="Remove ${esc(f.name)}">✕</button></div>`;
+    }).join('');
+}
+$('dcFiles').addEventListener('change', async e => {
+    for (const file of e.target.files) {
+        try { files.push({ name: file.name, url: await readAsDataUrl(file) }); } catch { }
+    }
+    e.target.value = '';
+    renderFiles(); syncJson();
+});
+$('dcImages').addEventListener('click', e => {
+    const el = e.target.closest('[data-del-file]');
+    if (!el) return;
+    files.splice(+el.dataset.delFile, 1);
+    renderFiles(); syncJson();
+});
+
+// ── Preset state: load status ──
+async function fetchPresetState() {
+    try {
+        const resp = await fetch('/api/playground/decision/presets');
+        const presets = await resp.json();
+        return presets.find(p => p.id === presetSelect.value) ?? null;
+    } catch { return null; }
+}
+
+function applyPresetState(p) {
+    presetState = p;
+    const status = $('dcPresetStatus');
+    const loadBtn = $('dcLoad');
+    if (!p) { status.textContent = ''; loadBtn.classList.add('hidden'); $('dcPresetDetails').textContent = ''; return; }
+
+    if (p.loaded) {
+        status.innerHTML = '<span class="w-2 h-2 rounded-full bg-neon-green"></span><span class="text-neon-green">Loaded</span>';
+        loadBtn.classList.add('hidden');
+    } else if (p.serverStatus === 'Starting') {
+        status.innerHTML = '<span class="w-2 h-2 rounded-full bg-neon-magenta animate-pulse"></span><span class="text-neon-magenta">Loading…</span>';
+        loadBtn.classList.add('hidden');
+    } else {
+        status.innerHTML = '<span class="w-2 h-2 rounded-full border border-neon-magenta"></span><span class="text-text-secondary">Not loaded</span>';
+        loadBtn.classList.remove('hidden');
+        loadBtn.disabled = busy;
+    }
+    status.title = p.loaded ? `Running on ${p.serverName}` : `The first request will include loading the model on ${p.serverName}`;
+    $('dcPresetDetails').textContent = [p.serverName, p.decisionType, p.parameterSize, p.quantization, p.vision ? 'image input' : null].filter(Boolean).join(' · ');
+}
+
+async function refreshPresetState() {
+    if (!presetSelect.value) { applyPresetState(null); return null; }
+    const p = await fetchPresetState();
+    applyPresetState(p);
+    return p;
+}
+
+async function loadModel() {
+    const loadBtn = $('dcLoad');
+    loadBtn.disabled = true;
+    const form = new FormData();
+    form.append('PresetId', presetSelect.value);
+    form.append('Command', 'Start');
+    form.append('__RequestVerificationToken', document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '');
+    try {
+        const resp = await fetch('/Features/Presets/Actions', { method: 'POST', body: form });
+        const result = await resp.json();
+        if (!resp.ok || !result.success) { alert(result.message || 'Failed to load the model.'); loadBtn.disabled = false; return; }
+    } catch (e) { alert('Failed to load the model: ' + e.message); loadBtn.disabled = false; return; }
+
+    clearInterval(loadPoll);
+    const presetId = presetSelect.value;
+    const started = Date.now();
+    applyPresetState({ ...presetState, serverStatus: 'Starting', loaded: false });
+    loadPoll = setInterval(async () => {
+        if (presetSelect.value !== presetId || !document.body.contains(loadBtn)) { clearInterval(loadPoll); return; }
+        const p = await fetchPresetState();
+        if (!p) return;
+        if (p.loaded || p.serverStatus === 'Error' || Date.now() - started > 10 * 60 * 1000) {
+            clearInterval(loadPoll);
+            await refreshPresetState();
+            if (p.serverStatus === 'Error') alert('The server failed to start — check its logs on the Servers page.');
+        } else {
+            applyPresetState({ ...p, serverStatus: 'Starting' });
+        }
+    }, 2000);
+}
+
+// ── Results ──
+function bar(label, p, { top = false, title = '' } = {}) {
+    const width = Math.max(0, Math.min(1, p ?? 0)) * 100;
+    return `
+        <div class="grid grid-cols-[minmax(0,10rem)_1fr_4rem] items-center gap-3 text-sm"${title ? ` title="${esc(title)}"` : ''}>
+            <span class="truncate ${top ? 'text-text-primary font-medium' : 'text-text-secondary'}">${label}</span>
+            <span class="h-2 rounded-full bg-gray-700/40 overflow-hidden"><span class="block h-full rounded-full ${top ? 'bg-neon-cyan' : 'bg-gray-500/60'}" style="width:${width}%"></span></span>
+            <span class="text-right font-mono text-xs ${top ? 'text-neon-cyan' : 'text-text-secondary'}">${pct(p)}</span>
+        </div>`;
+}
+
+function renderAnswer(id, question, answer) {
+    const type = answer?.type ?? question?.type;
+    const head = `
+        <div class="flex flex-wrap items-baseline gap-2">
+            <span class="font-mono text-sm text-text-primary">${esc(id)}</span>
+            <span class="text-[11px] px-1.5 py-0.5 rounded border border-gray-600 text-text-secondary">${esc(type)}</span>
+            ${question?.instructions ? `<span class="text-xs text-text-secondary">${esc(typeof question.instructions === 'string' ? question.instructions : JSON.stringify(question.instructions))}</span>` : ''}
+        </div>`;
+    if (!answer) return `<div class="space-y-2">${head}<p class="text-xs text-neon-red">No answer returned.</p></div>`;
+
+    let body = '';
+    if (type === 'choice') {
+        const entries = Object.entries(answer.probabilities ?? {}).sort((a, b) => b[1] - a[1]);
+        const descs = question?.criteria ?? {};
+        body = entries.map(([opt, p]) => bar(esc(opt), p, { top: opt === answer.choice, title: descs[opt] ?? '' })).join('');
+        body += `<div class="flex flex-wrap gap-2 text-xs pt-1">${chip('choice', answer.choice)}${answer.confidence != null ? chip('confidence', answer.confidence.toFixed(3), '0 means every option is equally likely') : ''}</div>`;
+    } else if (type === 'score') {
+        const legend = answer.legend ?? {};
+        const probs = answer.probabilities ?? {};
+        const levels = Object.keys(legend).length ? Object.keys(legend) : Object.keys(probs);
+        const best = levels.reduce((a, b) => (probs[b] ?? 0) > (probs[a] ?? 0) ? b : a, levels[0]);
+        body = levels.map(l => bar(`<span class="font-mono text-xs mr-1">${esc(l)}</span>${esc(legend[l] ?? '')}`, probs[l], { top: l === best })).join('');
+        const max = levels.length - 1;
+        body += `<div class="flex flex-wrap gap-2 text-xs pt-1">${chip('score', `${(answer.score ?? 0).toFixed(2)} / ${max}`, 'The expected level, weighted by probability')}${answer.confidence != null ? chip('confidence', answer.confidence.toFixed(3)) : ''}</div>`;
+    } else {
+        const p = answer.noul;
+        const yes = question?.criteria?.true ? `true — ${question.criteria.true}` : 'true';
+        const no = question?.criteria?.false ? `false — ${question.criteria.false}` : 'false';
+        body = bar(esc(yes), p, { top: p >= 0.5 }) + bar(esc(no), p == null ? null : 1 - p, { top: p < 0.5 });
+    }
+    return `<div class="space-y-2">${head}<div class="space-y-1.5">${body}</div></div>`;
+}
+
+function renderRun(card, req, result) {
+    const { ok, body, ms, coldStart } = result;
+    const stateText = typeof req.state === 'string' ? req.state : JSON.stringify(req.state, null, 2);
+    const meta = [
+        chip('time', fmtMs(ms), coldStart ? 'Includes loading the model' : ''),
+        ok && body?.usage?.input_tokens != null ? chip('input', `${body.usage.input_tokens} tok`) : '',
+        ok && body?.model ? chip('model', body.model) : '',
+        req.files?.length ? chip('files', req.files.length) : '',
+        coldStart ? '<span class="text-neon-magenta">incl. model load</span>' : '',
+    ].join('');
+    const answers = ok
+        ? Object.entries(req.questions).map(([id, q]) => renderAnswer(id, q, body?.answers?.[id])).join('<hr class="border-gray-700/30" />')
+        : `<p class="text-sm text-neon-red break-words">${esc(body?.error?.message ?? (typeof body === 'string' ? body : 'Request failed.'))}</p>`;
+    const reqShown = { ...req, files: req.files?.map((_, i) => `<file ${i + 1}>`) };
+    if (!reqShown.files) delete reqShown.files;
+
+    card.innerHTML = `
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+            <span class="text-text-primary font-medium">${esc(req.model)}</span>${meta}
+            <span class="flex-1"></span>
+            <button type="button" class="dc-reuse text-text-secondary hover:text-neon-cyan underline">Edit &amp; rerun</button>
+        </div>
+        <details class="text-xs">
+            <summary class="cursor-pointer text-text-secondary hover:text-text-primary truncate">State: ${esc(stateText.slice(0, 140))}${stateText.length > 140 ? '…' : ''}</summary>
+            <pre class="mt-2 whitespace-pre-wrap break-words bg-cyber-bg-dark rounded-lg p-3 text-text-primary">${esc(stateText)}</pre>
+        </details>
+        <div class="space-y-4">${answers}</div>
+        <details class="text-xs">
+            <summary class="cursor-pointer text-text-secondary hover:text-text-primary">Raw request &amp; response</summary>
+            <div class="grid md:grid-cols-2 gap-2 mt-2">
+                <pre class="overflow-x-auto bg-cyber-bg-dark rounded-lg p-3 text-text-primary">${esc(JSON.stringify(reqShown, null, 2))}</pre>
+                <pre class="overflow-x-auto bg-cyber-bg-dark rounded-lg p-3 text-text-primary">${esc(typeof body === 'string' ? body : JSON.stringify(body, null, 2))}</pre>
+            </div>
+        </details>`;
+    card.querySelector('.dc-reuse').addEventListener('click', () => {
+        fromRequest(req);
+        renderQuestions(); setJsonDirty(false); changed();
+        stateEl.focus();
+    });
+}
+
+function setBusy(b) {
+    busy = b;
+    const hasPreset = !!presetSelect.selectedOptions[0]?.dataset.name;
+    goBtn.disabled = !b && (!hasPreset || !questions.length);
+    $('dcGoLabel').textContent = b ? 'Stop' : 'Decide';
+    $('dcLoad').disabled = b;
+    $('dcExample').disabled = b;
+    $('dcClear').disabled = b;
+}
+
+async function decide() {
+    if (busy) return;
+    $('dcError').textContent = '';
+    let req;
+    try { req = buildRequest(); }
+    catch (e) { $('dcError').textContent = e.message; return; }
+
+    $('dcEmpty')?.remove();
+    const card = document.createElement('article');
+    card.className = 'rounded-xl border border-gray-700/40 bg-gray-800/20 p-4 space-y-3';
+    card.innerHTML = '<p class="text-sm text-text-secondary animate-pulse">Scoring…</p>';
+    feed.appendChild(card);
+    card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+
+    const p = await fetchPresetState();
+    const coldStart = !!p && !p.loaded;
+    if (coldStart) card.innerHTML = '<p class="text-sm text-neon-magenta animate-pulse">Loading the model, then scoring…</p>';
+
+    abortController = new AbortController();
+    setBusy(true);
+    const started = performance.now();
+    let result;
+    try {
+        const resp = await fetch('/api/playground/decide', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req),
+            signal: abortController.signal,
+        });
+        const text = await resp.text();
+        let body;
+        try { body = JSON.parse(text); } catch { body = text; }
+        result = { ok: resp.ok && !!body?.answers, body, ms: performance.now() - started, coldStart };
+    } catch (e) {
+        result = { ok: false, body: { error: { message: e.name === 'AbortError' ? 'Stopped.' : e.message } }, ms: performance.now() - started, coldStart };
+    } finally {
+        abortController = null;
+        setBusy(false);
+    }
+    renderRun(card, req, result);
+    if (coldStart) refreshPresetState();
+}
+
+// ── Wiring ──
+let decisionPresetId = presetSelect.value;
+presetSelect.addEventListener('change', () => {
+    const target = presetSelect.selectedOptions[0]?.dataset.switch;
+    if (target) {
+        const id = presetSelect.value;
+        presetSelect.value = decisionPresetId; // so Back returns to the decision preset
+        location.href = target + '?presetId=' + encodeURIComponent(id);
+        return;
+    }
+    decisionPresetId = presetSelect.value;
+    clearInterval(loadPoll);
+    changed();
+    refreshPresetState();
+});
+$('dcLoad').addEventListener('click', loadModel);
+$('dcExample').addEventListener('click', () => { fromRequest(EXAMPLE); renderQuestions(); setJsonDirty(false); changed(); });
+$('dcClear').addEventListener('click', () => { if (!busy) feed.innerHTML = ''; });
+$('dcApplyJson').addEventListener('click', () => {
+    let req;
+    try { req = JSON.parse(jsonEl.value); fromRequest(req); }
+    catch (e) { $('dcError').textContent = 'Request JSON: ' + e.message; return; }
+    $('dcError').textContent = '';
+    renderQuestions(); setJsonDirty(false); changed();
+});
+jsonEl.addEventListener('input', () => setJsonDirty(true));
+$('dcCopyCurl').addEventListener('click', async () => {
+    let req;
+    try { req = buildRequest({ withFiles: false }); }
+    catch (e) { $('dcError').textContent = e.message; return; }
+    const url = `${location.protocol}//${location.hostname}:${ROUTING_PORT}/v1/systemone`;
+    const body = JSON.stringify(req).replace(/'/g, `'\\''`);
+    const cmd = `curl ${url} \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer $LLM_ROUTER_KEY" \\\n  -d '${body}'`;
+    try { await navigator.clipboard.writeText(cmd); $('dcCopyCurl').textContent = 'Copied'; setTimeout(() => $('dcCopyCurl').textContent = 'Copy curl', 1500); }
+    catch { prompt('Copy this command:', cmd); }
+});
+stateEl.addEventListener('input', changed);
+stateJsonEl.addEventListener('change', changed);
+
+$('dcForm').addEventListener('submit', e => { e.preventDefault(); decide(); });
+goBtn.addEventListener('click', e => { if (busy) { e.preventDefault(); abortController?.abort(); } });
+stateEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); $('dcForm').requestSubmit(); }
+});
+document.addEventListener('keydown', function onEsc(e) {
+    if (!document.body.contains(feed)) { document.removeEventListener('keydown', onEsc); return; }
+    if (e.key === 'Escape' && busy) abortController?.abort();
+});
+
+loadDraft();
+renderQuestions();
+syncJson();
+setBusy(false);
+refreshPresetState();
+stateEl.focus();
+})();
+</script>

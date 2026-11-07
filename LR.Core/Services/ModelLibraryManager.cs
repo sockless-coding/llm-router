@@ -176,6 +176,8 @@ public class ModelLibraryManager : IModelLibrary
         model.EosTokenId = metadata.EosTokenId;
         model.BosTokenId = metadata.BosTokenId;
         model.ChatTemplate = metadata.ChatTemplate;
+        model.DecisionType = metadata.DecisionType;
+        model.PoolingType = metadata.PoolingType;
         model.LicenseText = metadata.LicenseText;
         model.AllKvPairsJson = metadata.AllKvPairs is not null
             ? JsonSerializer.Serialize(metadata.AllKvPairs)

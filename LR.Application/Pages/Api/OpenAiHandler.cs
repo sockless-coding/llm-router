@@ -88,7 +88,7 @@ public class OpenAiHandler : IProtocolHandler
     {
         // Chat models only — the capabilities shape (context, tools, vision) is meaningless for image models.
         var presets = (await _presetManager.GetAllPresetsAsync())
-            .OfModality(await _serverManager.GetAllInstancesAsync(), _engines, EngineModality.Text);
+            .ForChat(await _serverManager.GetAllInstancesAsync(), _engines);
         var models = _apiKeyContext.FilterAllowed(presets).Select(BuildCapabilities).ToList();
 
         return new { data = models };

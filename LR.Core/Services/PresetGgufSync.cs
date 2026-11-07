@@ -20,6 +20,7 @@ internal static class PresetGgufSync
         preset.GgufEmbeddingLength = model.EmbeddingLength;
         preset.GgufRopeFreqBase = model.RopeFreqBase;
         preset.GgufChatTemplate = model.ChatTemplate;
+        preset.GgufDecisionType = model.DecisionType;
 
         // Only fill in a detected projector when the preset hasn't been given one explicitly —
         // never override a user's own Mmproj/MmprojUrl choice (e.g. picking a different quant,

@@ -106,6 +106,22 @@ public class GgufMetadata
     public string? ChatTemplate { get; set; }
 
     /// <summary>
+    /// Decision-model type (e.g. "openjev", "laya", "kev") — set only on native decision models,
+    /// which llama-server answers through <c>/v1/systemone</c> instead of generating text.
+    /// From {arch}.decision.type.
+    /// </summary>
+    [JsonPropertyName("decisionType")]
+    public string? DecisionType { get; set; }
+
+    /// <summary>
+    /// Pooling type the model was converted with (llama.cpp's <c>llama_pooling_type</c>: 0 none,
+    /// 1 mean, 2 cls, 3 last, 4 rank). Only embedding and reranking models write it.
+    /// From {arch}.pooling_type.
+    /// </summary>
+    [JsonPropertyName("poolingType")]
+    public int? PoolingType { get; set; }
+
+    /// <summary>
     /// License text from the GGUF file.
     /// From general.license (may be large).
     /// </summary>

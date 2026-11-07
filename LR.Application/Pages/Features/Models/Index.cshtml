@@ -87,11 +87,57 @@
 }
 else
 {
+    var tabBase = "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all";
+    var tabOn = "bg-neon-magenta/10 text-neon-magenta border-neon-magenta/30";
+    var tabOff = "text-text-secondary border-transparent hover:bg-gray-700/30 hover:text-text-primary";
+    <nav class="flex flex-wrap items-center gap-2 mb-4" aria-label="Filter models by type">
+        <a href="/Features/Models" class="@tabBase @(Model.TypeFilter is null ? tabOn : tabOff)" aria-current="@(Model.TypeFilter is null ? "page" : null)">
+            All <span class="text-xs opacity-70">@Model.ModelGroups.Count</span>
+        </a>
+        @foreach (var category in Enum.GetValues<ModelTypeCategory>())
+        {
+            var count = Model.CategoryCounts.GetValueOrDefault(category);
+            var active = Model.TypeFilter == category;
+            <a href="/Features/Models?type=@category.ToString().ToLowerInvariant()"
+               class="@tabBase @(active ? tabOn : tabOff) @(count == 0 && !active ? "opacity-50" : "")"
+               aria-current="@(active ? "page" : null)">
+                @ModelKindClassifier.Label(category) <span class="text-xs opacity-70">@count</span>
+            </a>
+        }
+    </nav>
+
+    @if (Model.TypeFilter == ModelTypeCategory.Decision)
+    {
+        <div class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-text-secondary">
+            Decision models score typed questions (<span class="font-mono">choice</span>, <span class="font-mono">score</span>, <span class="font-mono">noul</span>) about a
+            <span class="font-mono">state</span> and return probabilities instead of generating text. Run one with a llama.cpp preset and call
+            <span class="font-mono text-text-primary">POST /v1/systemone</span> with the preset's name as <span class="font-mono">model</span>.
+            Except for granite-switch, they don't answer chat requests, so they're left out of chat model listings.
+            <a href="/Features/Playground/Decide" class="text-neon-cyan underline">Try one in the Playground</a>.
+        </div>
+    }
+    else if (Model.TypeFilter == ModelTypeCategory.Embedding)
+    {
+        <div class="mb-4 rounded-lg border border-neon-green/20 bg-neon-green/5 px-4 py-3 text-sm text-text-secondary">
+            Embedding models answer <span class="font-mono text-text-primary">POST /v1/embeddings</span> and <span class="font-mono text-text-primary">/api/embed</span>.
+            Their preset needs embeddings enabled, with a pooling type other than <span class="font-mono">none</span>.
+        </div>
+    }
+
+    @if (!Model.VisibleGroups.Any())
+    {
+        <div class="text-center py-12 bg-cyber-card rounded-xl border border-gray-700/30">
+            <p class="text-text-secondary">No @ModelKindClassifier.Label(Model.TypeFilter!.Value).ToLowerInvariant() models registered.</p>
+        </div>
+    }
+    else
+    {
     <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden overflow-x-auto">
         <table class="w-full text-sm">
             <thead>
                 <tr class="border-b border-gray-700/50 bg-gray-800/30">
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Type</th>
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Source</th>
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Quant</th>
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Params</th>
@@ -104,7 +150,7 @@ else
             </thead>
             <tbody>
                 @{ var groupIndex = 0; }
-                @foreach (var group in Model.ModelGroups)
+                @foreach (var group in Model.VisibleGroups)
                 {
                     groupIndex++;
                     var groupDomId = $"grp-{groupIndex}";
@@ -122,7 +168,7 @@ else
                         var groupFolder = System.IO.Path.GetDirectoryName(group.AllModels.First().FilePath);
 
                         <tr class="border-b border-gray-700/30 bg-gray-800/30 hover:bg-gray-800/40 cursor-pointer select-none" onclick="toggleModelGroup('@groupDomId')">
-                            <td class="px-4 py-3" colspan="2">
+                            <td class="px-4 py-3">
                                 <span class="inline-flex items-center gap-2">
                                     <svg class="w-4 h-4 transition-transform" data-group-chevron="@groupDomId" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                                     <span class="text-text-primary font-medium">@ModelDisplayFormat.Truncate(group.DisplayName, 48)</span>
@@ -132,6 +178,10 @@ else
                                     }
                                 </span>
                             </td>
+                            <td class="px-4 py-3">
+                                <partial name="_ModelTypeBadge" model="@(new ModelTypeBadgeViewModel(group.Type, group.TypeLabel, group.DecisionType))" />
+                            </td>
+                            <td class="px-4 py-3"></td>
                             <td class="px-4 py-3 text-text-secondary">@quantLabel</td>
                             <td class="px-4 py-3 text-text-primary">@(group.ParameterSize ?? "—")</td>
                             <td class="px-4 py-3 text-right text-text-secondary">—</td>
@@ -176,6 +226,7 @@ else
                                 Indented = true,
                                 HiddenByDefault = true,
                                 GroupDomId = groupDomId,
+                                GroupType = group.Type,
                             })" />
                         }
                     }
@@ -191,6 +242,7 @@ else
             </tbody>
         </table>
     </div>
+    }
 }
 
 @section Scripts {

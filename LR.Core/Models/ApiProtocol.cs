@@ -19,4 +19,9 @@ public enum ApiProtocol
     /// Ollama API (e.g., /api/chat, /api/tags).
     /// </summary>
     Ollama = 2,
+
+    /// <summary>
+    /// TypeSafe/Jev-compatible System One decision API (<c>/v1/systemone</c>).
+    /// </summary>
+    SystemOne = 3,
 }

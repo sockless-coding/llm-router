@@ -70,7 +70,7 @@ public class OllamaHandler : IProtocolHandler
     {
         // Ollama has no image models — only chat presets are listed.
         var presets = (await _presetManager.GetAllPresetsAsync())
-            .OfModality(await _serverManager.GetAllInstancesAsync(), _engines, EngineModality.Text);
+            .ForChat(await _serverManager.GetAllInstancesAsync(), _engines);
         var models = _apiKeyContext.FilterAllowed(presets).Select(p =>
         {
             var architecture = p.GgufArchitecture ?? "llama";

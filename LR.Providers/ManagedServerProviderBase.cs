@@ -541,7 +541,9 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             if (doc.RootElement.ValueKind == JsonValueKind.Object
                 && doc.RootElement.TryGetProperty("usage", out var usage)
                 && usage.ValueKind == JsonValueKind.Object
-                && usage.TryGetProperty("prompt_tokens", out var promptTokens)
+                // prompt_tokens: OpenAI shapes (embeddings); input_tokens: /v1/systemone.
+                && (usage.TryGetProperty("prompt_tokens", out var promptTokens)
+                    || usage.TryGetProperty("input_tokens", out promptTokens))
                 && promptTokens.TryGetInt32(out var n))
             {
                 routeResponse.PromptTokensProcessed = n;

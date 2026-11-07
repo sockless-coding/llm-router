@@ -1,11 +1,12 @@
 using LR.Core.Models;
+using LR.Core.Services.EngineBuilds;
 
 namespace LR.Core.Services;
 
 /// <summary>
-/// What role a registered GGUF file plays. Most are runnable as a standalone chat model, but a
-/// multimodal projector (mmproj) only makes sense paired with a text model and shouldn't be
-/// presented to the user as its own top-level model.
+/// What a registered model file is for — which API serves it, or, for a companion file, what it
+/// gets paired with. Drives the Models page's type badges and filter tabs, and which library
+/// files are offered where (e.g. only projectors in a preset's mmproj picker).
 /// </summary>
 /// <remarks>
 /// A draft/MTP head for self-speculative decoding was previously guessed from a "mtp" substring
@@ -15,19 +16,60 @@ namespace LR.Core.Services;
 /// there's no GGUF metadata field that reliably distinguishes a real standalone MTP-head sidecar
 /// file either, so that guess was dropped rather than replaced with another unverified heuristic.
 /// </remarks>
-public enum ModelFileKind
+public enum ModelType
 {
-    Primary = 0,
-    MultimodalProjector = 1,
+    /// <summary>A text-generation model — chat/completions.</summary>
+    Chat = 0,
+    /// <summary>Pools a vector per input — <c>/v1/embeddings</c>.</summary>
+    Embedding = 1,
+    /// <summary>Scores query/document pairs — llama.cpp's rank pooling.</summary>
+    Reranker = 2,
+    /// <summary>A native decision model — <c>/v1/systemone</c>.</summary>
+    Decision = 3,
+    /// <summary>A diffusion checkpoint stable-diffusion.cpp runs — <c>/v1/images/*</c>.</summary>
+    Image = 4,
+    /// <summary>A multimodal projector (mmproj), paired with a chat or decision model.</summary>
+    Projector = 5,
+    /// <summary>A diffusion model's VAE, text encoder, TAESD or LoRA.</summary>
+    ImageComponent = 6,
+}
+
+/// <summary>The Models page's filter tabs: each <see cref="ModelType"/> files under one.</summary>
+public enum ModelTypeCategory
+{
+    Chat,
+    Embedding,
+    Decision,
+    Image,
 }
 
 /// <summary>
-/// Classifies a <see cref="LocalModel"/> file as a primary model or an auxiliary kind, from its
-/// GGUF architecture and filename — there's no dedicated GGUF metadata field for this.
+/// Classifies a <see cref="LocalModel"/> from its GGUF metadata and file name. The signals are the
+/// ones llama.cpp itself keys off: <c>general.architecture = clip</c> for a projector,
+/// <c>{arch}.decision.type</c> for a decision model, <c>{arch}.pooling_type</c> for an
+/// embedding/reranking model — plus <see cref="DiffusionModelGuide"/>'s file roles for the files
+/// stable-diffusion.cpp loads.
 /// </summary>
 public static class ModelKindClassifier
 {
-    public static ModelFileKind Classify(LocalModel model)
+    /// <summary>
+    /// llama.cpp's decision types whose model also generates text (llama-server reports
+    /// <c>["text", "decisions"]</c>); every other decision model only answers <c>/v1/systemone</c>.
+    /// </summary>
+    private static readonly HashSet<string> TextCapableDecisionTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "granite-switch",
+    };
+
+    private static readonly HashSet<string> DiffusionExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".safetensors", ".sft", ".ckpt", ".pt", ".pth",
+    };
+
+    // llama.cpp's llama_pooling_type: NONE = 0, MEAN = 1, CLS = 2, LAST = 3, RANK = 4.
+    private const int PoolingRank = 4;
+
+    public static ModelType Classify(LocalModel model)
     {
         var fileName = Path.GetFileName(model.FilePath);
 
@@ -35,15 +77,85 @@ public static class ModelKindClassifier
         // check catches sibling files whose metadata hasn't been (re-)read yet.
         if (string.Equals(model.Architecture, "clip", StringComparison.OrdinalIgnoreCase)
             || ContainsToken(fileName, "mmproj"))
-            return ModelFileKind.MultimodalProjector;
+            return ModelType.Projector;
 
-        return ModelFileKind.Primary;
+        if (!string.IsNullOrWhiteSpace(model.DecisionType))
+            return ModelType.Decision;
+
+        // llama.cpp only loads GGUF, so any other weights file is stable-diffusion.cpp's; a GGUF
+        // is when its architecture is a diffusion one (city96's converter).
+        var isDiffusion = DiffusionExtensions.Contains(Path.GetExtension(fileName))
+                          || DiffusionModelGuide.IsDiffusionArchitecture(model.Architecture);
+        var role = DiffusionModelGuide.ClassifyFile(model);
+        if (isDiffusion)
+            return role == DiffusionFileRole.Model ? ModelType.Image : ModelType.ImageComponent;
+
+        // A GGUF text encoder or VAE for a diffusion model (e.g. city96's t5-v1_1-xxl GGUF, or a
+        // Qwen LLM under a diffusers text_encoder/ folder) has an LLM architecture but isn't
+        // meant to be chatted with. LoRA stays out: a llama.cpp LoRA adapter is named alike.
+        if (role is DiffusionFileRole.Vae or DiffusionFileRole.ClipL or DiffusionFileRole.ClipG
+                 or DiffusionFileRole.T5xxl or DiffusionFileRole.Taesd or DiffusionFileRole.TextEncoder
+                 or DiffusionFileRole.Llm)
+            return ModelType.ImageComponent;
+
+        return model.PoolingType switch
+        {
+            PoolingRank => ModelType.Reranker,
+            > 0 => ModelType.Embedding,
+            _ => ModelType.Chat,
+        };
     }
 
-    public static string Label(ModelFileKind kind) => kind switch
+    /// <summary>Companion files that aren't run on their own and nest under the model they go with.</summary>
+    public static bool IsAuxiliary(ModelType type) => type is ModelType.Projector or ModelType.ImageComponent;
+
+    public static ModelTypeCategory CategoryOf(ModelType type) => type switch
     {
-        ModelFileKind.MultimodalProjector => "Projector",
-        _ => "Model",
+        ModelType.Embedding or ModelType.Reranker => ModelTypeCategory.Embedding,
+        ModelType.Decision => ModelTypeCategory.Decision,
+        ModelType.Image or ModelType.ImageComponent => ModelTypeCategory.Image,
+        _ => ModelTypeCategory.Chat,
+    };
+
+    /// <summary>
+    /// True when a model with this <c>{arch}.decision.type</c> can't generate text, so llama-server
+    /// rejects chat/completions for it — such presets are left out of chat model listings.
+    /// </summary>
+    public static bool IsDecisionOnly(string? decisionType) =>
+        !string.IsNullOrWhiteSpace(decisionType) && !TextCapableDecisionTypes.Contains(decisionType);
+
+    public static string Label(ModelType type) => type switch
+    {
+        ModelType.Chat => "Chat",
+        ModelType.Embedding => "Embedding",
+        ModelType.Reranker => "Reranker",
+        ModelType.Decision => "Decision",
+        ModelType.Image => "Image",
+        ModelType.Projector => "Projector",
+        _ => "Component",
+    };
+
+    /// <summary>
+    /// The label for one file's row: its type, made specific where that helps — which diffusion
+    /// part a component is, or that a decision model also chats.
+    /// </summary>
+    public static string DetailedLabel(LocalModel model)
+    {
+        var type = Classify(model);
+        if (type == ModelType.ImageComponent
+            && DiffusionModelGuide.ClassifyFile(model) is var role and not (DiffusionFileRole.Model or DiffusionFileRole.Other))
+            return DiffusionModelGuide.Label(role);
+        if (type == ModelType.Decision && !IsDecisionOnly(model.DecisionType))
+            return "Decision + Chat";
+        return Label(type);
+    }
+
+    public static string Label(ModelTypeCategory category) => category switch
+    {
+        ModelTypeCategory.Chat => "Chat",
+        ModelTypeCategory.Embedding => "Embedding & Rerank",
+        ModelTypeCategory.Decision => "Decision",
+        _ => "Image",
     };
 
     /// <summary>

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
+using LR.Core.Services;
 
 namespace LR.Application.Pages.Features.Models;
 
@@ -15,6 +16,17 @@ public class ModelsIndexModel : PageModel
     public IReadOnlyList<LocalModel> Models { get; set; } = new List<LocalModel>();
     public IReadOnlyList<ModelGroupViewModel> ModelGroups { get; set; } = new List<ModelGroupViewModel>();
     public Dictionary<Guid, int> PresetUsageCounts { get; set; } = new();
+
+    /// <summary>The selected type tab (<c>?type=decision</c>); null shows every model.</summary>
+    [BindProperty(SupportsGet = true, Name = "type")]
+    public ModelTypeCategory? TypeFilter { get; set; }
+
+    /// <summary>Model groups per type tab, over the whole library (not just the shown tab).</summary>
+    public Dictionary<ModelTypeCategory, int> CategoryCounts { get; set; } = new();
+
+    /// <summary>The groups the selected tab shows.</summary>
+    public IEnumerable<ModelGroupViewModel> VisibleGroups =>
+        TypeFilter is { } filter ? ModelGroups.Where(g => g.Category == filter) : ModelGroups;
 
     [BindProperty]
     public string RootFolder { get; set; } = string.Empty;
@@ -82,6 +94,8 @@ public class ModelsIndexModel : PageModel
     {
         Models = await _modelLibrary.GetAllAsync();
         ModelGroups = ModelGroupViewModel.Build(Models);
+        CategoryCounts = Enum.GetValues<ModelTypeCategory>()
+            .ToDictionary(c => c, c => ModelGroups.Count(g => g.Category == c));
 
         var allPresets = await _presetManager.GetAllPresetsAsync();
         PresetUsageCounts = allPresets

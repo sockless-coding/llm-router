@@ -12,6 +12,12 @@ namespace LR.Application.Pages.Features.Models;
 public class ModelGroupViewModel
 {
     public string DisplayName { get; set; } = string.Empty;
+    public ModelType Type { get; set; }
+    public ModelTypeCategory Category => ModelKindClassifier.CategoryOf(Type);
+    /// <summary>The badge text — <see cref="Type"/> made specific (e.g. "VAE", "Decision + Chat").</summary>
+    public string TypeLabel { get; set; } = string.Empty;
+    /// <summary>{arch}.decision.type of a decision model group (e.g. "openjev").</summary>
+    public string? DecisionType { get; set; }
     public string? Architecture { get; set; }
     public string? ParameterSize { get; set; }
     public List<LocalModel> PrimaryModels { get; set; } = new();
@@ -50,7 +56,7 @@ public class ModelGroupViewModel
         var auxiliary = new List<LocalModel>();
         foreach (var m in members)
         {
-            if (ModelKindClassifier.Classify(m) == ModelFileKind.Primary)
+            if (!ModelKindClassifier.IsAuxiliary(ModelKindClassifier.Classify(m)))
                 primaries.Add(m);
             else
                 auxiliary.Add(m);
@@ -87,9 +93,20 @@ public class ModelGroupViewModel
                 : primaries[0].Name;
         }
 
+        // A group is the type most of its runnable files are; an all-companion group (a VAE or T5
+        // repo on its own) takes its companions' type so it still files under the right tab.
+        var type = primaries
+            .GroupBy(ModelKindClassifier.Classify)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key)
+            .First().Key;
+
         return new ModelGroupViewModel
         {
             DisplayName = displayName,
+            Type = type,
+            TypeLabel = ModelKindClassifier.DetailedLabel(primaries.First(m => ModelKindClassifier.Classify(m) == type)),
+            DecisionType = primaries.Select(m => m.DecisionType).FirstOrDefault(d => !string.IsNullOrWhiteSpace(d)),
             Architecture = primaries.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.Architecture))?.Architecture,
             ParameterSize = primaries.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.ParameterSize))?.ParameterSize,
             PrimaryModels = primaries,

@@ -98,6 +98,18 @@ public class LocalModel
     [Column(TypeName = "TEXT")]
     public string? ChatTemplate { get; set; }
 
+    /// <summary>
+    /// {arch}.decision.type — non-null marks a native decision model, served through
+    /// <c>/v1/systemone</c> (see <see cref="Services.ModelKindClassifier"/>).
+    /// </summary>
+    [MaxLength(64)]
+    public string? DecisionType { get; set; }
+
+    /// <summary>
+    /// {arch}.pooling_type — present on embedding (1–3) and reranking (4) models only.
+    /// </summary>
+    public int? PoolingType { get; set; }
+
     [Column(TypeName = "TEXT")]
     public string? LicenseText { get; set; }
 

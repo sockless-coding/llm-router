@@ -1012,6 +1012,13 @@ public class ModelPreset
     public double? GgufRopeFreqBase { get; set; }
 
     /// <summary>
+    /// Decision-model type read from GGUF file ({arch}.decision.type); non-null means the
+    /// preset answers <c>/v1/systemone</c>.
+    /// </summary>
+    [MaxLength(64)]
+    public string? GgufDecisionType { get; set; }
+
+    /// <summary>
     /// Chat template string read from GGUF file (tokenizer.chat_template).
     /// </summary>
     [MaxLength(4096)]
