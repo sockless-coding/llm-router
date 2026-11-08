@@ -340,6 +340,11 @@
                     <button type="button" id="vllm-recipe-apply" class="px-3 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">Fill in the preset</button>
                 </div>
 
+                <div class="pt-2 border-t border-gray-700/30">
+                    <button type="button" id="vllm-qwen38-profile" class="px-3 py-1.5 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-xs font-medium">Fill in Qwen3.8 on Arc Pro B70</button>
+                    <p class="text-xs text-text-secondary mt-1">For an Intel (XPU, Docker) install and a Qwen3.8-27B GPTQ INT4 model: MTP with 4 speculative tokens, 100K context, low reasoning by default. Replaces the settings below; the model stays as you entered it.</p>
+                </div>
+
                 <div id="vllm-recipe-warnings" class="hidden rounded-lg border border-amber-400/30 bg-amber-400/5 p-3">
                     <p class="text-xs font-medium text-amber-400 mb-1">Check before saving</p>
                     <ul id="vllm-recipe-warning-list" class="list-disc pl-4 space-y-1 text-xs text-text-secondary"></ul>
@@ -570,6 +575,11 @@
                         modelPath.dispatchEvent(new Event('input', { bubbles: true }));
                     }
 
+                    el('vllm-qwen38-profile').addEventListener('click', () => {
+                        writeSettings(@Html.Raw(System.Text.Json.JsonSerializer.Serialize(VllmDocker.Qwen38Preset).Replace("</", "<\\/")));
+                        el('vllm-recipe-warnings').classList.add('hidden');
+                        setStatus('Filled in the Qwen3.8 settings for an Arc Pro B70. Enter the model folder or Hugging Face id, review them, then save the preset.');
+                    });
                     el('vllm-recipe-load').addEventListener('click', loadRecipe);
                     el('vllm-recipe-apply').addEventListener('click', applyRecipe);
                     el('vllm-recipe-variant').addEventListener('change', refreshHardware);

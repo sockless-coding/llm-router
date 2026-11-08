@@ -110,6 +110,31 @@ public class VllmDockerTests
     }
 
     [Fact]
+    public void Dockerfile_AppliesTheCookbookPatchesInOrder_AsOneValidCommand()
+    {
+        var dockerfile = VllmDocker.Dockerfile;
+        var positions = VllmDocker.CookbookPatches.Select(p => dockerfile.IndexOf($"&& python /opt/llm-router/cookbook/{p} \\\n", StringComparison.Ordinal)).ToList();
+
+        Assert.All(positions, p => Assert.True(p > 0));
+        Assert.Equal(positions.Order(), positions);
+    }
+
+    [Fact]
+    public void Qwen38Preset_TurnsOnMtpAndLowReasoning_AndIsValidForTheServer()
+    {
+        var preset = new ModelPreset { ModelPath = "m/n", EngineSettings = new(VllmDocker.Qwen38Preset) };
+
+        var args = VllmPresetSettings.ServeArgs(preset);
+        var environment = VllmPresetSettings.EnvironmentOf(preset);
+
+        Assert.Equal("""{"method":"mtp","num_speculative_tokens":4}""", After(args, "--speculative-config"));
+        Assert.Equal("""{"reasoning_effort":"low"}""", After(args, "--default-chat-template-kwargs"));
+        Assert.Equal("1", environment["B70_MTP_BF16_DRAFT"]);
+        Assert.Equal("1", environment["B70_DRAFT_LMHEAD_INT4"]);
+        Assert.Equal("1", environment["B70_DRAFT_MTP_INT4"]);
+    }
+
+    [Fact]
     public void GeneratedFiles_HaveLinuxLineEndings()
     {
         Assert.DoesNotContain("\r", VllmDocker.Dockerfile);
