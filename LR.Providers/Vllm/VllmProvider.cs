@@ -69,6 +69,9 @@ public class VllmProvider : ManagedServerProviderBase
         if (string.IsNullOrEmpty(InstallFolderPath))
             throw new InvalidOperationException("vLLM's install folder is not set — bind the server to a vLLM install from the Engines page.");
 
+        if (VllmDocker.IsDockerFolder(InstallFolderPath))
+            return BuildDockerLaunchSpec(preset);
+
         var command = VllmLayout.Resolve(InstallFolderPath, TargetIsWindows, IsRemote ? null : File.Exists);
         if (!IsRemote && command.Wsl is null && !File.Exists(command.Executable))
             throw new FileNotFoundException($"vLLM wasn't found at {command.Executable}. Install it from the Engines page.");
@@ -84,6 +87,40 @@ public class VllmProvider : ManagedServerProviderBase
         _reportedUpAt = null;
 
         return new ServerLaunchSpec(command.Executable, args, command.WorkingDirectory, environment);
+    }
+
+    /// <summary>
+    /// A server in a container: <c>docker run</c> is the process the wrapper watches. Inside, the server
+    /// listens on every interface of the container, and the address it's reachable on is decided by what's
+    /// published on the host.
+    /// </summary>
+    private ServerLaunchSpec BuildDockerLaunchSpec(ModelPreset preset)
+    {
+        if (!TargetIsWindows)
+            throw new InvalidOperationException("vLLM on an Intel GPU is only set up for Windows with Docker Desktop.");
+        if (!IsRemote && !VllmDocker.IsInstall(InstallFolderPath!))
+            throw new FileNotFoundException($"The vLLM image's build files aren't in {InstallFolderPath}. Install it from the Engines page.");
+
+        var serve = VllmPresetSettings.ServeArgs(preset);
+        var modelFolder = VllmDocker.ModelFolder(preset.ModelPath!);
+        if (modelFolder is not null)
+        {
+            if (!IsRemote && !Directory.Exists(modelFolder))
+                throw new DirectoryNotFoundException($"The model folder {modelFolder} doesn't exist.");
+            serve[1] = VllmDocker.ContainerModelPath;
+        }
+        serve.AddRange(["--host", "0.0.0.0", "--port", Port.ToString(CultureInfo.InvariantCulture)]);
+
+        var environment = BuildEnvironment(preset, throughWsl: false);
+        _maxConcurrent = VllmPresetSettings.MaxConcurrent(preset) ?? DefaultMaxConcurrentRequests;
+        _reportedUpAt = null;
+
+        return new ServerLaunchSpec(
+            VllmDocker.Executable,
+            VllmDocker.RunArgs(Port, ListenAddress, modelFolder, environment.Keys, serve),
+            null,
+            environment,
+            new ServerStopSpec(VllmDocker.Executable, VllmDocker.StopArgs(Port)));
     }
 
     /// <summary>

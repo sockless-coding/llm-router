@@ -148,7 +148,11 @@ public sealed class AgentDeploymentService
             throw new InvalidOperationException($"vLLM can't be installed for {backend} on '{agent.Name}'.");
 
         string tag;
-        if (string.IsNullOrWhiteSpace(version))
+        if (backend == BackendType.Sycl)
+        {
+            tag = VllmDocker.ResolveTag(version);
+        }
+        else if (string.IsNullOrWhiteSpace(version))
         {
             tag = await VllmReleases.GetLatestTagAsync()
                 ?? throw new InvalidOperationException("Could not reach PyPI to look up the newest vLLM. Enter a version to install instead.");
@@ -158,7 +162,7 @@ public sealed class AgentDeploymentService
             tag = "v" + VllmLayout.NormalizeVersion(version);
         }
 
-        var folder = AgentPaths.SafeSegment($"vllm-{tag}-{backend.ToString().ToLowerInvariant()}");
+        var folder = AgentPaths.SafeSegment(VllmLayout.InstallFolderName(tag, backend));
         var outputDir = AgentPaths.Combine(agent.IsWindows, EngineRootOf(agent), folder);
         if (await context.EngineBuilds.AnyAsync(b => b.AgentId == agentId && b.Engine == ServerEngine.Vllm && b.Name == EngineBuildService.VllmBuildName(tag, backend)))
             throw new InvalidOperationException($"'{agent.Name}' already has vLLM {tag} for {backend}. Delete it first or pick a different version.");

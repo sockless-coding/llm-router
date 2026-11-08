@@ -13,12 +13,16 @@ public sealed class WrapperHost
 {
     private const int MaxBacklogLines = 500;
 
+    /// <summary>How long a stop command gets. It only waits on something like a Docker engine that has stopped answering.</summary>
+    private static readonly TimeSpan StopCommandTimeout = TimeSpan.FromSeconds(60);
+
     private readonly List<string> _outputBacklog = new();
     private readonly object _backlogLock = new();
 
     private volatile WrapperPipeConnection? _currentConnection;
 
     private Process? _serverProcess;
+    private (string Executable, List<string> Arguments)? _serverStopCommand;
     private Process? _companionProcess;
     private CancellationTokenSource? _outputCts;
     private volatile bool _suppressNextExitEvent;
@@ -87,7 +91,8 @@ public sealed class WrapperHost
     private async Task StartServerAsync(StartServerCommand cmd)
     {
         await EnsureCompanionRunningAsync(cmd.CompanionAppPath, cmd.EnvironmentSetupCommand);
-        await StartServerProcessAsync(cmd.ExecutablePath, cmd.Arguments, cmd.WorkingDirectory, cmd.EnvironmentSetupCommand, cmd.Port, cmd.Environment);
+        await StartServerProcessAsync(cmd.ExecutablePath, cmd.Arguments, cmd.WorkingDirectory, cmd.EnvironmentSetupCommand, cmd.Port, cmd.Environment,
+            string.IsNullOrEmpty(cmd.StopExecutablePath) ? null : (cmd.StopExecutablePath, cmd.StopArguments ?? []));
     }
 
     private async Task StopServerAsync(bool stopCompanion)
@@ -99,12 +104,17 @@ public sealed class WrapperHost
 
     // --- Main server process ---
 
-    private async Task StartServerProcessAsync(string executablePath, List<string> arguments, string? workingDirectory, string? environmentSetupCommand, int? port, Dictionary<string, string>? environment)
+    private async Task StartServerProcessAsync(string executablePath, List<string> arguments, string? workingDirectory, string? environmentSetupCommand, int? port, Dictionary<string, string>? environment, (string Executable, List<string> Arguments)? stopCommand)
     {
         // Idempotent "ensure": stop whatever main server is currently running (this is an
         // intentional stop, not a crash — suppressed from ProcessExitedEvent) before swapping in
         // the new one.
         await StopServerProcessAsync();
+
+        // A wrapper that died couldn't stop what it had started, and this one doesn't know about it.
+        if (stopCommand is { } leftover)
+            await RunStopCommandAsync(leftover);
+        _serverStopCommand = stopCommand;
 
         var startInfo = new ProcessStartInfo
         {
@@ -191,16 +201,24 @@ public sealed class WrapperHost
     {
         _outputCts?.Cancel();
 
-        if (_serverProcess is not null && !_serverProcess.HasExited)
-        {
+        var running = _serverProcess is not null && !_serverProcess.HasExited;
+        if (running)
             _suppressNextExitEvent = true;
+
+        // Also when the process has already gone: a container can outlive its docker client.
+        if (_serverStopCommand is { } stopCommand)
+            await RunStopCommandAsync(stopCommand);
+        _serverStopCommand = null;
+
+        if (running)
+        {
             try
             {
                 // entireProcessTree: true is required here — when EnvironmentSetupCommand is
                 // set, _serverProcess is cmd.exe running the temp batch, with the actual server
                 // executable as its child (invoked via "call"). Killing just cmd.exe leaves that
                 // child running as an orphan.
-                _serverProcess.Kill(entireProcessTree: true);
+                _serverProcess!.Kill(entireProcessTree: true);
                 await _serverProcess.WaitForExitAsync();
             }
             catch { /* best effort */ }
@@ -210,6 +228,17 @@ public sealed class WrapperHost
         _serverProcess = null;
         _lastKnownPort = null;
         CleanupPendingTempBatch();
+    }
+
+    /// <summary>Best effort, like the kill it comes with: a failure can't be acted on, and it can mean there was nothing to stop.</summary>
+    private static async Task RunStopCommandAsync((string Executable, List<string> Arguments) command)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(StopCommandTimeout);
+            await Services.ProcessRunner.RunAsync(command.Executable, command.Arguments, Path.GetTempPath(), null, _ => Task.CompletedTask, timeout.Token);
+        }
+        catch { /* best effort */ }
     }
 
     /// <summary>

@@ -15,8 +15,8 @@
     @if (onWindows)
     {
         <p class="text-xs text-amber-400">
-            vLLM doesn't run natively on Windows, so installs here go in WSL (<span class="font-mono">wsl --install -d Ubuntu</span>), under
-            <span class="font-mono">~/@VllmLayout.WslInstallRoot</span>. WSL distros belong to a Windows user: this needs LLM Router running under your account, not as a service under LocalSystem.
+            vLLM doesn't run natively on Windows, so NVIDIA installs here go in WSL (<span class="font-mono">wsl --install -d Ubuntu</span>), under
+            <span class="font-mono">~/@VllmLayout.WslInstallRoot</span>, and Intel installs build a Docker image, which needs Docker Desktop running. Both belong to a Windows user: this needs LLM Router running under your account, not as a service under LocalSystem.
             To install on another machine, use its page under <a href="/Features/Agents/Index" class="underline hover:text-neon-cyan">Agents</a>.
         </p>
     }
@@ -67,7 +67,11 @@ else
                             {
                                 if (b.Status == EngineBuildStatus.Ready)
                                 {
-                                    <a href="/Features/Engines/Changelog?id=@b.Id" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check updates</a>
+                                    @* An Intel install is pinned to one image, so vLLM's newer releases don't apply to it. *@
+                                    if (b.BackendType != BackendType.Sycl)
+                                    {
+                                        <a href="/Features/Engines/Changelog?id=@b.Id" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check updates</a>
+                                    }
                                     <button type="button" onclick="updateVllm('@b.Id')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Update</button>
                                 }
                                 <button type="button" data-name="@b.Name" onclick="deleteBuild('@b.Id', this.dataset.name, @usage)" class="text-xs px-2 py-1 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Delete</button>
@@ -87,14 +91,14 @@ else
 }
 
 <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3 max-w-xl">
-    <h3 class="text-sm font-semibold text-text-primary">Install vLLM@(onWindows ? " in WSL" : "")</h3>
+    <h3 class="text-sm font-semibold text-text-primary">Install vLLM</h3>
     <div class="grid grid-cols-2 gap-3">
         <div>
             <label for="vllm-backend" class="block text-xs font-medium text-text-secondary mb-1">GPU</label>
             <select id="vllm-backend" class="@inpCls">
                 @foreach (var backend in VllmLayout.InstallBackends(onWindows))
                 {
-                    <option value="@backend">@(backend == BackendType.Cuda ? "NVIDIA (CUDA)" : "AMD (ROCm)")</option>
+                    <option value="@backend">@(backend switch { BackendType.Cuda => "NVIDIA (CUDA)", BackendType.Sycl => "Intel (XPU, Docker)", _ => "AMD (ROCm)" })</option>
                 }
             </select>
         </div>
@@ -115,5 +119,9 @@ else
         </div>
     </div>
     <p class="text-xs text-text-secondary">Takes about 20 GB per install. Needs <span class="font-mono">python3</span> on @(onWindows ? "the distro" : "this machine") to fetch <span class="font-mono">uv</span>, unless it already has <span class="font-mono">uv</span>. CPU-only setups can use a venv you make yourself.</p>
+    @if (onWindows)
+    {
+        <p class="text-xs text-text-secondary">Intel: goes in the engine install root folder and builds an image of about 18 GB in Docker Desktop, always with vLLM @VllmDocker.PinnedVersion, the version tested on an Arc Pro B70, so leave the version empty. Only tested on that GPU, and other models may need settings of their own.</p>
+    }
     <button type="button" onclick="installVllm()" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">Install</button>
 </div>

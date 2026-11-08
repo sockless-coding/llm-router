@@ -69,7 +69,7 @@ public static class VllmInstaller
     public static async Task<string> ResolveInstallPathAsync(VllmInstallRequest request, CancellationToken ct)
     {
         EnsureSupportedOs();
-        if (!OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsWindows() || request.Backend == BackendType.Sycl)
             return request.OutputDir;
         if (VllmLayout.ParseWslPath(request.OutputDir) is { } existing)
             return existing.ToUncPath();
@@ -82,6 +82,9 @@ public static class VllmInstaller
     public static async Task<VllmInstallResult> InstallAsync(VllmInstallRequest request, BuildProgressSink sink, CancellationToken ct)
     {
         EnsureSupportedOs();
+        if (request.Backend == BackendType.Sycl)
+            return await VllmDocker.InstallAsync(request, sink, ct);
+
         var installPath = await ResolveInstallPathAsync(request, ct);
         var wsl = OperatingSystem.IsWindows() ? VllmLayout.ParseWslPath(installPath) : null;
 
@@ -140,6 +143,12 @@ public static class VllmInstaller
     /// </summary>
     public static async Task DeleteAsync(string installPath, CancellationToken ct = default)
     {
+        if (VllmDocker.IsDockerFolder(installPath))
+        {
+            await VllmDocker.DeleteAsync(installPath, ct);
+            return;
+        }
+
         if (VllmLayout.ParseWslPath(installPath) is not { } wsl)
         {
             if (Directory.Exists(installPath)) Directory.Delete(installPath, recursive: true);
@@ -209,7 +218,7 @@ public static class VllmInstaller
         {
             BackendType.Cuda => $"{WrapperHost.PosixQuote(requirement)} --torch-backend=auto",
             BackendType.Hip => $"{WrapperHost.PosixQuote(requirement)} --extra-index-url https://wheels.vllm.ai/rocm/",
-            _ => throw new InvalidOperationException($"vLLM can't be installed for {backend}; use NVIDIA CUDA or AMD ROCm, or point the server at a venv you set up yourself."),
+            _ => throw new InvalidOperationException($"vLLM can't be installed in a venv for {backend}; use NVIDIA CUDA or AMD ROCm, or point the server at a venv you set up yourself."),
         };
 
         return $$"""

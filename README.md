@@ -198,7 +198,7 @@ If a run config (or `STRATA_API_KEY`) sets an API key, the router sends it autom
 
 ### vLLM servers
 
-[vLLM](https://github.com/vllm-project/vllm) serves Hugging Face models on the GPU, with its own batching. It only runs on Linux, so **on Windows the router runs it inside WSL** (`wsl --install -d Ubuntu`; the GPU comes through from the Windows NVIDIA driver, nothing to install in the distro).
+[vLLM](https://github.com/vllm-project/vllm) serves Hugging Face models on the GPU, with its own batching. It only runs on Linux, so **on Windows the router runs it inside WSL** (`wsl --install -d Ubuntu`; the GPU comes through from the Windows NVIDIA driver, nothing to install in the distro), or for an Intel GPU, in Docker Desktop (see below).
 
 1. **Engines → vLLM → Install**: pick the GPU and optionally a version (blank = the newest on PyPI). Each install is a self-contained folder holding its own `uv`, Python 3.12 and venv: `<install root>/vllm-<version>-<backend>` on Linux, `~/.llm-router/engines/…` in the distro on Windows, tracked by its `\\wsl.localhost\…` path. It needs `python3` on the target to fetch `uv`, unless `uv` is already there. CPU-only setups aren't offered, because vLLM's CPU wheels need a hand-set `LD_PRELOAD`; a server can point straight at a venv you made yourself instead.
 2. **Servers**: create a server with engine **vLLM**, bound to the install. A remote agent works the same way.
@@ -209,6 +209,16 @@ Things to know about recipes:
 - **The form says what the site changed.** Recipes only list hardware they're tested on, and the site quietly falls back for anything else (an RTX 5090 request for a CPU-validated recipe comes back tuned for a Xeon). Consumer GPUs usually get a data-centre recipe with the right flags; check the context length and GPU memory share against your card.
 - **Nothing from a recipe runs until you save and start the preset, and some of it is left out.** Flags the router owns (`--host`, `--port`, `--api-key`, `--served-model-name`, …) and variables like `LD_PRELOAD`, `PATH` or `HF_TOKEN` are dropped and reported. `--trust-remote-code` is kept but called out, since it runs Python from the model's repository. A recipe's extra install steps are shown, not run. `VLLM_USE_RUST_FRONTEND` is also left out, because that frontend rejects Anthropic-format requests; add it to the preset's environment variables if only OpenAI-format clients use it.
 - **Multi-node strategies aren't available**: a router server is one machine.
+
+#### Intel GPUs (Windows, Docker Desktop)
+
+Pick **Intel (XPU, Docker)** when installing to run vLLM on an Intel GPU such as the Arc Pro B70. A venv in WSL doesn't work on these cards, so this runs vLLM's own XPU image in Docker Desktop instead, and works alongside an NVIDIA card in the same PC. It needs Docker Desktop running its Linux/WSL 2 engine, an engine install root folder, and LLM Router (or the agent) running under an account that can use Docker, not as a service under LocalSystem.
+
+- **The install** is `<install root>/vllm-v<version>-xpu-docker`, which holds the build files; the image itself (`llm-router/vllm-xpu:managed`, about 18 GB) lives in Docker. The install builds it, then checks that it can compute on the GPU.
+- **The version is fixed**, because the image's fixes patch vLLM's source. **Update** rebuilds the image, picking up whatever a newer LLM Router pins.
+- **Models**: a Hugging Face id downloads into the Docker volume `llm-router-hf-cache`, which deleting the install leaves in place; a folder must be on a local drive (`D:\models\qwen`) and is mounted read-only. Network and `\\wsl.localhost` paths can't be mounted.
+- **Each server is a container** named `llm-router-vllm-<port>`, removed when the server stops. Published on loopback, or on all interfaces for a remote agent. Environment variables are passed by name, so their values don't appear on the `docker` command line.
+- **Only tested with an Arc Pro B70.** Settings that suit one model may not suit another, and the first GPU is the only one used.
 
 A first start downloads the model into the Hugging Face cache of the machine the server runs on, so the startup timeout is 4 hours; gated models use the Hugging Face token from the model library settings. Models don't come from the model library, whose entries are single files. Clients ask for the preset's name or aliases as usual; the router rewrites `model` to the fixed name each server is started under, because vLLM rejects any other. vLLM has no llama.cpp-style `/props` or `/slots`, so the dashboard shows no slot or KV usage for it, and the router's in-flight limit is the preset's **Max concurrent requests** (default 64).
 

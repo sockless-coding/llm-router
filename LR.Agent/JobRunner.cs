@@ -291,8 +291,9 @@ public sealed class JobRunner
     {
         foreach (var path in job.Paths)
         {
-            // A folder inside a WSL distro can't be deleted through its Windows network path (a venv's symlinks stop it).
-            if (VllmLayout.ParseWslPath(path) is not null)
+            // A folder inside a WSL distro can't be deleted through its Windows network path (a venv's symlinks
+            // stop it), and a Docker install has an image to remove as well.
+            if (VllmLayout.ParseWslPath(path) is not null || VllmDocker.IsDockerFolder(path))
             {
                 await VllmInstaller.DeleteAsync(path, ct);
                 continue;
