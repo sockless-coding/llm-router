@@ -36,10 +36,18 @@ public static partial class VllmLayout
     /// <summary>Where managed installs go inside a WSL distro, relative to the user's home. Linux's own filesystem: a venv on <c>/mnt/…</c> is very slow.</summary>
     public const string WslInstallRoot = ".llm-router/engines";
 
-    /// <summary>The backends a managed install can target. CPU wheels need a hand-set <c>LD_PRELOAD</c>, so they're left to a venv the user made.</summary>
+    /// <summary>
+    /// The backends a managed install can target. CPU wheels need a hand-set <c>LD_PRELOAD</c>, so they're
+    /// left to a venv the user made. Intel GPUs go through Docker Desktop (see <see cref="VllmDocker"/>).
+    /// </summary>
     public static IReadOnlyList<Models.BackendType> InstallBackends(bool targetIsWindows) => targetIsWindows
-        ? [Models.BackendType.Cuda]
+        ? [Models.BackendType.Cuda, Models.BackendType.Sycl]
         : [Models.BackendType.Cuda, Models.BackendType.Hip];
+
+    /// <summary>The folder name of a managed install, which is also how a Docker one is recognised.</summary>
+    public static string InstallFolderName(string tag, Models.BackendType backend) => backend == Models.BackendType.Sycl
+        ? VllmDocker.FolderName
+        : $"vllm-{tag}-{backend.ToString().ToLowerInvariant()}";
 
     /// <summary>Parses <c>\\wsl.localhost\Distro\path</c> or <c>\\wsl$\Distro\path</c>; null for anything else.</summary>
     public static WslLocation? ParseWslPath(string? path)
@@ -95,10 +103,12 @@ public static partial class VllmLayout
     }
 
     /// <summary>True if <paramref name="folder"/> on this machine holds a vLLM executable in a layout <see cref="Resolve"/> knows.</summary>
-    public static bool IsInstall(string folder) => ParseWslPath(folder) is not null
-        // Windows sees a distro's files through the share, under their Linux names.
-        ? File.Exists(Path.Combine(folder, ".venv", "bin", "vllm"))
-        : File.Exists(Resolve(folder, OperatingSystem.IsWindows(), File.Exists).Executable);
+    public static bool IsInstall(string folder) => VllmDocker.IsDockerFolder(folder)
+        ? VllmDocker.IsInstall(folder)
+        : ParseWslPath(folder) is not null
+            // Windows sees a distro's files through the share, under their Linux names.
+            ? File.Exists(Path.Combine(folder, ".venv", "bin", "vllm"))
+            : File.Exists(Resolve(folder, OperatingSystem.IsWindows(), File.Exists).Executable);
 
     /// <summary>True for a version pip can be asked for: <c>0.20.1</c>, <c>v0.20.1</c>, <c>0.20.1rc1</c>.</summary>
     public static bool IsVersion(string version) => VersionRegex().IsMatch(version);

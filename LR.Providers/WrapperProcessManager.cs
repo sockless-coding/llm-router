@@ -112,6 +112,8 @@ public class WrapperProcessManager
                 EnvironmentSetupCommand = EnvironmentSetupCommand,
                 CompanionAppPath = CompanionAppPath,
                 Environment = launch.Environment?.ToDictionary(),
+                StopExecutablePath = launch.Stop?.ExecutablePath,
+                StopArguments = launch.Stop?.Arguments,
                 Port = Port,
             }, cancellationToken);
 

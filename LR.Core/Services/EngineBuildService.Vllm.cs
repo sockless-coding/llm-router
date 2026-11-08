@@ -22,14 +22,16 @@ public partial class EngineBuildService
     public async Task<Guid> StartVllmInstallAsync(BackendType backend, string? version, string? wslDistro, string? name)
     {
         var settings = await _settings.GetAsync();
-        if (!OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(settings.InstallRootFolder))
+        // Only an install in WSL finds its own place, in the distro's home.
+        var inWsl = OperatingSystem.IsWindows() && backend != BackendType.Sycl;
+        if (!inWsl && string.IsNullOrWhiteSpace(settings.InstallRootFolder))
             throw new InvalidOperationException("Set an engine install root folder (Engine Build Settings) before installing vLLM.");
         if (!VllmLayout.InstallBackends(OperatingSystem.IsWindows()).Contains(backend))
             throw new InvalidOperationException($"vLLM can't be installed for {backend} on this machine.");
 
-        var tag = await ResolveVllmTagAsync(version);
-        var folderName = $"vllm-{tag}-{backend.ToString().ToLowerInvariant()}";
-        var outputDir = OperatingSystem.IsWindows() ? folderName : Path.GetFullPath(Path.Combine(settings.InstallRootFolder, folderName));
+        var tag = await ResolveVllmTagAsync(version, backend);
+        var folderName = VllmLayout.InstallFolderName(tag, backend);
+        var outputDir = inWsl ? folderName : Path.GetFullPath(Path.Combine(settings.InstallRootFolder, folderName));
         var request = new VllmInstallRequest(backend, tag, outputDir, string.IsNullOrWhiteSpace(wslDistro) ? null : wslDistro.Trim());
         var installPath = await VllmInstaller.ResolveInstallPathAsync(request, CancellationToken.None);
 
@@ -68,7 +70,7 @@ public partial class EngineBuildService
     /// <summary>The in-place update behind <see cref="StartUpdateAsync"/>: the same venv, moved to another vLLM version.</summary>
     private async Task StartVllmUpdateAsync(LRDbContext context, EngineBuild build, string? refOverride, string workspaceRoot)
     {
-        var tag = await ResolveVllmTagAsync(refOverride);
+        var tag = await ResolveVllmTagAsync(refOverride, build.BackendType);
         build.Status = EngineBuildStatus.Downloading;
         build.StatusMessage = "Updating in place…";
         await context.SaveChangesAsync();
@@ -78,11 +80,15 @@ public partial class EngineBuildService
         StartJob(buildId, ct => RunVllmJobAsync(buildId, request, workspaceRoot, isNewInstall: false, ct));
     }
 
-    public static string VllmBuildName(string tag, BackendType backend) => $"vLLM {tag} ({backend})";
+    public static string VllmBuildName(string tag, BackendType backend) =>
+        $"vLLM {tag} ({(backend == BackendType.Sycl ? "Intel XPU, Docker" : backend.ToString())})";
 
-    /// <summary>The tag of <paramref name="version"/>, or of the newest version on PyPI.</summary>
-    private static async Task<string> ResolveVllmTagAsync(string? version)
+    /// <summary>The tag of <paramref name="version"/>, or of the newest version on PyPI. The Docker image has its one version.</summary>
+    private static async Task<string> ResolveVllmTagAsync(string? version, BackendType backend)
     {
+        if (backend == BackendType.Sycl)
+            return VllmDocker.ResolveTag(version);
+
         if (!string.IsNullOrWhiteSpace(version))
             return "v" + VllmLayout.NormalizeVersion(version);
 

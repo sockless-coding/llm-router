@@ -104,10 +104,10 @@ public class VllmLayoutTests
     }
 
     [Fact]
-    public void InstallBackends_WindowsOffersCudaOnly()
+    public void InstallBackends_IntelIsWindowsOnly_AndAmdLinuxOnly()
     {
-        Assert.Equal([BackendType.Cuda], VllmLayout.InstallBackends(targetIsWindows: true));
-        Assert.Contains(BackendType.Hip, VllmLayout.InstallBackends(targetIsWindows: false));
+        Assert.Equal([BackendType.Cuda, BackendType.Sycl], VllmLayout.InstallBackends(targetIsWindows: true));
+        Assert.Equal([BackendType.Cuda, BackendType.Hip], VllmLayout.InstallBackends(targetIsWindows: false));
     }
 
     [Fact]

@@ -23,7 +23,7 @@ public class VllmEngineDescriptor : IEngineDescriptor
     public string InstallFolderHelp =>
         "A folder holding a Python environment with vLLM (.venv/bin/vllm). On Windows, vLLM runs in WSL, so use the distro's path " +
         @"(\\wsl.localhost\Ubuntu\home\you\vllm), or a native venv of the community vllm-windows fork (.venv\Scripts\vllm.exe). " +
-        "Or pick an install from the Engines page, which can set one up and update it.";
+        "Or pick an install from the Engines page, which can set one up and update it, including one for an Intel GPU, which runs in Docker Desktop.";
 
     public string InstallFolderPlaceholder => OperatingSystem.IsWindows() ? @"\\wsl.localhost\Ubuntu\home\you\vllm" : "/opt/vllm";
 

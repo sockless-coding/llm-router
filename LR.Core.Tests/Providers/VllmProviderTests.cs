@@ -140,6 +140,102 @@ public sealed class VllmProviderTests : IDisposable
         Assert.Equal("VLLM_X", launch.Environment["WSLENV"]);
     }
 
+    private string CreateDockerInstall()
+    {
+        var folder = Path.Combine(_root, VllmDocker.FolderName);
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "Dockerfile"), "");
+        return folder;
+    }
+
+    private static BackendConfigData RemoteWindowsDocker() => new()
+    {
+        InstallFolderPath = @"D:\lr-agent\engines\" + VllmDocker.FolderName,
+        AgentId = Guid.NewGuid(),
+        RemoteHost = "10.0.0.6",
+        RemoteIsWindows = true,
+    };
+
+    [Fact]
+    public void RemoteDocker_PublishesOnAllInterfaces_ServesInsideOnAllInterfaces_AndCanBeStopped()
+    {
+        using var provider = Create(RemoteWindowsDocker());
+
+        var launch = provider.Launch(Qwen);
+
+        Assert.Equal(VllmDocker.Executable, launch.ExecutablePath);
+        Assert.Contains("0.0.0.0:8123:8123", launch.Arguments);
+        Assert.Equal(["serve", "Qwen/Qwen3-8B", "--served-model-name", VllmLayout.ServedModelName, "--host", "0.0.0.0", "--port", "8123"], launch.Arguments.TakeLast(8));
+        Assert.Equal(VllmDocker.Executable, launch.Stop!.ExecutablePath);
+        Assert.Equal(VllmDocker.StopArgs(8123), launch.Stop.Arguments);
+    }
+
+    [Fact]
+    public void RemoteDocker_MountsAModelFolder_AndServesItFromInsideTheContainer()
+    {
+        using var provider = Create(RemoteWindowsDocker());
+
+        var launch = provider.Launch(new ModelPreset { ModelPath = @"D:\models\qwen" });
+
+        Assert.Contains(@"D:\models\qwen:/model:ro", launch.Arguments);
+        Assert.Equal(VllmDocker.ContainerModelPath, launch.Arguments[launch.Arguments.IndexOf("serve") + 1]);
+    }
+
+    [Fact]
+    public void Docker_SecretsReachTheProcessEnvironment_NotItsArguments()
+    {
+        using var provider = Create(RemoteWindowsDocker());
+
+        var launch = provider.Launch(new ModelPreset
+        {
+            ModelPath = "m/n",
+            EngineSettings = new() { [VllmPresetSettings.Environment] = "MY_SECRET=hunter2" },
+        });
+
+        Assert.Equal("hunter2", launch.Environment!["MY_SECRET"]);
+        Assert.Contains("MY_SECRET", launch.Arguments);
+        Assert.DoesNotContain(launch.Arguments, a => a.Contains("hunter2"));
+        Assert.False(launch.Environment.ContainsKey("WSLENV"));
+    }
+
+    [Fact]
+    public void LocalDocker_PublishesOnLoopback_WhenTheInstallIsThere()
+    {
+        // Windows only in real use; the provider asks the agent's OS, so this runs anywhere when remote is off.
+        if (!OperatingSystem.IsWindows()) return;
+        using var provider = Create(new BackendConfigData { InstallFolderPath = CreateDockerInstall() });
+
+        Assert.Contains("127.0.0.1:8123:8123", provider.Launch(Qwen).Arguments);
+    }
+
+    [Fact]
+    public void LocalDocker_MissingBuildFilesOrModelFolder_IsAClearError()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var missingInstall = Create(new BackendConfigData { InstallFolderPath = Path.Combine(_root, VllmDocker.FolderName) });
+        Assert.Throws<FileNotFoundException>(() => missingInstall.Launch(Qwen));
+
+        using var missingModel = Create(new BackendConfigData { InstallFolderPath = CreateDockerInstall() });
+        Assert.Throws<DirectoryNotFoundException>(() => missingModel.Launch(new ModelPreset { ModelPath = Path.Combine(_root, "no-such-model") }));
+    }
+
+    [Fact]
+    public void Venv_HasNoStopCommand()
+    {
+        CreateVenv();
+        using var provider = Create(new BackendConfigData { InstallFolderPath = _root });
+
+        Assert.Null(provider.Launch(Qwen).Stop);
+    }
+
+    [Fact]
+    public void Descriptor_RecognisesADockerInstall()
+    {
+        var descriptor = _services.GetRequiredService<IEngineCatalog>().Get(ServerEngine.Vllm)!;
+
+        Assert.Null(descriptor.ValidateInstallFolder(CreateDockerInstall()));
+    }
+
     [Fact]
     public void Environment_StaysOutOfTheArguments()
     {

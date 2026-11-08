@@ -50,6 +50,16 @@ public sealed class StartServerCommand : WrapperMessage
     /// </summary>
     public Dictionary<string, string>? Environment { get; set; }
 
+    /// <summary>
+    /// A program that stops the server, for one that outlives the process started for it (a container
+    /// outlives its <c>docker</c> client). Run on stop, and before a start in case an earlier wrapper
+    /// died and left a server behind. Null for the usual server, which is simply killed.
+    /// </summary>
+    public string? StopExecutablePath { get; set; }
+
+    /// <summary>The arguments of <see cref="StopExecutablePath"/>.</summary>
+    public List<string>? StopArguments { get; set; }
+
     /// <summary>The port the server is expected to listen on, reported back via <see cref="HelloEvent"/>.</summary>
     public int? Port { get; set; }
 }
