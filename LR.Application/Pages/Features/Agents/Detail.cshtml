@@ -222,12 +222,17 @@
                     <select id="relEngine" onchange="refreshBackends()" class="@input" aria-label="Engine">
                         <option value="LlamaCpp">llama.cpp</option>
                         <option value="StableDiffusionCpp">stable-diffusion.cpp</option>
+                        <option value="Vllm">vLLM</option>
                     </select>
                     <select id="relBackend" class="@input" aria-label="Backend"></select>
                 </div>
                 <input id="relTag" placeholder="Release tag (empty = latest)" class="@input font-mono" aria-label="Release tag" />
                 <button type="button" onclick="installRelease()" class="px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">Install on @a.Name</button>
                 <p class="text-xs text-gray-500">Only backends with a published archive for @(a.Rid ?? "this platform") are listed; compile from source for the others.</p>
+                @if (a.IsWindows)
+                {
+                    <p class="text-xs text-amber-400">vLLM goes in WSL on this Windows agent. The agent must run under the account that owns the distro (its default service account sees none), and its servers are only reachable from the router with <span class="font-mono">networkingMode=mirrored</span> in that account's .wslconfig.</p>
+                }
             </div>
             <div class="space-y-2">
                 <h3 class="text-sm font-semibold text-gray-200 pt-2">Compile from a recipe</h3>
@@ -354,6 +359,7 @@
     const releaseBackends = {
         LlamaCpp: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ReleaseBackends[ServerEngine.LlamaCpp].Select(b => b.ToString()))),
         StableDiffusionCpp: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ReleaseBackends[ServerEngine.StableDiffusionCpp].Select(b => b.ToString()))),
+        Vllm: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ReleaseBackends[ServerEngine.Vllm].Select(b => b.ToString()))),
     };
     const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
     const val = (id) => document.getElementById(id).value.trim();

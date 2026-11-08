@@ -33,6 +33,14 @@ public static class PresetMemoryEstimator
         if (engine == ServerEngine.StableDiffusionCpp)
             return DiffusionBytes(preset, fileSize);
 
+        // A vLLM model is a Hugging Face id with no files to measure, so the recipe's own minimum is
+        // the best figure there is. vLLM claims a fixed share of the GPU regardless (--gpu-memory-utilization).
+        if (engine == ServerEngine.Vllm)
+            return preset.EngineSettings.TryGetValue(VllmPresetSettings.VramGb, out var gb)
+                && double.TryParse(gb, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var vram) && vram > 0
+                ? (long)(vram * 1024 * Mb)
+                : ComputeBufferBytes;
+
         long weights = ModelFileBytes(preset.ModelPath, fileSize);
         int? layers = model?.BlockCount;
 

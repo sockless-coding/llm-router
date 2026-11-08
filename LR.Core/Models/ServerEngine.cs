@@ -19,4 +19,7 @@ public enum ServerEngine
 
     /// <summary>stable-diffusion.cpp (github.com/leejet/stable-diffusion.cpp) — image generation via <c>sd-server</c>.</summary>
     StableDiffusionCpp = 3,
+
+    /// <summary>vLLM (github.com/vllm-project/vllm) — <c>vllm serve</c>, on Linux natively and on Windows through WSL.</summary>
+    Vllm = 4,
 }

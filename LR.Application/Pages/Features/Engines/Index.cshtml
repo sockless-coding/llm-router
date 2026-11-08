@@ -121,6 +121,24 @@ else
                 else alert(result.message || 'Could not start build.');
             };
 
+            // --- vLLM ---
+
+            window.installVllm = async function () {
+                const value = id => document.getElementById(id)?.value.trim() ?? '';
+                const result = await postAction({
+                    Command: 'installVllm', Backend: value('vllm-backend'), ReleaseTag: value('vllm-version'),
+                    WslDistro: value('vllm-distro'), Name: value('vllm-name'),
+                });
+                if (result.success) toDetail(result.buildId); else alert(result.message || 'Could not start the install.');
+            };
+
+            window.updateVllm = async function (id) {
+                const version = prompt('vLLM version to update to (empty = the newest release). Stop any server using this install first.', '');
+                if (version === null) return;
+                const result = await postAction({ Command: 'update', BuildId: id, ReleaseTag: version.trim() });
+                if (result.success) toDetail(result.buildId); else alert(result.message || 'Could not start the update.');
+            };
+
             // --- Strata ---
 
             window.registerStrata = async function () {

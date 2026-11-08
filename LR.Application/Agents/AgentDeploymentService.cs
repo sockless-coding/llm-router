@@ -84,6 +84,9 @@ public sealed class AgentDeploymentService
     /// <summary>Installs a prebuilt llama.cpp / stable-diffusion.cpp release on the agent. Returns the new build's id.</summary>
     public async Task<Guid> StartEngineInstallAsync(Guid agentId, ServerEngine engine, BackendType backend, string? releaseTag, string? name)
     {
+        if (engine == ServerEngine.Vllm)
+            return await StartVllmInstallAsync(agentId, backend, releaseTag, name);
+
         var profile = EngineReleaseProfile.For(engine)
             ?? throw new InvalidOperationException($"{engine} can't be installed on agents.");
 
@@ -125,6 +128,62 @@ public sealed class AgentDeploymentService
             Engine = engine,
             Backend = backend,
             ReleaseTag = releaseTag,
+            OutputDir = outputDir,
+        }, isEngine: true);
+        _connections.Log(agentId, "info", $"Installing {build.Name}.");
+        return build.Id;
+    }
+
+    /// <summary>
+    /// Installs vLLM on the agent. On a Windows agent the folder here is provisional: it goes in WSL,
+    /// wherever that distro's home is, and the job's result reports where it ended up.
+    /// </summary>
+    private async Task<Guid> StartVllmInstallAsync(Guid agentId, BackendType backend, string? version, string? name)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
+        var agent = await RequireOnlineAgentAsync(context, agentId);
+
+        if (!VllmLayout.InstallBackends(agent.IsWindows).Contains(backend))
+            throw new InvalidOperationException($"vLLM can't be installed for {backend} on '{agent.Name}'.");
+
+        string tag;
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            tag = await VllmReleases.GetLatestTagAsync()
+                ?? throw new InvalidOperationException("Could not reach PyPI to look up the newest vLLM. Enter a version to install instead.");
+        }
+        else
+        {
+            tag = "v" + VllmLayout.NormalizeVersion(version);
+        }
+
+        var folder = AgentPaths.SafeSegment($"vllm-{tag}-{backend.ToString().ToLowerInvariant()}");
+        var outputDir = AgentPaths.Combine(agent.IsWindows, EngineRootOf(agent), folder);
+        if (await context.EngineBuilds.AnyAsync(b => b.AgentId == agentId && b.Engine == ServerEngine.Vllm && b.Name == EngineBuildService.VllmBuildName(tag, backend)))
+            throw new InvalidOperationException($"'{agent.Name}' already has vLLM {tag} for {backend}. Delete it first or pick a different version.");
+
+        var build = new EngineBuild
+        {
+            Name = string.IsNullOrWhiteSpace(name) ? EngineBuildService.VllmBuildName(tag, backend) : name.Trim(),
+            Engine = ServerEngine.Vllm,
+            BackendType = backend,
+            Source = EngineBuildSource.OfficialRelease,
+            InstallPath = outputDir,
+            VersionTag = tag,
+            Status = EngineBuildStatus.Downloading,
+            StatusMessage = $"Installing on {agent.Name}…",
+            AgentId = agentId,
+        };
+        context.EngineBuilds.Add(build);
+        await context.SaveChangesAsync();
+
+        await SendJobAsync(agentId, build.Id, new InstallEngineJob
+        {
+            JobId = build.Id,
+            Engine = ServerEngine.Vllm,
+            Backend = backend,
+            ReleaseTag = tag,
             OutputDir = outputDir,
         }, isEngine: true);
         _connections.Log(agentId, "info", $"Installing {build.Name}.");
@@ -540,6 +599,8 @@ public sealed class AgentDeploymentService
             if (inPlace && build.Source == EngineBuildSource.OfficialRelease && r.VersionTag is not null
                 && EngineReleaseProfile.For(build.Engine) is { } profile)
                 build.Name = $"{profile.DisplayName} {r.VersionTag} ({build.BackendType})";
+            else if (inPlace && build.Engine == ServerEngine.Vllm && r.VersionTag is not null)
+                build.Name = EngineBuildService.VllmBuildName(r.VersionTag, build.BackendType);
             await context.SaveChangesAsync();
             await sink.CompletedAsync(inPlace ? $"Updated in place to {r.VersionTag ?? "the latest version"}." : "Installed.");
             if (build.AgentId is { } aid) _connections.Log(aid, "info", $"{build.Name} is ready.");

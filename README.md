@@ -4,7 +4,7 @@ A lightweight .NET-based routing layer for managing and load-balancing across mu
 
 ## Overview
 
-LLM Router provides a unified interface to route requests across heterogeneous backend inference engines — [llama.cpp](https://github.com/ggml-org/llama.cpp) builds (CPU, CUDA, Vulkan, SYCL, ...) and [Strata](https://github.com/Niko1221/Strata) for text, [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) for images — running on different machines or GPUs. It features:
+LLM Router provides a unified interface to route requests across heterogeneous backend inference engines — [llama.cpp](https://github.com/ggml-org/llama.cpp) builds (CPU, CUDA, Vulkan, SYCL, ...) [Strata](https://github.com/Niko1221/Strata) and [vLLM](https://github.com/vllm-project/vllm) for text, [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) for images — running on different machines or GPUs. It features:
 
 - **Multi-protocol API gateway** — Exposes OpenAI-compatible (`/v1/chat/completions`, `/v1/responses`, `/v1/models`), Claude-compatible (`/v1/messages`), and Ollama-compatible (`/api/chat`, `/api/generate`, `/api/tags`, ...) endpoints in front of your backend servers.
 - **Tool / function calling** — Passes OpenAI-style `tools`/`tool_choice` through to llama.cpp backends and translates the resulting tool calls back into Chat Completions or Responses API shapes.
@@ -66,7 +66,7 @@ flowchart TB
 |---|---|
 | **LR.Application** | ASP.NET Core web app — Razor Pages UI, API endpoint mappings (OpenAI/Claude/Ollama/Responses), SignalR hubs, background services, Windows Service hosting |
 | **LR.Core** | Core interfaces, EF Core models/migrations (SQLite), and services — routing engine, server/preset/model-library managers, Hugging Face client, request logging, wrapper protocol |
-| **LR.Providers** | Backend engine providers: a shared base (`ManagedServerProviderBase` — wrapper process management, health, OpenAI/Anthropic request + SSE handling) with one folder per engine (`LlamaCpp/`, `Strata/`) |
+| **LR.Providers** | Backend engine providers: a shared base (`ManagedServerProviderBase` — wrapper process management, health, OpenAI/Anthropic request + SSE handling) with one folder per engine (`LlamaCpp/`, `Strata/`, `Vllm/`) |
 | **LR.Wrapper** | Standalone process that launches and supervises a `llama-server` child process over a named-pipe protocol, so a router restart doesn't kill the backend (the supervisor itself lives in `LR.Core/Wrapper`) |
 | **LR.Agent** | Self-contained service for remote machines: connects out to the router over a WebSocket, relays the wrapper protocol to per-server wrapper processes it launches (`LR.Agent wrapper …`), runs engine-install and model-download jobs locally, and updates itself from the router |
 
@@ -173,7 +173,7 @@ updates, but you install them by replacing the files yourself.
 
 ## Using the dashboard
 
-- **Servers** — register backend server instances, pick their engine (llama.cpp, Strata or stable-diffusion.cpp), point them at a build / Strata folder, start/stop/restart them, and view live logs and status.
+- **Servers** — register backend server instances, pick their engine (llama.cpp, Strata, vLLM or stable-diffusion.cpp), point them at a build / Strata folder, start/stop/restart them, and view live logs and status.
 - **Presets** — define launch configurations (model path, context size, sampling parameters, GPU/threading, speculative decoding, LoRA, multimodal settings, etc.), optionally linked to a model-library entry so the model path and GGUF metadata stay in sync automatically.
 - **Model Library** — import existing `.gguf` (and, for diffusion models, `.safetensors`) files, scan a folder for unregistered models, or search and download models from the Hugging Face Hub with live progress; inspect GGUF metadata per model.
 - **Stats** — throughput, latency, and context-usage charts.
@@ -195,6 +195,24 @@ The first start of a preset prepares its model for Strata with Strata's own `set
 The Strata tab shows each install's version, commit, engine version and prepared models. It can check for updates (a release install against the latest release), update in place (a release install checks out the new tag and installs that release's same engine build; refused while a server is running from it), roll back the engine, or stop tracking an install (its files are never deleted). A Strata folder you set up yourself with `START-HERE.bat` can be added too; it updates like Strata's `UPDATE.bat`, and a preset can also point straight at one of its `strata-<model>.json` run configs.
 
 If a run config (or `STRATA_API_KEY`) sets an API key, the router sends it automatically. Strata's `/props` and `/slots` mirror llama.cpp's, so slot-based concurrency limits, context-aware queuing, and the dashboard's slot/KV usage work the same as for llama.cpp servers.
+
+### vLLM servers
+
+[vLLM](https://github.com/vllm-project/vllm) serves Hugging Face models on the GPU, with its own batching. It only runs on Linux, so **on Windows the router runs it inside WSL** (`wsl --install -d Ubuntu`; the GPU comes through from the Windows NVIDIA driver, nothing to install in the distro).
+
+1. **Engines → vLLM → Install**: pick the GPU and optionally a version (blank = the newest on PyPI). Each install is a self-contained folder holding its own `uv`, Python 3.12 and venv: `<install root>/vllm-<version>-<backend>` on Linux, `~/.llm-router/engines/…` in the distro on Windows, tracked by its `\\wsl.localhost\…` path. It needs `python3` on the target to fetch `uv`, unless `uv` is already there. CPU-only setups aren't offered, because vLLM's CPU wheels need a hand-set `LD_PRELOAD`; a server can point straight at a venv you made yourself instead.
+2. **Servers**: create a server with engine **vLLM**, bound to the install. A remote agent works the same way.
+3. **Presets**: in the **vLLM** section, search for a model under **Start from a recipe**, choose its variant, hardware, strategy and features, and **Fill in the preset**. Recipes come from [recipes.vllm.ai](https://recipes.vllm.ai) and are read once, by the router, when applied: their command fills in the form for you to review, and a saved preset never needs the site. You can also type a Hugging Face id or a model folder and fill the fields in by hand.
+
+Things to know about recipes:
+
+- **The form says what the site changed.** Recipes only list hardware they're tested on, and the site quietly falls back for anything else (an RTX 5090 request for a CPU-validated recipe comes back tuned for a Xeon). Consumer GPUs usually get a data-centre recipe with the right flags; check the context length and GPU memory share against your card.
+- **Nothing from a recipe runs until you save and start the preset, and some of it is left out.** Flags the router owns (`--host`, `--port`, `--api-key`, `--served-model-name`, …) and variables like `LD_PRELOAD`, `PATH` or `HF_TOKEN` are dropped and reported. `--trust-remote-code` is kept but called out, since it runs Python from the model's repository. A recipe's extra install steps are shown, not run. `VLLM_USE_RUST_FRONTEND` is also left out, because that frontend rejects Anthropic-format requests; add it to the preset's environment variables if only OpenAI-format clients use it.
+- **Multi-node strategies aren't available**: a router server is one machine.
+
+A first start downloads the model into the Hugging Face cache of the machine the server runs on, so the startup timeout is 4 hours; gated models use the Hugging Face token from the model library settings. Models don't come from the model library, whose entries are single files. Clients ask for the preset's name or aliases as usual; the router rewrites `model` to the fixed name each server is started under, because vLLM rejects any other. vLLM has no llama.cpp-style `/props` or `/slots`, so the dashboard shows no slot or KV usage for it, and the router's in-flight limit is the preset's **Max concurrent requests** (default 64).
+
+**WSL limitations.** WSL distros belong to a Windows user, so the router or agent has to run under that user's account, not as a service under LocalSystem (the default for both installers); otherwise it sees no distros. On a remote Windows agent the router also has to reach the server over the network, and WSL's default NAT networking only forwards to the Windows machine itself: use `networkingMode=mirrored` in that account's `.wslconfig` and allow the port through the Hyper-V firewall. Alternatively, a server can point at a native venv of the community [vllm-windows](https://github.com/SystemPanic/vllm-windows) fork (`.venv\Scripts\vllm.exe`), which needs no WSL but isn't installed or updated by the router.
 
 ### Image generation (stable-diffusion.cpp)
 
@@ -220,7 +238,7 @@ Image presets are kept apart from chat: they don't appear in `/api/tags` or `/v1
 ### Remote agents
 
 An agent is a small service on another machine that runs servers for this router. Everything is
-controlled from the router: the agent installs llama.cpp / stable-diffusion.cpp builds and models
+controlled from the router: the agent installs llama.cpp / stable-diffusion.cpp / vLLM builds and models
 on its own disk, starts and stops backends, and updates itself.
 
 **Adding a machine.** Open **Agents**, check the router URL (it must be reachable from the other

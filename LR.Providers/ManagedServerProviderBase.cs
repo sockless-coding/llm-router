@@ -241,6 +241,24 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     protected virtual bool HasLlamaServerEndpoints => true;
 
     /// <summary>
+    /// Whether a start is finished as soon as <see cref="HealthCheckAsync"/> passes, for an engine
+    /// that only listens once its model is loaded and has no dependable output marker to wait for.
+    /// </summary>
+    protected virtual bool ReadyWhenHealthy => false;
+
+    /// <summary>
+    /// Called after each failed health check during a <see cref="ReadyWhenHealthy"/> start. An engine
+    /// that can tell the wait is pointless throws here, with a message for the user, to fail the start.
+    /// </summary>
+    protected virtual void OnReadinessCheckFailed() { }
+
+    /// <summary>
+    /// Adjusts a chat request's body for the engine just before it's posted, in both the OpenAI and
+    /// Anthropic shapes — the counterpart of <see cref="PrepareRawRequestPayload"/>.
+    /// </summary>
+    protected virtual void PrepareChatRequestBody(Dictionary<string, JsonElement> body) { }
+
+    /// <summary>
     /// Rewrites a <see cref="SendRawRequestAsync"/> payload into the engine's own dialect just
     /// before it's posted — e.g. folding OpenAI-extension fields into engine-specific ones. The
     /// payload is routed and queued unchanged; only the copy sent to this engine is rewritten.
@@ -303,6 +321,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
 
         var launch = BuildLaunchSpec(preset);
         _processManager.StartupTimeout = StartupTimeout;
+        _processManager.ReadinessProbe = ReadyWhenHealthy ? ProbeReadinessAsync : null;
 
         // Forget the previous run's /props and /metrics — this start may use a different config.
         _serverProps = null;
@@ -322,6 +341,14 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             await LogProviderMessage(ServerLogLevel.Info, $"Server started successfully on {ServerUrl}.");
 
         return result;
+    }
+
+    private async Task<bool> ProbeReadinessAsync(CancellationToken cancellationToken)
+    {
+        if (await HealthCheckAsync(cancellationToken))
+            return true;
+        OnReadinessCheckFailed();
+        return false;
     }
 
     /// <summary>
@@ -508,6 +535,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                 var requestBody = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload)
                     ?? new Dictionary<string, JsonElement>();
                 requestBody["stream"] = JsonSerializer.SerializeToElement(false);
+                PrepareChatRequestBody(requestBody);
 
                 using var httpRequest = CreateRequest(HttpMethod.Post, endpoint);
                 httpRequest.Content = JsonContent.Create(requestBody);
@@ -670,6 +698,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
         var streamBody = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload)
             ?? new Dictionary<string, JsonElement>();
         streamBody["stream"] = JsonSerializer.SerializeToElement(true);
+        PrepareChatRequestBody(streamBody);
         payload = JsonSerializer.Serialize(streamBody);
 
         const int maxRetries = 2;
@@ -842,10 +871,13 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                             ? content.GetString()
                             : null;
 
-                        // Extract reasoning_content for models with thinking/reasoning capabilities
+                        // Extract reasoning for models with thinking/reasoning capabilities:
+                        // reasoning_content (llama.cpp) or reasoning (newer vLLM).
                         reasoningContentDelta = delta.TryGetProperty("reasoning_content", out JsonElement reasoningContent)
                             ? reasoningContent.GetString()
-                            : null;
+                            : delta.TryGetProperty("reasoning", out JsonElement reasoning) && reasoning.ValueKind == JsonValueKind.String
+                                ? reasoning.GetString()
+                                : null;
 
                         // Tool calls stream incrementally, index-keyed, the same way OpenAI does:
                         // each frame carries a fragment of one call's id/name/arguments. Some

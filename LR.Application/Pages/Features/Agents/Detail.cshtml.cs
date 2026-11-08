@@ -72,6 +72,8 @@ public class AgentDetailModel : PageModel
             var profile = EngineReleaseProfile.For(engine)!;
             ReleaseBackends[engine] = profile.CandidateBackends.Where(b => profile.PrimaryAssetPattern(b, os, arch) is not null).ToList();
         }
+        // vLLM has no release archives to match: it installs with pip, for these backends.
+        ReleaseBackends[ServerEngine.Vllm] = VllmLayout.InstallBackends(agent.IsWindows).ToList();
         return Page();
     }
 
@@ -79,6 +81,7 @@ public class AgentDetailModel : PageModel
     {
         ServerEngine.LlamaCpp => "llama.cpp",
         ServerEngine.StableDiffusionCpp => "stable-diffusion.cpp",
+        ServerEngine.Vllm => "vLLM",
         _ => engine.ToString(),
     };
 }

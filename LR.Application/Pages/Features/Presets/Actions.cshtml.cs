@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using LR.Core.Data;
 using LR.Core.Interfaces;
 using LR.Core.Models;
+using LR.Core.Services.EngineBuilds;
 
 namespace LR.Application.Pages.Features.Presets;
 
@@ -13,11 +14,50 @@ public class ActionsModel : PageModel
 {
     private readonly IServerManager _serverManager;
     private readonly LRDbContext _context;
+    private readonly IVllmRecipeClient _recipes;
 
-    public ActionsModel(IServerManager serverManager, LRDbContext context)
+    public ActionsModel(IServerManager serverManager, LRDbContext context, IVllmRecipeClient recipes)
     {
         _serverManager = serverManager;
         _context = context;
+        _recipes = recipes;
+    }
+
+    /// <summary>The vLLM recipe list and hardware vocabulary, for the picker on the preset form.</summary>
+    public Task<IActionResult> OnGetVllmCatalogAsync() =>
+        RecipeResultAsync(async ct => await _recipes.GetCatalogAsync(ct));
+
+    /// <summary>One recipe's choices.</summary>
+    public Task<IActionResult> OnGetVllmRecipeAsync(string hfId) =>
+        RecipeResultAsync(async ct => await _recipes.GetRecipeAsync(hfId, ct)
+            ?? throw new InvalidOperationException($"There's no vLLM recipe for {hfId}."));
+
+    /// <summary>
+    /// What applying a recipe would put in the form, and what to read before saving. Only reads: nothing
+    /// is stored until the user saves the preset, and nothing the site returned has been run.
+    /// <paramref name="features"/> is comma-separated, <c>none</c> for all off; null keeps the recipe's defaults.
+    /// </summary>
+    public Task<IActionResult> OnGetVllmApplyAsync(string hfId, string? hardware, string? variant, string? strategy, string? features) =>
+        RecipeResultAsync(async ct =>
+        {
+            var selected = features == "none" ? [] : features?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var rendering = await _recipes.RenderAsync(hfId, new VllmRecipeSelection(hardware, variant, strategy, selected), ct)
+                ?? throw new InvalidOperationException($"There's no vLLM recipe for {hfId}.");
+            var details = await _recipes.GetRecipeAsync(hfId, ct);
+            var applied = VllmPresetSettings.Apply(rendering, details, selected);
+            return new { applied.Model, applied.Settings, applied.Warnings, rendering.PageUrl, rendering.Hardware, rendering.Variant, rendering.Strategy };
+        });
+
+    private async Task<IActionResult> RecipeResultAsync<T>(Func<CancellationToken, Task<T>> action)
+    {
+        try
+        {
+            return new JsonResult(await action(HttpContext.RequestAborted));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new JsonResult(new { error = ex.Message }) { StatusCode = StatusCodes.Status502BadGateway };
+        }
     }
 
     [BindProperty]

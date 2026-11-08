@@ -1,0 +1,119 @@
+@using LR.Core.Models
+@using LR.Core.Services.EngineBuilds
+@model LR.Application.Pages.Features.Engines.EnginesIndexModel
+@{
+    var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 text-sm";
+    var onWindows = OperatingSystem.IsWindows();
+}
+
+<div class="mb-4 space-y-2">
+    <p class="text-text-secondary text-sm">
+        Install <a href="https://github.com/@VllmLayout.Repo/releases" target="_blank" rel="noopener" class="text-neon-cyan/80 hover:text-neon-cyan">vLLM</a>
+        side by side, one self-contained Python environment per version, and bind vLLM servers to them. Models come from Hugging Face rather than the model library:
+        a preset names one, usually by applying a recipe from <a href="https://recipes.vllm.ai" target="_blank" rel="noopener" class="text-neon-cyan/80 hover:text-neon-cyan">recipes.vllm.ai</a>.
+    </p>
+    @if (onWindows)
+    {
+        <p class="text-xs text-amber-400">
+            vLLM doesn't run natively on Windows, so installs here go in WSL (<span class="font-mono">wsl --install -d Ubuntu</span>), under
+            <span class="font-mono">~/@VllmLayout.WslInstallRoot</span>. WSL distros belong to a Windows user: this needs LLM Router running under your account, not as a service under LocalSystem.
+            To install on another machine, use its page under <a href="/Features/Agents/Index" class="underline hover:text-neon-cyan">Agents</a>.
+        </p>
+    }
+</div>
+
+<h2 class="text-sm font-semibold uppercase tracking-wider text-text-secondary mb-3">vLLM installs</h2>
+@if (!Model.Builds.Any())
+{
+    <div class="text-center py-10 bg-cyber-card rounded-xl border border-neon-cyan/10 mb-8">
+        <p class="text-text-secondary">No vLLM installs yet</p>
+        <p class="text-text-secondary text-sm mt-1">Install one below. A server can also point straight at a venv you set up yourself, from its settings.</p>
+    </div>
+}
+else
+{
+    <div class="bg-cyber-card rounded-xl border border-gray-700/30 overflow-hidden overflow-x-auto mb-8">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-700/50 bg-gray-800/30">
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Version</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium">Backend</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Status</th>
+                    <th class="text-center px-4 py-3 text-text-secondary font-medium">Used By</th>
+                    <th class="text-right px-4 py-3 text-text-secondary font-medium"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var b in Model.Builds)
+                {
+                    var usage = Model.ServerUsageCounts.GetValueOrDefault(b.Id, 0);
+                    var inFlight = b.Status is EngineBuildStatus.Downloading or EngineBuildStatus.Building;
+                    <tr class="border-b border-gray-700/30 hover:bg-gray-800/20 align-top">
+                        <td class="px-4 py-3">
+                            <a href="/Features/Engines/Detail?id=@b.Id" class="text-text-primary font-medium hover:text-neon-cyan transition-colors">@b.Name</a>
+                            <p class="text-xs text-text-secondary mt-0.5 font-mono break-all">@b.InstallPath</p>
+                        </td>
+                        <td class="px-4 py-3 text-text-primary font-mono">@(b.VersionTag ?? "—")</td>
+                        <td class="px-4 py-3 text-text-secondary">@b.BackendType</td>
+                        <td class="px-4 py-3 text-center"><partial name="~/Pages/Features/Engines/Tabs/_StatusBadge.cshtml" model="b" /></td>
+                        <td class="px-4 py-3 text-center text-text-primary">@usage</td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap space-x-1">
+                            @if (inFlight)
+                            {
+                                <button type="button" onclick="cancelBuild('@b.Id')" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Cancel</button>
+                            }
+                            else
+                            {
+                                if (b.Status == EngineBuildStatus.Ready)
+                                {
+                                    <a href="/Features/Engines/Changelog?id=@b.Id" class="text-xs px-2 py-1 rounded-md bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-all font-medium">Check updates</a>
+                                    <button type="button" onclick="updateVllm('@b.Id')" class="text-xs px-2 py-1 rounded-md bg-neon-cyan/10 text-neon-cyan hover:bg-neon-cyan/20 transition-all font-medium">Update</button>
+                                }
+                                <button type="button" data-name="@b.Name" onclick="deleteBuild('@b.Id', this.dataset.name, @usage)" class="text-xs px-2 py-1 rounded-md bg-red-500/10 text-neon-red hover:bg-red-500/20 transition-all font-medium">Delete</button>
+                            }
+                        </td>
+                    </tr>
+                    @if (b.Status == EngineBuildStatus.Error || (b.Status == EngineBuildStatus.Ready && !string.IsNullOrEmpty(b.StatusMessage)))
+                    {
+                        <tr class="border-b border-gray-700/30">
+                            <td colspan="6" class="px-4 pb-3 -mt-2 text-xs @(b.Status == EngineBuildStatus.Error ? "text-neon-red" : "text-amber-400")">@b.StatusMessage</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3 max-w-xl">
+    <h3 class="text-sm font-semibold text-text-primary">Install vLLM@(onWindows ? " in WSL" : "")</h3>
+    <div class="grid grid-cols-2 gap-3">
+        <div>
+            <label for="vllm-backend" class="block text-xs font-medium text-text-secondary mb-1">GPU</label>
+            <select id="vllm-backend" class="@inpCls">
+                @foreach (var backend in VllmLayout.InstallBackends(onWindows))
+                {
+                    <option value="@backend">@(backend == BackendType.Cuda ? "NVIDIA (CUDA)" : "AMD (ROCm)")</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label for="vllm-version" class="block text-xs font-medium text-text-secondary mb-1">Version</label>
+            <input id="vllm-version" placeholder="newest release" class="@inpCls font-mono" />
+        </div>
+        @if (onWindows)
+        {
+            <div>
+                <label for="vllm-distro" class="block text-xs font-medium text-text-secondary mb-1">WSL distro</label>
+                <input id="vllm-distro" placeholder="the default one" class="@inpCls font-mono" />
+            </div>
+        }
+        <div>
+            <label for="vllm-name" class="block text-xs font-medium text-text-secondary mb-1">Name</label>
+            <input id="vllm-name" placeholder="optional" class="@inpCls" />
+        </div>
+    </div>
+    <p class="text-xs text-text-secondary">Takes about 20 GB per install. Needs <span class="font-mono">python3</span> on @(onWindows ? "the distro" : "this machine") to fetch <span class="font-mono">uv</span>, unless it already has <span class="font-mono">uv</span>. CPU-only setups can use a venv you make yourself.</p>
+    <button type="button" onclick="installVllm()" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">Install</button>
+</div>
