@@ -41,6 +41,23 @@ public sealed class SdCppInstallHandler : IEngineInstallHandler
     public void RefreshFromDisk(EngineBuild build) { }
 }
 
+/// <summary>vLLM installs: a venv holding <c>vllm</c> (in WSL on Windows), compared against the latest release by tag.</summary>
+public sealed class VllmInstallHandler : IEngineInstallHandler
+{
+    public ServerEngine Engine => ServerEngine.Vllm;
+
+    public string Repo => VllmLayout.Repo;
+
+    public bool IsInstallPresent(string installPath) => VllmLayout.IsInstall(installPath);
+
+    public bool IsReady(string installPath) => IsInstallPresent(installPath);
+
+    public Task<string?> GetLatestRefAsync(EngineBuild build, IGitHubClient github, CancellationToken ct = default) =>
+        VllmReleases.GetLatestTagAsync(ct);
+
+    public void RefreshFromDisk(EngineBuild build) { }
+}
+
 /// <summary>
 /// Strata checkouts: a release install (<see cref="EngineBuildSource.OfficialRelease"/>, pinned to a
 /// tag) is compared against the latest release, a checkout following the branch

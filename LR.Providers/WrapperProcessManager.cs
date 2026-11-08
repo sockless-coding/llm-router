@@ -45,6 +45,12 @@ public class WrapperProcessManager
     /// <summary>How long a start may take before it's treated as failed.</summary>
     public TimeSpan StartupTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// When set, a start also counts as finished once this returns true, for engines whose output has
+    /// no dependable readiness marker. Polled while waiting; an exception it throws fails the start.
+    /// </summary>
+    public Func<CancellationToken, Task<bool>>? ReadinessProbe { get; set; }
+
     private ServerInstance? _serverInstance;
     private volatile IWrapperTransport? _connection;
     private CancellationTokenSource? _pumpCts;
@@ -105,6 +111,7 @@ public class WrapperProcessManager
                 WorkingDirectory = launch.WorkingDirectory,
                 EnvironmentSetupCommand = EnvironmentSetupCommand,
                 CompanionAppPath = CompanionAppPath,
+                Environment = launch.Environment?.ToDictionary(),
                 Port = Port,
             }, cancellationToken);
 
@@ -153,10 +160,14 @@ public class WrapperProcessManager
                     throw new InvalidOperationException(msg);
                 }
 
-                if (modelLoaded && detectedPort.HasValue && (detectedPort.Value == Port || Port <= 0))
+                bool ready = modelLoaded && detectedPort.HasValue && (detectedPort.Value == Port || Port <= 0);
+                if (!ready && ReadinessProbe is { } probe)
+                    ready = await probe(cancellationToken);
+
+                if (ready)
                 {
                     double elapsed = stopwatch.ElapsedMilliseconds / 1000.0;
-                    _logger.LogInformation("Server started successfully at {ServerUrl} in {ElapsedMs}ms (output markers detected)",
+                    _logger.LogInformation("Server started successfully at {ServerUrl} in {ElapsedMs}ms",
                         $"http://localhost:{Port}", stopwatch.ElapsedMilliseconds);
 
                     await onProgress?.Invoke(new StartupProgressEvent

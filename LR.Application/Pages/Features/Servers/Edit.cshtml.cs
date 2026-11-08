@@ -100,7 +100,7 @@ public partial class EditModel : PageModel
             && !string.IsNullOrWhiteSpace(ViewModel.InstallFolderPath)
             && Engine.ValidateInstallFolder(ViewModel.InstallFolderPath) is { } folderError)
         {
-            ModelState.AddModelError(nameof(ViewModel.InstallFolderPath), folderError);
+            ModelState.AddModelError($"{nameof(ViewModel)}.{nameof(ViewModel.InstallFolderPath)}", folderError);
             return Page();
         }
 

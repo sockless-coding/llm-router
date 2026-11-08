@@ -87,7 +87,7 @@ public sealed class WrapperHost
     private async Task StartServerAsync(StartServerCommand cmd)
     {
         await EnsureCompanionRunningAsync(cmd.CompanionAppPath, cmd.EnvironmentSetupCommand);
-        await StartServerProcessAsync(cmd.ExecutablePath, cmd.Arguments, cmd.WorkingDirectory, cmd.EnvironmentSetupCommand, cmd.Port);
+        await StartServerProcessAsync(cmd.ExecutablePath, cmd.Arguments, cmd.WorkingDirectory, cmd.EnvironmentSetupCommand, cmd.Port, cmd.Environment);
     }
 
     private async Task StopServerAsync(bool stopCompanion)
@@ -99,7 +99,7 @@ public sealed class WrapperHost
 
     // --- Main server process ---
 
-    private async Task StartServerProcessAsync(string executablePath, List<string> arguments, string? workingDirectory, string? environmentSetupCommand, int? port)
+    private async Task StartServerProcessAsync(string executablePath, List<string> arguments, string? workingDirectory, string? environmentSetupCommand, int? port, Dictionary<string, string>? environment)
     {
         // Idempotent "ensure": stop whatever main server is currently running (this is an
         // intentional stop, not a crash — suppressed from ProcessExitedEvent) before swapping in
@@ -115,6 +115,10 @@ public sealed class WrapperHost
             RedirectStandardError = true,
             WorkingDirectory = workingDirectory,
         };
+
+        if (environment is not null)
+            foreach (var (name, value) in environment)
+                startInfo.Environment[name] = value;
 
         if (!string.IsNullOrEmpty(environmentSetupCommand))
         {

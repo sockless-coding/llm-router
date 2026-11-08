@@ -48,6 +48,10 @@ else
                 {
                     <span class="text-[11px] text-text-secondary">Checks out @s.LatestTag in <span class="font-mono break-all">@b.InstallPath</span> and runs Strata's own <span class="font-mono">setup.py --update</span>, which installs that release's engine. Model files and settings are kept; the @Model.ServerUsage bound server(s) keep working. To keep this version, install the new release side by side from the Releases page instead.</span>
                 }
+                else if (b.Engine == ServerEngine.Vllm)
+                {
+                    <span class="text-[11px] text-text-secondary">Installs vLLM @s.LatestTag into the Python environment in <span class="font-mono break-all">@b.InstallPath</span> — the @Model.ServerUsage bound server(s) keep working, no re-pointing. Downloaded models are kept. To keep this version, install the new one side by side from the Engines page instead.</span>
+                }
                 else if (b.Source == EngineBuildSource.GitCheckout)
                 {
                     <span class="text-[11px] text-text-secondary">Pulls the newest code into <span class="font-mono break-all">@b.InstallPath</span> and runs Strata's own <span class="font-mono">setup.py --update</span> (engine, Python packages, model configs). Model files and settings are kept; the @Model.ServerUsage bound server(s) keep working.</span>

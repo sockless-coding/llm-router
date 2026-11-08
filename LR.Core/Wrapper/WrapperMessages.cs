@@ -44,6 +44,12 @@ public sealed class StartServerCommand : WrapperMessage
     public string? EnvironmentSetupCommand { get; set; }
     public string? CompanionAppPath { get; set; }
 
+    /// <summary>
+    /// Environment variables for the server process only, on top of the wrapper's own. Carried here
+    /// rather than on the command line so secrets don't show up in process listings or logs.
+    /// </summary>
+    public Dictionary<string, string>? Environment { get; set; }
+
     /// <summary>The port the server is expected to listen on, reported back via <see cref="HelloEvent"/>.</summary>
     public int? Port { get; set; }
 }

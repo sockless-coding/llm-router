@@ -127,6 +127,16 @@ builder.Services.AddHttpClient<IGitHubClient, GitHubReleaseClient>(client =>
 builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.LlamaCppInstallHandler>();
 builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.StrataInstallHandler>();
 builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.SdCppInstallHandler>();
+builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.VllmInstallHandler>();
+builder.Services.AddHttpClient(VllmRecipeClient.HttpClientName, client =>
+{
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("llm-router");
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = true,
+    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Brotli,
+});
+builder.Services.AddSingleton<IVllmRecipeClient, VllmRecipeClient>();
 builder.Services.AddScoped<IEngineBuildManager, EngineBuildManager>();
 builder.Services.AddSingleton<IEngineBuildProgressPublisher, EngineBuildProgressPublisher>();
 builder.Services.AddSingleton<EngineBuildService>();

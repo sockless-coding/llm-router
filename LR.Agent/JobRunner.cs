@@ -57,7 +57,7 @@ public sealed class JobRunner
                     DownloadModelJob download => await DownloadModelAsync(download, cts.Token),
                     PullModelJob pull => await PullModelAsync(pull, cts.Token),
                     ReadModelMetadataJob read => await ReadMetadataAsync(read.FilePath, cts.Token),
-                    DeletePathJob delete => Delete(delete),
+                    DeletePathJob delete => await DeleteAsync(delete, cts.Token),
                     _ => throw new NotSupportedException($"This agent doesn't know how to run {job.GetType().Name}."),
                 };
                 completion.Success = true;
@@ -88,8 +88,42 @@ public sealed class JobRunner
 
     // ==================== ENGINES ====================
 
+    /// <summary>vLLM installs with pip, not from an archive: the same steps the router runs for itself (<see cref="VllmInstaller"/>).</summary>
+    private async Task<AgentJobResult> InstallVllmAsync(InstallEngineJob job, CancellationToken ct)
+    {
+        var workRoot = Path.Combine(_config.ResolvedDataDirectory, ".work", job.JobId.ToString("N"));
+        Directory.CreateDirectory(workRoot);
+        var sink = new BuildProgressSink(job.JobId, new ForwardingBuildPublisher(_session), Path.Combine(workRoot, "build.log"),
+            _loggerFactory.CreateLogger<BuildProgressSink>());
+
+        var request = new VllmInstallRequest(job.Backend, job.ReleaseTag, job.OutputDir, job.WslDistro);
+        try
+        {
+            var installed = await VllmInstaller.InstallAsync(request, sink, ct);
+            await sink.CompletedAsync($"vLLM {installed.VersionTag} is ready in {installed.InstallPath}.");
+            return new AgentJobResult
+            {
+                InstallPath = installed.InstallPath,
+                VersionTag = installed.VersionTag,
+                TargetOs = installed.TargetOs,
+                TargetArch = installed.TargetArch,
+                SizeBytes = installed.SizeBytes,
+            };
+        }
+        catch when (!job.InPlace)
+        {
+            // Like on the router: a new install that failed leaves nothing behind, so it can be retried.
+            try { await VllmInstaller.DeleteAsync(await VllmInstaller.ResolveInstallPathAsync(request, CancellationToken.None)); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Could not clean up the failed vLLM install for job {JobId}.", job.JobId); }
+            throw;
+        }
+    }
+
     private async Task<AgentJobResult> InstallEngineAsync(InstallEngineJob job, CancellationToken ct)
     {
+        if (job.Engine == ServerEngine.Vllm)
+            return await InstallVllmAsync(job, ct);
+
         var profile = EngineReleaseProfile.For(job.Engine)
             ?? throw new NotSupportedException($"{job.Engine} can't be installed on an agent.");
         var github = new GitHubReleaseClient(CreateHttpClient(), new TokenSettings(_session), _loggerFactory.CreateLogger<GitHubReleaseClient>());
@@ -253,10 +287,17 @@ public sealed class JobRunner
 
     // ==================== FILES ====================
 
-    private AgentJobResult Delete(DeletePathJob job)
+    private static async Task<AgentJobResult> DeleteAsync(DeletePathJob job, CancellationToken ct)
     {
         foreach (var path in job.Paths)
         {
+            // A folder inside a WSL distro can't be deleted through its Windows network path (a venv's symlinks stop it).
+            if (VllmLayout.ParseWslPath(path) is not null)
+            {
+                await VllmInstaller.DeleteAsync(path, ct);
+                continue;
+            }
+
             var full = Path.GetFullPath(path);
             if (Path.GetPathRoot(full) is { } root && string.Equals(root.TrimEnd('/', '\\'), full.TrimEnd('/', '\\'), StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"Refusing to delete the filesystem root {full}.");

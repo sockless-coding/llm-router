@@ -37,9 +37,12 @@ public static class LlamaCppResponseParser
                     ? content.GetString() ?? string.Empty
                     : string.Empty;
 
+                // reasoning_content (llama.cpp) or reasoning (newer vLLM).
                 response.ReasoningContent = message.TryGetProperty("reasoning_content", out JsonElement reasoning) && reasoning.ValueKind == JsonValueKind.String
                     ? reasoning.GetString()
-                    : null;
+                    : message.TryGetProperty("reasoning", out JsonElement vllmReasoning) && vllmReasoning.ValueKind == JsonValueKind.String
+                        ? vllmReasoning.GetString()
+                        : null;
 
                 // Only set ToolCalls when the array actually has entries — llama.cpp can include
                 // an empty "tool_calls": [] on ordinary text responses, and a non-null-but-empty

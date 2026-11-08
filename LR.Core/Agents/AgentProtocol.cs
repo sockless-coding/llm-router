@@ -302,6 +302,9 @@ public sealed class InstallEngineJob : AgentJobMessage
     public string? GitRef { get; set; }
     public string OutputDir { get; set; } = string.Empty;
     public bool InPlace { get; set; }
+
+    /// <summary>vLLM on a Windows agent: the WSL distro to install in; null for its default.</summary>
+    public string? WslDistro { get; set; }
 }
 
 /// <summary>Downloads a Hugging Face file (every shard, for a split GGUF) straight onto the agent.</summary>

@@ -240,6 +240,12 @@ public partial class EngineBuildService
                 return buildId;
             }
 
+            if (build.Engine == ServerEngine.Vllm)
+            {
+                await StartVllmUpdateAsync(context, build, refOverride, workspaceRoot);
+                return buildId;
+            }
+
             if (build.Source == EngineBuildSource.SourceCompile)
             {
                 recipe = build.RecipeId is { } rid ? await context.LlamaCppBuildRecipes.FindAsync(rid) : null;

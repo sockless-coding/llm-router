@@ -95,7 +95,7 @@ public class ServerCreateModel : PageModel
         {
             if (string.IsNullOrWhiteSpace(ViewModel.InstallFolderPath))
             {
-                ModelState.AddModelError(nameof(ViewModel.InstallFolderPath), descriptor.SupportsManagedBuilds
+                ModelState.AddModelError($"{nameof(ViewModel)}.{nameof(ViewModel.InstallFolderPath)}", descriptor.SupportsManagedBuilds
                     ? $"Select a managed build or enter a folder path for {descriptor.DisplayName}."
                     : $"Enter the folder path for {descriptor.DisplayName}.");
                 return Page();
@@ -104,7 +104,7 @@ public class ServerCreateModel : PageModel
             // A folder on a remote agent can't be checked from here — its wrapper reports a bad path on start.
             if (agent is null && descriptor.ValidateInstallFolder(ViewModel.InstallFolderPath) is { } folderError)
             {
-                ModelState.AddModelError(nameof(ViewModel.InstallFolderPath), folderError);
+                ModelState.AddModelError($"{nameof(ViewModel)}.{nameof(ViewModel.InstallFolderPath)}", folderError);
                 return Page();
             }
         }

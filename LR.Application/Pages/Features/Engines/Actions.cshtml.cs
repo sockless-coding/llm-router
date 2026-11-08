@@ -39,6 +39,9 @@ public class EngineActionsModel : PageModel
     /// <summary>Strata: the release asset holding the engine build to install (e.g. <c>strata-windows-x64.zip</c>).</summary>
     [BindProperty] public string? Asset { get; set; }
 
+    /// <summary>vLLM on Windows: the WSL distro to install in (the default one when empty).</summary>
+    [BindProperty] public string? WslDistro { get; set; }
+
     /// <summary>The engine a release install is for (llama.cpp when not given).</summary>
     [BindProperty] public ServerEngine? Engine { get; set; }
 
@@ -55,6 +58,8 @@ public class EngineActionsModel : PageModel
                 await _buildService.RefreshStrataAsync(BuildId, HttpContext.RequestAborted);
                 return new { success = true, buildId = BuildId, message = "Refreshed." };
             }),
+            "installvllm" => await RunAsync(async () =>
+                new { success = true, buildId = await _buildService.StartVllmInstallAsync(Backend, ReleaseTag, WslDistro, Name), message = "Install started." }),
             "installrelease" => await InstallReleaseAsync(),
             "update" => await UpdateAsync(),
             "startbuild" => await StartBuildAsync(),

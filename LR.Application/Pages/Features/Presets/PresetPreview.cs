@@ -75,6 +75,9 @@ public static class PresetPreview
         if (engine == ServerEngine.StableDiffusionCpp)
             return BuildStableDiffusion(preset);
 
+        if (engine == ServerEngine.Vllm)
+            return BuildVllm(preset);
+
         var args = new LlamaCppArgBuilder { Port = 8080 }.Build(preset);
         var commandLine = "llama-server " + string.Join(' ', args.Select(QuoteIfNeeded));
 
@@ -112,6 +115,26 @@ public static class PresetPreview
             "# every start\n" +
             "python serve/server.py --engine strata --config <prepared config> --host 127.0.0.1 --port <port>";
         return new Result(commandLine, setupArgs);
+    }
+
+    /// <summary>A vLLM preset: its environment, then the <c>vllm serve</c> launch (the port is assigned at start).</summary>
+    private static Result BuildVllm(ModelPreset preset)
+    {
+        List<string> args;
+        Dictionary<string, string> environment;
+        try
+        {
+            args = VllmPresetSettings.ServeArgs(preset);
+            environment = VllmPresetSettings.EnvironmentOf(preset);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new Result(ex.Message, Array.Empty<string>());
+        }
+
+        args.AddRange(["--host", "127.0.0.1", "--port", "<port>"]);
+        var exports = string.Concat(environment.Select(e => $"{e.Key}={QuoteIfNeeded(e.Value)} "));
+        return new Result(exports + "vllm " + string.Join(' ', args.Select(QuoteIfNeeded)), args);
     }
 
     /// <summary>A stable-diffusion.cpp preset: the <c>sd-server</c> launch (the port is assigned at start).</summary>

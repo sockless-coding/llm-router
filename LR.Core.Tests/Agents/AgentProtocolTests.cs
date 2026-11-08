@@ -106,6 +106,37 @@ public class AgentProtocolTests
     }
 
     [Fact]
+    public void VllmInstallJobsCarryTheirVersionAndDistro()
+    {
+        var json = AgentProtocol.Serialize(new InstallEngineJob
+        {
+            JobId = Guid.NewGuid(),
+            Engine = ServerEngine.Vllm,
+            Backend = BackendType.Cuda,
+            ReleaseTag = "v0.33.0",
+            OutputDir = "/var/lib/lr-agent/engines/vllm",
+            WslDistro = "Ubuntu",
+        });
+        var job = Assert.IsType<InstallEngineJob>(AgentProtocol.Deserialize(json));
+        Assert.Equal(ServerEngine.Vllm, job.Engine);
+        Assert.Equal("v0.33.0", job.ReleaseTag);
+        Assert.Equal("Ubuntu", job.WslDistro);
+    }
+
+    [Fact]
+    public void StartCommandsCarryTheirEnvironmentToTheAgentsWrapper()
+    {
+        var json = AgentProtocol.Serialize(new WrapperFrameMessage
+        {
+            InstanceId = Guid.NewGuid(),
+            Frame = new StartServerCommand { ExecutablePath = "wsl.exe", Environment = new() { ["HF_TOKEN"] = "hf_x", ["WSLENV"] = "HF_TOKEN" } },
+        });
+        var frame = Assert.IsType<WrapperFrameMessage>(AgentProtocol.Deserialize(json));
+        var start = Assert.IsType<StartServerCommand>(frame.Frame);
+        Assert.Equal("hf_x", start.Environment!["HF_TOKEN"]);
+    }
+
+    [Fact]
     public void EnumsTravelAsNames() =>
         Assert.Contains("\"Vulkan\"", AgentProtocol.Serialize(new InstallEngineJob { Backend = BackendType.Vulkan }));
 

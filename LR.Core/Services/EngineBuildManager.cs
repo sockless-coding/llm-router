@@ -79,7 +79,13 @@ public class EngineBuildManager : IEngineBuildManager
         // A remote agent's install is deleted by that agent; never touch a same-named path here.
         if (deleteFiles && build.AgentId is null && !string.IsNullOrWhiteSpace(build.InstallPath) && Directory.Exists(build.InstallPath))
         {
-            try { Directory.Delete(build.InstallPath, recursive: true); }
+            try
+            {
+                if (build.Engine == ServerEngine.Vllm)
+                    await VllmInstaller.DeleteAsync(build.InstallPath);
+                else
+                    Directory.Delete(build.InstallPath, recursive: true);
+            }
             catch { /* leave the folder; the row is going away regardless */ }
         }
 
