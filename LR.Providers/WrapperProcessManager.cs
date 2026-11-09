@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
+using LR.Core.Services;
 using LR.Core.Wrapper;
 
 namespace LR.Providers;
@@ -27,6 +28,12 @@ public class WrapperProcessManager
     private const int ProgressReportEverySeconds = 5;
     private const int WrapperConnectTimeoutMs = 15_000;
     private const int CommandAckTimeoutMs = 15_000;
+
+    /// <summary>Output kept for a failed start's message; the whole of it goes to <see cref="ServerOutputLog"/>.</summary>
+    private const int StartupLinesKept = 400;
+
+    /// <summary>How much of the latest output line a progress message shows.</summary>
+    private const int ProgressLineLength = 160;
 
     private readonly ILogger<WrapperProcessManager> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -52,6 +59,7 @@ public class WrapperProcessManager
     public Func<CancellationToken, Task<bool>>? ReadinessProbe { get; set; }
 
     private ServerInstance? _serverInstance;
+    private ServerOutputLog? _outputLog;
     private volatile IWrapperTransport? _connection;
     private CancellationTokenSource? _pumpCts;
     private Task? _pumpTask;
@@ -78,7 +86,11 @@ public class WrapperProcessManager
 
     public void SetServerInstance(ServerInstance? instance)
     {
+        var sameServer = instance is not null && _serverInstance?.Id == instance.Id;
         _serverInstance = instance;
+        if (sameServer && _outputLog is not null) return;
+        _outputLog?.Dispose();
+        _outputLog = instance is null ? null : new ServerOutputLog(instance.Id);
     }
 
     /// <summary>
@@ -92,6 +104,8 @@ public class WrapperProcessManager
         Func<StartupProgressEvent, Task>? onProgress,
         CancellationToken cancellationToken)
     {
+        var commandLine = ServerOutputLog.MaskSecrets(launch.Arguments);
+        _outputLog?.BeginStart($"Starting {launch.ExecutablePath} {commandLine}");
         await EnsureWrapperConnectedAsync(cancellationToken);
 
         var startup = new StartupState();
@@ -102,7 +116,7 @@ public class WrapperProcessManager
             _pendingAck = ackTcs;
 
             _logger.LogInformation("Sending start command to wrapper for {ServerUrl} with args: {Args}",
-                $"http://localhost:{Port}", string.Join(" ", launch.Arguments));
+                $"http://localhost:{Port}", commandLine);
 
             await _connection!.SendAsync(new StartServerCommand
             {
@@ -139,7 +153,7 @@ public class WrapperProcessManager
                 bool exited, modelLoaded, connectionLost;
                 int exitCode;
                 int? detectedPort;
-                string recentOutput;
+                string? lastLine;
                 lock (startup.Lock)
                 {
                     exited = startup.ProcessExited;
@@ -147,20 +161,16 @@ public class WrapperProcessManager
                     exitCode = startup.ExitCode;
                     modelLoaded = startup.ModelLoadedDetected;
                     detectedPort = startup.DetectedPort;
-                    recentOutput = string.Join("\n", startup.RecentLines);
+                    lastLine = startup.Lines.Count > 0 ? startup.Lines[^1] : null;
                 }
 
                 if (connectionLost && !exited)
-                    throw new InvalidOperationException(AgentId is null
+                    throw Failure(startup, AgentId is null
                         ? "Lost the connection to the wrapper process while the server was starting."
                         : "Lost the connection to the agent while the server was starting.");
 
                 if (exited)
-                {
-                    var msg = $"Server process exited prematurely with code {exitCode}. " +
-                        (string.IsNullOrEmpty(recentOutput) ? "" : $"Output: {recentOutput}");
-                    throw new InvalidOperationException(msg);
-                }
+                    throw Failure(startup, $"Server process exited prematurely with code {exitCode}.");
 
                 bool ready = modelLoaded && detectedPort.HasValue && (detectedPort.Value == Port || Port <= 0);
                 if (!ready && ReadinessProbe is { } probe)
@@ -193,26 +203,43 @@ public class WrapperProcessManager
                     {
                         InstanceId = _serverInstance?.Id ?? Guid.Empty,
                         EventType = StartupEventType.HealthChecking,
-                        Message = $"Waiting for server to be ready... ({currentElapsed:F1}s elapsed)",
+                        Message = $"Waiting for server to be ready... ({currentElapsed:F0}s elapsed)" +
+                            (string.IsNullOrWhiteSpace(lastLine) ? "" : $" Latest output: {Shorten(lastLine)}"),
                         ElapsedSeconds = currentElapsed
                     })!;
                 }
             }
 
-            string outputSnippet;
-            lock (startup.Lock)
-                outputSnippet = string.Join("\n", startup.RecentLines);
-
             _logger.LogError("Server failed to become healthy within {TimeoutMs}ms.", (long)StartupTimeout.TotalMilliseconds);
-            throw new InvalidOperationException(
-                $"Server failed to become healthy within {(int)StartupTimeout.TotalSeconds}s. " +
-                (string.IsNullOrEmpty(outputSnippet) ? "No output captured." : $"Recent output: {outputSnippet}"));
+            throw Failure(startup, $"Server failed to become healthy within {(int)StartupTimeout.TotalSeconds}s.");
         }
         finally
         {
             _activeStartup = null;
             _pendingAck = null;
         }
+    }
+
+    /// <summary>The exception for a failed start: what explains it from the output, with where the rest of it is.</summary>
+    private InvalidOperationException Failure(StartupState startup, string headline)
+    {
+        List<string> lines;
+        lock (startup.Lock)
+            lines = [.. startup.Lines];
+
+        _outputLog?.Note(headline);
+        var path = _serverInstance is null ? null : ServerOutputLog.GetPath(_serverInstance.Id);
+        var message = lines.Count == 0
+            ? $"{headline} The server wrote no output."
+            : StartupFailureSummary.Describe(headline, lines, path);
+        _logger.LogWarning("Server {InstanceId} failed to start: {Message}", _serverInstance?.Id, message);
+        return new InvalidOperationException(message);
+    }
+
+    private static string Shorten(string line)
+    {
+        var trimmed = line.Trim();
+        return trimmed.Length <= ProgressLineLength ? trimmed : trimmed[..ProgressLineLength] + "…";
     }
 
     /// <summary>
@@ -274,6 +301,7 @@ public class WrapperProcessManager
     public void CancelStdoutReader()
     {
         _pumpCts?.Cancel();
+        _outputLog?.Dispose();
     }
 
     /// <summary>
@@ -554,6 +582,7 @@ public class WrapperProcessManager
     private void HandleOutputLine(OutputLineEvent oe)
     {
         _outputHandler.OnOutputLine(oe.Line);
+        _outputLog?.Append(oe.Line);
 
         var startup = _activeStartup;
         if (startup is null) return;
@@ -566,9 +595,9 @@ public class WrapperProcessManager
             if (!startup.DetectedPort.HasValue)
                 startup.DetectedPort = _outputHandler.TryParseListeningPort(oe.Line);
 
-            startup.RecentLines.Add(oe.Line);
-            if (startup.RecentLines.Count > 10)
-                startup.RecentLines.RemoveAt(0);
+            startup.Lines.Add(oe.Line);
+            if (startup.Lines.Count > StartupLinesKept)
+                startup.Lines.RemoveAt(0);
         }
     }
 
@@ -585,6 +614,7 @@ public class WrapperProcessManager
             return;
         }
 
+        _outputLog?.Note($"Server process exited with code {pe.ExitCode}.");
         _logger.LogWarning("Server process exited unexpectedly with code {ExitCode}", pe.ExitCode);
 
         var instance = _serverInstance;
@@ -659,6 +689,6 @@ public class WrapperProcessManager
         public bool ProcessExited;
         public bool ConnectionLost;
         public int ExitCode;
-        public readonly List<string> RecentLines = new();
+        public readonly List<string> Lines = new();
     }
 }

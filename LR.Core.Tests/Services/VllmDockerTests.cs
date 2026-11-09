@@ -6,8 +6,8 @@ namespace LR.Core.Tests.Services;
 public class VllmDockerTests
 {
     [Theory]
-    [InlineData(@"D:\engines\vllm-v0.27.2rc1.dev77-xpu-docker", true)]
-    [InlineData(@"D:\engines\vllm-v0.27.2rc1.dev77-xpu-docker\", true)]
+    [InlineData(@"D:\engines\vllm-v0.33.0-xpu-docker", true)]
+    [InlineData(@"D:\engines\vllm-v0.33.0-xpu-docker\", true)]
     [InlineData("/data/engines/vllm-v1-XPU-DOCKER", true)]
     [InlineData(@"\\wsl.localhost\Ubuntu\home\me\.llm-router\engines\vllm-v0.33.0-cuda", false)]
     [InlineData(@"D:\xpu-docker\vllm", false)]
@@ -37,8 +37,8 @@ public class VllmDockerTests
     }
 
     [Theory]
-    [InlineData("0.33.0")]
-    [InlineData("0.27.2; rm -rf /")]
+    [InlineData("0.27.2rc1.dev77")]
+    [InlineData("0.33.0; rm -rf /")]
     public void ResolveTag_RefusesAnythingElse(string version)
     {
         Assert.Throws<InvalidOperationException>(() => VllmDocker.ResolveTag(version));

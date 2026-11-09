@@ -21,9 +21,9 @@ namespace LR.Core.Services.EngineBuilds;
 public static partial class VllmDocker
 {
     /// <summary>The vLLM in <see cref="BaseImage"/>; the version every install of this backend has.</summary>
-    public const string PinnedVersion = "0.27.2rc1.dev77";
+    public const string PinnedVersion = "0.33.0";
 
-    public const string BaseImage = "vllm/vllm-openai-xpu@sha256:f01e24f6c7ff01f1e0662234255a1372297d1dbd89d003cf13c8fad3eab1ba4f";
+    public const string BaseImage = "vllm/vllm-openai-xpu:v0.33.0@sha256:be3a9aea234be64ffc2816ac561c597e0f0b1f44a61a7f4912780e4d77450086";
 
     /// <summary>The image installs build. Fixed, so a server keeps working across an update of the install it's bound to.</summary>
     public const string ImageTag = "llm-router/vllm-xpu:managed";
@@ -114,8 +114,8 @@ public static partial class VllmDocker
 
     /// <summary>
     /// The MTP speculative-decoding patches for Qwen3.8 from the MIT-licensed
-    /// github.com/SergiioB/intel-arc-pro-b70-inference-cookbook, unmodified (see <c>VllmXpuPatches/LICENSE</c>), in
-    /// the order they apply. Without a speculative config they change nothing, and the draft ones are also
+    /// github.com/SergiioB/intel-arc-pro-b70-inference-cookbook (see <c>VllmXpuPatches/LICENSE</c>), in the order
+    /// they apply. Unmodified, except that <c>patch_mtp_boundary.py</c> was brought up to vLLM 0.33.0. Without a speculative config they change nothing, and the draft ones are also
     /// gated on the variables in <see cref="Qwen38Preset"/>, so one image serves every preset.
     /// </summary>
     public static readonly IReadOnlyList<string> CookbookPatches =
@@ -143,7 +143,9 @@ public static partial class VllmDocker
         [VllmPresetSettings.ExtraArgs] = string.Join('\n',
             "--quantization", "gptq",
             "--kv-cache-dtype", "fp8",
-            "--kv-cache-memory-bytes", "4617089843",
+            // The cookbook's 4617089843 (4.30 GiB) fit exactly on vLLM 0.27; 0.33.0 pads the cache layout and
+            // then had 4.25 GiB usable against the 4.26 GiB a 100K request needs, so this leaves some headroom.
+            "--kv-cache-memory-bytes", "4831838208",
             "--max-num-seqs", "1",
             "--max-num-batched-tokens", "8192",
             "--enable-prefix-caching",
@@ -290,7 +292,6 @@ public static partial class VllmDocker
             LD_LIBRARY_PATH=/usr/lib/wsl/lib:/tmp/ucx_install/lib:/opt/venv/lib:/usr/local/lib \
             ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE \
             ZE_AFFINITY_MASK=0 \
-            VLLM_XPU_ENABLE_XPU_GRAPH=1 \
             PYTORCH_ALLOC_CONF=expandable_segments:True \
             CCL_ZE_IPC_EXCHANGE=sockets \
             CCL_ATL_TRANSPORT=ofi \
@@ -339,6 +340,15 @@ public static partial class VllmDocker
             "v1/worker/xpu_worker.py",
             r"^([ \t]+)(torch\.distributed\.all_reduce\(torch\.zeros\(1\)\.xpu\(\)\))[ \t]*$",
             r"\1if self.parallel_config.world_size > 1:\n\1    \2",
+        )
+
+        # vLLM turns XPU graphs on whenever torch is new enough, but the GPU as WSL presents it can't record them
+        # ("Device does not support graph record and replay"), and capturing anyway can corrupt the heap.
+        # LR_XPU_GRAPH=1 in a preset's environment turns them back on, for a driver that can.
+        patch(
+            "platforms/xpu.py",
+            r"^([ \t]+)if not supports_xpu_graph\(\):$",
+            r'\1if not supports_xpu_graph() or os.environ.get("LR_XPU_GRAPH") != "1":',
         )
 
         """.ReplaceLineEndings("\n");

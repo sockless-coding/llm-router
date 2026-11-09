@@ -6,6 +6,11 @@ num_speculative_tokens + 1 query tokens for the last speculative step. The XPU
 GDN kernel requires complete speculative groups. Reclassify only that partial
 pure-spec step as stateful non-spec prefill so the request can finish without
 padding beyond its configured sequence length.
+
+Modified by LLM Router for vLLM 0.33.0: the anchors follow upstream's changes
+to gdn_attn.py (pure-spec state indices sliced instead of masked, and accepted
+tokens selected in an if/else), and the partial group also clears
+uniform_spec_sequence_length. The fix itself is unchanged.
 """
 from __future__ import annotations
 
@@ -27,9 +32,10 @@ OLD = '''            if num_prefills == 0 and num_decodes == 0:
                 non_spec_token_indx = torch.empty(
                     0, dtype=torch.int32, device=query_start_loc.device
                 )
-                # Filter by spec_sequence_masks to exclude padded sequences
+                # Padded sequences trail the spec decodes, so slice them off
+                # rather than gather with the host mask (an H2D copy + a kernel).
                 spec_state_indices_tensor = block_table_tensor[
-                    spec_sequence_masks_cpu, : self.num_spec + 1
+                    :num_spec_decodes, : self.num_spec + 1
                 ]
                 non_spec_state_indices_tensor = None
                 # Padded sequences are always at the back, so the first
@@ -63,6 +69,7 @@ NEW = '''            if num_prefills == 0 and num_decodes == 0:
                     non_spec_query_start_loc = query_start_loc
                     non_spec_query_start_loc_cpu = query_start_loc_cpu
                     num_accepted_tokens = None
+                    uniform_spec_sequence_length = None
                 else:
                     spec_token_indx = torch.arange(
                         expected_spec_token_size,
@@ -72,9 +79,10 @@ NEW = '''            if num_prefills == 0 and num_decodes == 0:
                     non_spec_token_indx = torch.empty(
                         0, dtype=torch.int32, device=query_start_loc.device
                     )
-                    # Filter by spec_sequence_masks to exclude padded sequences
+                    # Padded sequences trail the spec decodes, so slice them off
+                    # rather than gather with the host mask (an H2D copy + a kernel).
                     spec_state_indices_tensor = block_table_tensor[
-                        spec_sequence_masks_cpu, : self.num_spec + 1
+                        :num_spec_decodes, : self.num_spec + 1
                     ]
                     non_spec_state_indices_tensor = None
                     # Padded sequences are always at the back, so the first
@@ -87,12 +95,18 @@ NEW = '''            if num_prefills == 0 and num_decodes == 0:
 '''
 
 OLD_FINALIZE = '''            assert num_accepted_tokens is not None
-            num_accepted_tokens = num_accepted_tokens[spec_sequence_masks_cpu]
+            if num_prefills == 0 and num_decodes == 0:
+                num_accepted_tokens = num_accepted_tokens[:num_spec_decodes]
+            else:
+                num_accepted_tokens = num_accepted_tokens[spec_sequence_masks_cpu]
 '''
 
 NEW_FINALIZE = '''            if spec_sequence_masks_cpu is not None:
                 assert num_accepted_tokens is not None
-                num_accepted_tokens = num_accepted_tokens[spec_sequence_masks_cpu]
+                if num_prefills == 0 and num_decodes == 0:
+                    num_accepted_tokens = num_accepted_tokens[:num_spec_decodes]
+                else:
+                    num_accepted_tokens = num_accepted_tokens[spec_sequence_masks_cpu]
 '''
 
 
