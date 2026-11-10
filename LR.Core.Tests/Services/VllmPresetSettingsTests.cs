@@ -213,7 +213,7 @@ public class VllmPresetSettingsTests
     public void Apply_WarnsAboutRemoteCodeGpuCountAndUnrunDependencies()
     {
         var details = new VllmRecipeDetails("org/model", "M", null, "0.20.0", null, [], "h100",
-            [new VllmRecipeVariant("default", null, "bf16", 20, null, null, [])], [], "pip install thing");
+            [new VllmRecipeVariant("default", null, "bf16", 20, null, null, [])], [], "pip install thing", ["h100"]);
 
         var applied = VllmPresetSettings.Apply(
             Rendering(["vllm", "serve", "org/model", "--trust-remote-code", "--tensor-parallel-size", "8"]), details, null);

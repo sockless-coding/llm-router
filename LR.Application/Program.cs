@@ -137,6 +137,7 @@ builder.Services.AddHttpClient(VllmRecipeClient.HttpClientName, client =>
     AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Brotli,
 });
 builder.Services.AddSingleton<IVllmRecipeClient, VllmRecipeClient>();
+builder.Services.AddScoped<IVllmModelLibrary, VllmModelLibrary>();
 builder.Services.AddScoped<IEngineBuildManager, EngineBuildManager>();
 builder.Services.AddSingleton<IEngineBuildProgressPublisher, EngineBuildProgressPublisher>();
 builder.Services.AddSingleton<EngineBuildService>();

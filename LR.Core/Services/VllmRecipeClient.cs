@@ -14,12 +14,17 @@ public sealed partial class VllmRecipeClient : IVllmRecipeClient
     public const string HttpClientName = "vllm-recipes";
     private const string BaseUrl = "https://recipes.vllm.ai";
     private static readonly TimeSpan CatalogLifetime = TimeSpan.FromHours(1);
+    private static readonly TimeSpan HardwareIndexLifetime = TimeSpan.FromHours(12);
+    private const int HardwareIndexConcurrency = 12;
 
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<VllmRecipeClient> _logger;
     private readonly SemaphoreSlim _catalogGate = new(1, 1);
     private VllmRecipeCatalog? _catalog;
     private DateTime _catalogFetchedAt;
+    private readonly SemaphoreSlim _hardwareGate = new(1, 1);
+    private IReadOnlyDictionary<string, IReadOnlyList<string>>? _hardwareIndex;
+    private DateTime _hardwareIndexFetchedAt;
 
     public VllmRecipeClient(IHttpClientFactory httpFactory, ILogger<VllmRecipeClient> logger)
     {
@@ -67,6 +72,45 @@ public sealed partial class VllmRecipeClient : IVllmRecipeClient
     {
         using var doc = await FetchAsync($"/{CheckId(hfId)}.json{BuildQuery(selection)}", ct);
         return doc is null ? null : ParseRendering(doc.RootElement);
+    }
+
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> GetHardwareIndexAsync(CancellationToken ct = default)
+    {
+        await _hardwareGate.WaitAsync(ct);
+        try
+        {
+            if (_hardwareIndex is not null && DateTime.UtcNow - _hardwareIndexFetchedAt < HardwareIndexLifetime)
+                return _hardwareIndex;
+
+            var catalog = await GetCatalogAsync(ct);
+            var index = new System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+            var failures = 0;
+            await Parallel.ForEachAsync(catalog.Models, new ParallelOptions { MaxDegreeOfParallelism = HardwareIndexConcurrency, CancellationToken = ct }, async (model, token) =>
+            {
+                try
+                {
+                    if (await GetRecipeAsync(model.HfId, token) is { } recipe)
+                        index[model.HfId] = recipe.Hardware;
+                }
+                catch (InvalidOperationException)
+                {
+                    Interlocked.Increment(ref failures);
+                }
+            });
+            if (failures > 0)
+                _logger.LogWarning("Left {Failures} of {Total} vLLM recipes out of the hardware index: they couldn't be read.", failures, catalog.Models.Count);
+
+            // An index the site mostly failed to answer for isn't worth keeping for 12 hours.
+            if (index.Count == 0 && _hardwareIndex is not null)
+                return _hardwareIndex;
+            _hardwareIndex = new Dictionary<string, IReadOnlyList<string>>(index, StringComparer.OrdinalIgnoreCase);
+            _hardwareIndexFetchedAt = failures > catalog.Models.Count / 4 ? DateTime.UtcNow - HardwareIndexLifetime + TimeSpan.FromMinutes(10) : DateTime.UtcNow;
+            return _hardwareIndex;
+        }
+        finally
+        {
+            _hardwareGate.Release();
+        }
     }
 
     /// <summary>The query string for a selection: <c>hardware</c>, <c>variant</c>, <c>strategy</c>, <c>features</c>.</summary>
@@ -177,6 +221,23 @@ public sealed partial class VllmRecipeClient : IVllmRecipeClient
             ? deps.ToString()
             : null;
 
+        // The profiles the site has a command for: by_hardware is the full list, a variant's
+        // supported_hardware is often missing, and the default is listed even when nothing else is.
+        var hardware = new List<string>();
+        void AddHardware(string? id)
+        {
+            if (!string.IsNullOrWhiteSpace(id) && !hardware.Contains(id, StringComparer.OrdinalIgnoreCase))
+                hardware.Add(id);
+        }
+        var recommended = Obj(root, "recommended_command");
+        AddHardware(recommended is { } r0 ? Str(r0, "hardware") : null);
+        if (recommended is { } r1 && Obj(r1, "by_hardware") is { } byHardware)
+            foreach (var p in byHardware.EnumerateObject())
+                AddHardware(p.Name);
+        foreach (var variant in variants)
+            foreach (var id in variant.SupportedHardware)
+                AddHardware(id);
+
         return new VllmRecipeDetails(
             hfId,
             meta is { } m ? Str(m, "title") ?? hfId : hfId,
@@ -187,7 +248,8 @@ public sealed partial class VllmRecipeClient : IVllmRecipeClient
             Obj(root, "recommended_command") is { } rc ? Str(rc, "hardware") : null,
             variants,
             features,
-            dependencies);
+            dependencies,
+            hardware);
     }
 
     public static VllmRecipeRendering ParseRendering(JsonElement root)

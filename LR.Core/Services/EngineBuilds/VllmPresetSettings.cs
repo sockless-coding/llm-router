@@ -37,6 +37,42 @@ public static partial class VllmPresetSettings
     public const string RecipeSha = "vllm.recipeSha";
     public const string MinVllmVersion = "vllm.minVersion";
 
+    /// <summary>The saved <see cref="VllmRecipe"/> the preset was filled in from, and its name when picked.</summary>
+    public const string SavedRecipeId = "vllm.savedRecipe";
+    public const string SavedRecipeName = "vllm.savedRecipeName";
+
+    /// <summary>Keys that only say where a preset's settings came from; the form carries them as hidden fields.</summary>
+    public static readonly IReadOnlyList<string> ProvenanceKeys =
+        [RecipeId, RecipeHardware, RecipeVariant, RecipeStrategy, RecipeFeatures, RecipeSha, MinVllmVersion, VramGb, SavedRecipeId, SavedRecipeName];
+
+    /// <summary>
+    /// The engine settings a preset gets from a saved recipe: the recipe's own, plus which recipe it was
+    /// (and its hardware and VRAM, which a hand-written recipe keeps outside its settings).
+    /// </summary>
+    public static Dictionary<string, string> ForPreset(VllmRecipe recipe)
+    {
+        var settings = new Dictionary<string, string>(recipe.Settings)
+        {
+            [SavedRecipeId] = recipe.Id.ToString(),
+            [SavedRecipeName] = recipe.Name,
+        };
+        if (!string.IsNullOrWhiteSpace(recipe.Hardware)) settings[RecipeHardware] = recipe.Hardware;
+        if (recipe.VramGb is { } vram) settings[VramGb] = vram.ToString(CultureInfo.InvariantCulture);
+        return settings;
+    }
+
+    /// <summary>
+    /// Checks that a preset made from these settings would start: the same checks as
+    /// <see cref="ServeArgs"/> and <see cref="EnvironmentOf"/>. Throws <see cref="InvalidOperationException"/>.
+    /// </summary>
+    public static List<string> Validate(string model, IReadOnlyDictionary<string, string> settings)
+    {
+        var preset = new ModelPreset { ModelPath = model, EngineSettings = new Dictionary<string, string>(settings) };
+        var args = ServeArgs(preset);
+        EnvironmentOf(preset);
+        return args;
+    }
+
     /// <summary>The recipe's minimum VRAM, in GB: what the preset's memory estimate is based on.</summary>
     public const string VramGb = "vllm.vramGb";
 
