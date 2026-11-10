@@ -377,7 +377,8 @@ public class OpenAiHandler : IProtocolHandler
                                             ReasoningContent = chunk.ReasoningContentDelta
                                         }
                                     }
-                                }
+                                },
+                                GeneratedTokens = chunk.CompletionTokens
                             })}\r\n\r\n";
                             await bodyWriter.WriteAsync(Encoding.UTF8.GetBytes(dataText), cancellationToken);
                         }

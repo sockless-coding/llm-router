@@ -52,6 +52,15 @@ public class ChatCompletionChunk
     [JsonPropertyName("timings")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public LlamaCppTimings? Timings { get; set; }
+
+    /// <summary>
+    /// Tokens generated so far (non-standard). Only sent when the backend reports a running count
+    /// (vLLM), where one chunk can carry several tokens under speculative/MTP decoding — so a
+    /// client can't count tokens by counting chunks. Omitted otherwise.
+    /// </summary>
+    [JsonPropertyName("generated_tokens")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? GeneratedTokens { get; set; }
 }
 
 public class ChunkChoice

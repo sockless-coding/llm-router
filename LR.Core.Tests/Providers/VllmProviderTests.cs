@@ -313,4 +313,96 @@ public sealed class VllmProviderTests : IDisposable
         CreateVenv();
         Assert.Null(descriptor.ValidateInstallFolder(_root));
     }
+
+    [Fact]
+    public void StreamedRequests_AskForUsageOnEveryFrame_NonStreamedOnesCarryNoStreamOptions()
+    {
+        var streamed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            """{"stream":true,"stream_options":{"include_usage":false}}""")!;
+        VllmProvider.PrepareStreamOptions(streamed);
+        Assert.True(streamed["stream_options"].GetProperty("include_usage").GetBoolean());
+        Assert.True(streamed["stream_options"].GetProperty("continuous_usage_stats").GetBoolean());
+
+        // vLLM 400s on stream_options without stream=true.
+        var whole = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            """{"stream":false,"stream_options":{"include_usage":true}}""")!;
+        VllmProvider.PrepareStreamOptions(whole);
+        Assert.False(whole.ContainsKey("stream_options"));
+    }
+
+    [Fact]
+    public void SpecDecodeCounters_AreSummedOverEngines_AndAbsentWithoutSpeculativeDecoding()
+    {
+        const string metrics = """
+            # HELP vllm:spec_decode_num_drafts_total Number of spec decoding drafts.
+            # TYPE vllm:spec_decode_num_drafts_total counter
+            vllm:spec_decode_num_drafts_total{engine="0",model_name="m"} 100.0
+            vllm:spec_decode_num_drafts_total{engine="1",model_name="m"} 20.0
+            vllm:spec_decode_num_draft_tokens_total{engine="0",model_name="m"} 300.0
+            vllm:spec_decode_num_accepted_tokens_total{engine="0",model_name="m"} 240.0
+            vllm:spec_decode_num_accepted_tokens_per_pos_total{engine="0",model_name="m",position="0"} 99.0
+            vllm:num_requests_running{engine="0",model_name="m"} 1.0
+            vllm:num_requests_waiting{engine="0",model_name="m"} 0.0
+            """;
+        var counters = VllmProvider.ParseSpecDecodeCounters(metrics);
+        Assert.Equal(new VllmProvider.SpecDecodeCounters(120, 300, 240, 1), counters);
+
+        Assert.Null(VllmProvider.ParseSpecDecodeCounters("vllm:num_requests_running{engine=\"0\"} 0.0\n"));
+    }
+
+    [Fact]
+    public void SpecDecodeDelta_GivesTheRequestsDraftCounts_AndIgnoresACounterReset()
+    {
+        var response = new RouteResponse();
+        VllmProvider.ApplySpecDecodeDelta(response,
+            new VllmProvider.SpecDecodeCounters(100, 300, 200, 0),
+            new VllmProvider.SpecDecodeCounters(150, 450, 320, 0));
+        Assert.Equal(150, response.DraftGenerated);
+        Assert.Equal(120, response.DraftAccepted);
+        Assert.Equal(0.8, response.DraftAcceptanceRate!.Value, 6);
+        Assert.Equal(1 + 120.0 / 50, response.DraftMeanLen!.Value, 6);
+
+        var afterRestart = new RouteResponse();
+        VllmProvider.ApplySpecDecodeDelta(afterRestart,
+            new VllmProvider.SpecDecodeCounters(100, 300, 200, 0),
+            new VllmProvider.SpecDecodeCounters(5, 15, 10, 0));
+        Assert.Null(afterRestart.DraftAcceptanceRate);
+    }
+
+    [Fact]
+    public void SpeculativeDecoding_IsDetectedFromTheCommandLine()
+    {
+        Assert.True(VllmProvider.IsSpeculative(new ModelPreset
+        {
+            ModelPath = "Qwen/Qwen3",
+            EngineSettings = new() { [VllmPresetSettings.ExtraArgs] = """--speculative-config '{"method":"mtp","num_speculative_tokens":3}'""" },
+        }));
+        Assert.False(VllmProvider.IsSpeculative(new ModelPreset { ModelPath = "Qwen/Qwen3" }));
+    }
+
+    [Fact]
+    public void MeasuredTimings_SplitPromptAndGeneration_ForAnEngineThatReportsNone()
+    {
+        // 1000-token prompt, 400 from the cache; first frame at 300 ms, 101st token at 1300 ms.
+        var response = new RouteResponse { PromptTokensProcessed = 1000, CachedPromptTokens = 400, GeneratedTokenCount = 101 };
+        ManagedServerProviderBase.ApplyMeasuredTimings(response, 300, 1300, 1310);
+
+        Assert.Equal(300, response.FirstTokenLatencyMs);
+        Assert.Equal(300, response.PromptProcessingMs);
+        Assert.Equal(2000, response.PromptTokensPerSecond!.Value, 6);   // 600 computed tokens / 0.3 s
+        Assert.Equal(100, response.GeneratedTokenCount / response.GenerationMs * 1000, 6); // 100 tokens / 1 s
+        Assert.Equal(1310, response.TotalLatencyMs);
+        Assert.Equal(400, response.BackendTimings!.CacheN);
+        Assert.Equal(600, response.BackendTimings.PromptN);
+        Assert.Equal(100, response.BackendTimings.GenerationPerSecond!.Value, 6);
+    }
+
+    [Fact]
+    public void MeasuredTimings_LeaveAnEnginesOwnTimingsAlone()
+    {
+        var response = new RouteResponse { PromptProcessingMs = 50, GeneratedTokenCount = 10, PromptTokensProcessed = 10 };
+        ManagedServerProviderBase.ApplyMeasuredTimings(response, 300, 1300, 1310);
+        Assert.Equal(50, response.PromptProcessingMs);
+        Assert.Null(response.BackendTimings);
+    }
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -38,6 +39,15 @@ public class VllmProvider : ManagedServerProviderBase
     private readonly ILogger<VllmProvider> _logger;
     private volatile int _maxConcurrent;
     private DateTime? _reportedUpAt;
+
+    /// <summary>1 when the running preset decodes speculatively (MTP, EAGLE, a draft model…), 2 when not, 0 not yet known.</summary>
+    private volatile int _speculative;
+
+    /// <summary>Requests being measured for speculative-decoding counts, and the one per response.</summary>
+    private readonly List<SpecDecodeProbe> _probesInFlight = [];
+    private readonly ConditionalWeakTable<RouteResponse, SpecDecodeProbe> _probes = new();
+
+    private static readonly TimeSpan MetricsTimeout = TimeSpan.FromSeconds(2);
 
     public VllmProvider(ILogger<VllmProvider> logger, IServiceScopeFactory scopeFactory)
         : base(logger, scopeFactory)
@@ -84,6 +94,7 @@ public class VllmProvider : ManagedServerProviderBase
 
         var environment = BuildEnvironment(preset, command.Wsl is not null);
         _maxConcurrent = VllmPresetSettings.MaxConcurrent(preset) ?? DefaultMaxConcurrentRequests;
+        _speculative = IsSpeculative(preset) ? 1 : 2;
         _reportedUpAt = null;
 
         return new ServerLaunchSpec(command.Executable, args, command.WorkingDirectory, environment);
@@ -113,6 +124,7 @@ public class VllmProvider : ManagedServerProviderBase
 
         var environment = BuildEnvironment(preset, throughWsl: false);
         _maxConcurrent = VllmPresetSettings.MaxConcurrent(preset) ?? DefaultMaxConcurrentRequests;
+        _speculative = IsSpeculative(preset) ? 1 : 2;
         _reportedUpAt = null;
 
         return new ServerLaunchSpec(
@@ -243,8 +255,187 @@ public class VllmProvider : ManagedServerProviderBase
         };
     }
 
-    protected override void PrepareChatRequestBody(Dictionary<string, JsonElement> body) =>
+    protected override void PrepareChatRequestBody(Dictionary<string, JsonElement> body)
+    {
         body["model"] = JsonSerializer.SerializeToElement(VllmLayout.ServedModelName);
+        PrepareStreamOptions(body);
+    }
+
+    /// <summary>
+    /// vLLM rejects <c>stream_options</c> on a request that doesn't stream (a payload built for a
+    /// streaming request can end up sent whole), so it's dropped there. On a streamed request it
+    /// asks for usage on every frame (<c>continuous_usage_stats</c>): under speculative/MTP decoding
+    /// one frame carries several tokens, and the running count is the only way to tell how many.
+    /// </summary>
+    public static void PrepareStreamOptions(Dictionary<string, JsonElement> body)
+    {
+        if (!(body.TryGetValue("stream", out var stream) && stream.ValueKind == JsonValueKind.True))
+        {
+            body.Remove("stream_options");
+            return;
+        }
+
+        var options = body.TryGetValue("stream_options", out var existing) && existing.ValueKind == JsonValueKind.Object
+            ? JsonNode.Parse(existing.GetRawText()) as JsonObject ?? []
+            : [];
+        options["include_usage"] = true;
+        options["continuous_usage_stats"] = true;
+        body["stream_options"] = JsonSerializer.SerializeToElement(options);
+    }
+
+    // --- Speculative decoding counts -------------------------------------------------------------
+    //
+    // vLLM reports speculative decoding only as server-wide Prometheus counters, not per request.
+    // Reading them before and after a request gives that request's counts — as long as nothing else
+    // ran on the server meanwhile, so a request that overlapped another gets none.
+
+    private sealed class SpecDecodeProbe
+    {
+        public DateTime StartedAt { get; } = DateTime.UtcNow;
+        public SpecDecodeCounters? Before { get; set; }
+        public bool Shared { get; set; }
+    }
+
+    /// <summary>vLLM's cumulative speculative-decoding counters (summed over engines), plus the requests it has running or waiting.</summary>
+    public sealed record SpecDecodeCounters(double Drafts, double DraftTokens, double AcceptedTokens, double RequestsInFlight);
+
+    protected override async Task OnRequestStartingAsync(RouteResponse response, CancellationToken cancellationToken)
+    {
+        if (!IsSpeculativeServer())
+            return;
+
+        var probe = new SpecDecodeProbe();
+        lock (_probesInFlight)
+        {
+            // A request that failed never completes; don't let it count as overlapping forever.
+            _probesInFlight.RemoveAll(p => DateTime.UtcNow - p.StartedAt > RequestTimeout);
+            foreach (var other in _probesInFlight)
+                other.Shared = true;
+            probe.Shared = _probesInFlight.Count > 0;
+            _probesInFlight.Add(probe);
+        }
+        _probes.AddOrUpdate(response, probe);
+
+        var before = await ReadSpecDecodeCountersAsync(cancellationToken);
+        lock (_probesInFlight)
+        {
+            probe.Before = before;
+            // Something else (another client, a request from before a router restart) is on the server.
+            if (before is { RequestsInFlight: > 0 })
+                probe.Shared = true;
+        }
+    }
+
+    protected override async Task OnRequestCompletedAsync(RouteResponse response)
+    {
+        if (!_probes.TryGetValue(response, out var probe))
+            return;
+        _probes.Remove(response);
+        lock (_probesInFlight)
+        {
+            _probesInFlight.Remove(probe);
+            if (probe.Shared || probe.Before is null)
+                return;
+        }
+
+        if (await ReadSpecDecodeCountersAsync(CancellationToken.None) is { } after)
+            ApplySpecDecodeDelta(response, probe.Before, after);
+    }
+
+    /// <summary>Sets the response's draft counts from the change in the counters across it.</summary>
+    public static void ApplySpecDecodeDelta(RouteResponse response, SpecDecodeCounters before, SpecDecodeCounters after)
+    {
+        var drafts = after.Drafts - before.Drafts;
+        var draftTokens = after.DraftTokens - before.DraftTokens;
+        var accepted = after.AcceptedTokens - before.AcceptedTokens;
+        // A restart resets the counters; nothing drafted means nothing to report.
+        if (draftTokens <= 0 || accepted < 0 || accepted > draftTokens)
+            return;
+
+        response.DraftGenerated = (int)Math.Round(draftTokens);
+        response.DraftAccepted = (int)Math.Round(accepted);
+        response.DraftAcceptanceRate = accepted / draftTokens;
+        // vLLM's "mean acceptance length": tokens per verification step, the bonus token included.
+        if (drafts > 0)
+            response.DraftMeanLen = 1 + accepted / drafts;
+    }
+
+    private async Task<SpecDecodeCounters?> ReadSpecDecodeCountersAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(MetricsTimeout);
+            var (status, body) = await SendServerRequestAsync(HttpMethod.Get, "/metrics", null, cts.Token);
+            return status == System.Net.HttpStatusCode.OK ? ParseSpecDecodeCounters(body) : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
+        {
+            _logger.LogDebug(ex, "Could not read vLLM's /metrics");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The speculative-decoding counters from a Prometheus <c>/metrics</c> text, summed over label
+    /// sets (one per engine), or null when the server exposes none (it isn't decoding speculatively).
+    /// </summary>
+    public static SpecDecodeCounters? ParseSpecDecodeCounters(string metrics)
+    {
+        double drafts = 0, draftTokens = 0, accepted = 0, inFlight = 0;
+        bool found = false;
+        foreach (var raw in metrics.AsSpan().EnumerateLines())
+        {
+            var line = raw.Trim();
+            if (line.IsEmpty || line[0] == '#')
+                continue;
+
+            int nameEnd = line.IndexOfAny('{', ' ');
+            int valueStart = line.LastIndexOf(' ');
+            if (nameEnd <= 0 || valueStart <= 0
+                || !double.TryParse(line[(valueStart + 1)..], NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+                continue;
+
+            switch (line[..nameEnd])
+            {
+                case "vllm:spec_decode_num_drafts_total": drafts += value; break;
+                case "vllm:spec_decode_num_draft_tokens_total": draftTokens += value; found = true; break;
+                case "vllm:spec_decode_num_accepted_tokens_total": accepted += value; break;
+                case "vllm:num_requests_running":
+                case "vllm:num_requests_waiting": inFlight += value; break;
+            }
+        }
+        return found ? new SpecDecodeCounters(drafts, draftTokens, accepted, inFlight) : null;
+    }
+
+    private bool IsSpeculativeServer()
+    {
+        if (_speculative == 0)
+        {
+            bool speculative = false;
+            if (ServerInstance?.ActivePresetId is Guid presetId)
+            {
+                try
+                {
+                    using var scope = ScopeFactory.CreateScope();
+                    var preset = scope.ServiceProvider.GetService<IPresetManager>()?.GetById(presetId);
+                    speculative = preset is not null && IsSpeculative(preset);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not read preset {PresetId}", presetId);
+                }
+            }
+            _speculative = speculative ? 1 : 2;
+        }
+        return _speculative == 1;
+    }
+
+    /// <summary>Whether the preset's command line turns on speculative decoding.</summary>
+    public static bool IsSpeculative(ModelPreset preset) =>
+        VllmPresetSettings.ServeArgs(preset).Any(a =>
+            a.StartsWith("--speculative-config", StringComparison.Ordinal)
+            || a.StartsWith("--speculative_config", StringComparison.Ordinal));
 
     protected override string PrepareRawRequestPayload(string endpoint, string payload)
     {

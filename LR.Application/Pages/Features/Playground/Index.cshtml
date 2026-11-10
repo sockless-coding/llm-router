@@ -384,8 +384,8 @@ function chip(label, value, title) {
 function renderStats(m) {
     const chips = [];
     chips.push(chip('TTFT', fmtMs(m.ttftMs), 'Time to first token, measured in the browser (includes queueing, any model load, and prompt processing)'));
-    if (m.promptTps != null) chips.push(chip('PP', fmtTps(m.promptTps), `Prompt processing speed reported by the backend${m.promptMs != null ? ` — ${fmtMs(m.promptMs)}` : ''}`));
-    if (m.genTps != null) chips.push(chip('TG', fmtTps(m.genTps), `Token generation speed reported by the backend${m.genMs != null ? ` — ${fmtMs(m.genMs)}` : ''}`));
+    if (m.promptTps != null) chips.push(chip('PP', fmtTps(m.promptTps), `Prompt processing speed reported by the backend (for vLLM, measured by the router from the time to the first token, so it includes any wait in vLLM's queue)${m.promptMs != null ? ` — ${fmtMs(m.promptMs)}` : ''}`));
+    if (m.genTps != null) chips.push(chip('TG', fmtTps(m.genTps), `Token generation speed reported by the backend (for vLLM, measured by the router between the first and last token)${m.genMs != null ? ` — ${fmtMs(m.genMs)}` : ''}`));
     if (m.promptTokens != null || m.completionTokens != null) {
         const cached = m.cachedTokens ? ` (${m.cachedTokens} cached)` : '';
         chips.push(chip('Tokens', `${m.promptTokens ?? '?'}${cached} → ${m.completionTokens ?? '?'}`, 'Prompt tokens (of which reused from the KV cache) → generated tokens'));
@@ -539,13 +539,18 @@ async function runTurn(messages, caption, coldStart) {
     const started = performance.now();
     let firstTokenAt = null;
     let deltaCount = 0;
+    // Running token count from the backend when it sends one (vLLM): under speculative/MTP
+    // decoding one delta carries several tokens, so counting deltas undercounts.
+    let tokensSoFar = null;
     let usage = null, timings = null;
 
-    // Live elapsed/speed estimate while the reply streams (deltas ≈ tokens for llama.cpp).
+    // Live elapsed/speed estimate while the reply streams (deltas ≈ tokens for llama.cpp; vLLM sends a count).
+    // Tokens after the first one: the first comes out of prompt processing, the rest are generation.
+    const liveTokens = () => Math.max((tokensSoFar ?? deltaCount) - 1, 0);
     const ticker = setInterval(() => {
         const now = performance.now();
         let html = chip(firstTokenAt ? 'TTFT' : (coldStart ? 'Loading model' : 'Waiting'), fmtMs(firstTokenAt ? firstTokenAt - started : now - started));
-        if (firstTokenAt && now - firstTokenAt > 250) html += ' ' + chip('≈ TG', fmtTps(deltaCount / ((now - firstTokenAt) / 1000)), 'Live estimate from streamed chunks; the backend-reported figure replaces it when the reply finishes');
+        if (firstTokenAt && now - firstTokenAt > 250) html += ' ' + chip('≈ TG', fmtTps(liveTokens() / ((now - firstTokenAt) / 1000)), 'Live estimate from streamed chunks; the backend-reported figure replaces it when the reply finishes');
         bubble.setStats(html);
     }, 200);
 
@@ -598,6 +603,7 @@ async function runTurn(messages, caption, coldStart) {
                             firstTokenAt ??= performance.now();
                             deltaCount++;
                         }
+                        if (typeof obj.generated_tokens === 'number') tokensSoFar = obj.generated_tokens;
                         if (text) { m.content += text; bubble.setContent(m.content); }
                         if (delta.reasoning_content) { m.reasoning += delta.reasoning_content; bubble.setReasoning(m.reasoning); }
                         if (delta.tool_calls) m.finishReason = 'tool_calls';
