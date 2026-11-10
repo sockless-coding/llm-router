@@ -234,4 +234,50 @@ public class VllmPresetSettingsTests
 
         Assert.Equal(20L * 1024 * 1024 * 1024, bytes);
     }
+
+    [Theory]
+    [InlineData("100000", 100000)]
+    [InlineData("32k", 32000)]
+    [InlineData("32K", 32768)]
+    [InlineData("1M", 1048576)]
+    [InlineData("25.6k", 25600)]
+    [InlineData("auto", null)]
+    [InlineData("-1", null)]
+    [InlineData("lots", null)]
+    public void MaxModelLenTokens_parses_vllm_sizes(string value, int? expected) =>
+        Assert.Equal(expected, VllmPresetSettings.MaxModelLenTokens(Preset("m", (VllmPresetSettings.MaxModelLen, value))));
+
+    [Fact]
+    public void ConfiguredContextSize_falls_back_to_max_model_len()
+    {
+        var preset = Preset("m", (VllmPresetSettings.MaxModelLen, "100000"));
+        Assert.Equal(100000, preset.ConfiguredContextSize());
+
+        preset.ContextSize = 8192;
+        Assert.Equal(8192, preset.ConfiguredContextSize());
+    }
+
+    [Fact]
+    public void PropsFromModels_reads_max_model_len_of_the_served_model()
+    {
+        using var doc = JsonDocument.Parse("""
+            {"object":"list","data":[
+              {"id":"other","root":"x","max_model_len":4096},
+              {"id":"%SERVED%","object":"model","root":"Qwen/Qwen3-8B","max_model_len":100000}
+            ]}
+            """.Replace("%SERVED%", VllmLayout.ServedModelName));
+
+        var props = LR.Providers.Vllm.VllmProvider.PropsFromModels(doc.RootElement);
+
+        Assert.Equal(100000, props?.MaxModelLength);
+        Assert.Equal(100000, props?.ContextSizePerSlot);
+        Assert.Equal("Qwen/Qwen3-8B", props?.ModelPath);
+    }
+
+    [Fact]
+    public void PropsFromModels_is_null_without_models()
+    {
+        using var doc = JsonDocument.Parse("""{"object":"list","data":[]}""");
+        Assert.Null(LR.Providers.Vllm.VllmProvider.PropsFromModels(doc.RootElement));
+    }
 }

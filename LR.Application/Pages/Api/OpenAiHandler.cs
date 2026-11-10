@@ -100,10 +100,11 @@ public class OpenAiHandler : IProtocolHandler
         // source for vision/audio support — fall back to preset data otherwise.
         var props = (_serverManager.GetProvider(preset.ServerInstanceId) as IServerCapacityProvider)?.ServerProps;
 
-        // ContextSize (-c) is what the server is launched with — the figure clients should budget
-        // against; GgufContextLength is only the model's native maximum. (Not taken from /props:
+        // The window the server runs with — vLLM's live max_model_len when it's serving this preset,
+        // else the configured -c / --max-model-len — is the figure clients should budget against;
+        // GgufContextLength is only the model's native maximum. (llama.cpp's /props isn't used:
         // its default_generation_settings.n_ctx is the per-slot slice, i.e. -c divided by -np.)
-        var contextLength = preset.ContextSize ?? preset.GgufContextLength ?? 4096;
+        var contextLength = preset.ServedContextSize(_serverManager) ?? preset.GgufContextLength ?? 4096;
 
         // PredictN (-n) is an explicit generation cap when set and positive. Otherwise fall back
         // to a fraction of the context window, since llama.cpp has no fixed output limit of its

@@ -126,6 +126,22 @@ public static partial class VllmPresetSettings
         return result;
     }
 
+    /// <summary>
+    /// The preset's <c>--max-model-len</c> as a token count, or null when it's unset, <c>auto</c>/<c>-1</c>
+    /// or malformed. Suffixes follow vLLM: lowercase k/m are powers of 1000, uppercase K/M powers of 1024.
+    /// </summary>
+    public static int? MaxModelLenTokens(ModelPreset preset)
+    {
+        if (Text(preset.EngineSettings, MaxModelLen) is not { } raw || !MaxModelLenRegex().IsMatch(raw))
+            return null;
+        var multiplier = raw[^1] switch { 'k' => 1e3, 'K' => 1024d, 'm' => 1e6, 'M' => 1024d * 1024, _ => 1d };
+        var number = multiplier == 1d ? raw : raw[..^1];
+        if (!double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || value <= 0)
+            return null;
+        var tokens = value * multiplier;
+        return tokens > int.MaxValue ? int.MaxValue : (int)tokens;
+    }
+
     /// <summary>The server's concurrent-request limit in the router, if the preset sets one.</summary>
     public static int? MaxConcurrent(ModelPreset preset) =>
         int.TryParse(Text(preset.EngineSettings, MaxConcurrentRequests), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n > 0 ? n : null;

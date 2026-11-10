@@ -196,6 +196,53 @@ public class VllmProvider : ManagedServerProviderBase
                 : ""));
     }
 
+    /// <summary>
+    /// vLLM has no <c>/props</c>; its <c>/v1/models</c> entry carries <c>max_model_len</c>, the context
+    /// window it actually resolved (which differs from the preset's when that says <c>auto</c>, or
+    /// when vLLM capped it to what fits in memory).
+    /// </summary>
+    protected override async Task<LlamaServerProps?> ReadServerPropsAsync(HttpClient httpClient, CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(HttpMethod.Get, "/v1/models");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (PropsFromModels(doc.RootElement) is not { } props)
+            return null;
+
+        await LogProviderMessage(ServerLogLevel.Info, $"Server /v1/models: max_model_len {(props.MaxModelLength?.ToString("N0", CultureInfo.InvariantCulture) ?? "?")}.");
+        return props;
+    }
+
+    /// <summary>The served model's facts from a <c>/v1/models</c> response, or null when it lists none.</summary>
+    public static LlamaServerProps? PropsFromModels(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+            return null;
+
+        // The router serves one model under VllmLayout.ServedModelName; take that entry, else the first.
+        var model = data.EnumerateArray().FirstOrDefault(m =>
+            m.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == VllmLayout.ServedModelName);
+        if (model.ValueKind != JsonValueKind.Object)
+            model = data.EnumerateArray().FirstOrDefault();
+        if (model.ValueKind != JsonValueKind.Object)
+            return null;
+
+        int? maxLen = model.TryGetProperty("max_model_len", out var len) && len.TryGetInt32(out var n) && n > 0 ? n : null;
+        string? path = model.TryGetProperty("root", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : null;
+
+        return new LlamaServerProps
+        {
+            MaxModelLength = maxLen,
+            // vLLM has no slots: any one request may use the whole window.
+            ContextSizePerSlot = maxLen,
+            ModelPath = path,
+        };
+    }
+
     protected override void PrepareChatRequestBody(Dictionary<string, JsonElement> body) =>
         body["model"] = JsonSerializer.SerializeToElement(VllmLayout.ServedModelName);
 

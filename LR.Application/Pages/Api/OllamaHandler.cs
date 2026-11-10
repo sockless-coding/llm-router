@@ -114,9 +114,7 @@ public class OllamaHandler : IProtocolHandler
                     // Ollama provider read context length from here. Prefer the preset's
                     // configured context size (what the server actually runs with) and only
                     // fall back to the model's native GGUF context length when unset.
-                    context_length = (p.ContextSize.HasValue && p.ContextSize.Value > 0)
-                        ? p.ContextSize.Value
-                        : p.GgufContextLength,
+                    context_length = p.ServedContextSize(_serverManager) ?? p.GgufContextLength,
                     embedding_length = p.GgufEmbeddingLength
                 },
                 capabilities
@@ -145,8 +143,9 @@ public class OllamaHandler : IProtocolHandler
         var paramLines = new List<string>();
         if (preset.Temperature.HasValue)
             paramLines.Add($"temperature {preset.Temperature.Value}");
-        if (preset.ContextSize.HasValue && preset.ContextSize.Value > 0)
-            paramLines.Add($"num_ctx {preset.ContextSize.Value}");
+        var configuredContext = preset.ServedContextSize(_serverManager);
+        if (configuredContext is { } ctx)
+            paramLines.Add($"num_ctx {ctx}");
         else if (gguf?.ContextLength.HasValue == true)
             paramLines.Add($"num_ctx {gguf.ContextLength.Value}");
         if (preset.GpuLayers.HasValue)
@@ -187,11 +186,11 @@ public class OllamaHandler : IProtocolHandler
         // native maximum from the GGUF header (e.g. 262144), which misrepresents what the
         // server actually runs with — override it with the preset's configured context size.
         var modelInfo = gguf?.AllKvPairs;
-        if (modelInfo is not null && preset.ContextSize.HasValue && preset.ContextSize.Value > 0)
+        if (modelInfo is not null && configuredContext is { } configured)
         {
             modelInfo = new Dictionary<string, object>(modelInfo)
             {
-                [$"{architecture}.context_length"] = preset.ContextSize.Value
+                [$"{architecture}.context_length"] = configured
             };
         }
 

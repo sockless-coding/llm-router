@@ -395,9 +395,9 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             if (!response.IsSuccessStatusCode)
                 return false;
 
-            // Now that the server is up, read its /props once — slot count (the resolved -np,
+            // Now that the server is up, read its props once — slot count (the resolved -np,
             // used by the router to cap concurrency), context window, modalities, build info.
-            if (_serverProps is null && HasLlamaServerEndpoints)
+            if (_serverProps is null)
                 await TryRefreshServerPropsAsync(httpClient, cancellationToken);
 
             return true;
@@ -409,18 +409,38 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     }
 
     /// <summary>
-    /// Best-effort read of the server's llama.cpp-style <c>/props</c> endpoint. Any failure is
-    /// swallowed — the server is already known healthy and callers fall back to preset/GGUF data
-    /// until this succeeds on a later health check.
+    /// Best-effort read of the running server's props (see <see cref="ReadServerPropsAsync"/>). Any
+    /// failure is swallowed — the server is already known healthy and callers fall back to
+    /// preset/GGUF data until this succeeds on a later health check.
     /// </summary>
     private async Task TryRefreshServerPropsAsync(HttpClient httpClient, CancellationToken cancellationToken)
     {
         try
         {
+            if (await ReadServerPropsAsync(httpClient, cancellationToken) is { } props)
+                _serverProps = props;
+        }
+        catch
+        {
+            // Ignore — will retry on the next health check.
+        }
+    }
+
+    /// <summary>
+    /// Reads the runtime facts the server reports about itself, or null when it can't (yet). The
+    /// default reads llama.cpp's <c>/props</c>; an engine without it overrides this. Exceptions are
+    /// caught by the caller.
+    /// </summary>
+    protected virtual async Task<LlamaServerProps?> ReadServerPropsAsync(HttpClient httpClient, CancellationToken cancellationToken)
+    {
+        if (!HasLlamaServerEndpoints)
+            return null;
+
+        {
             using var request = CreateRequest(HttpMethod.Get, "/props");
             using var response = await httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
-                return;
+                return null;
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -448,7 +468,11 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             string? buildInfo = root.TryGetProperty("build_info", out var bi) && bi.ValueKind == JsonValueKind.String
                 ? bi.GetString() : null;
 
-            _serverProps = new LlamaServerProps
+            await LogProviderMessage(ServerLogLevel.Info,
+                $"Server /props: {(totalSlots?.ToString() ?? "?")} slot(s), ctx/slot {(ctxPerSlot?.ToString() ?? "?")}" +
+                $"{(vision == true ? ", vision" : "")}{(audio == true ? ", audio" : "")}.");
+
+            return new LlamaServerProps
             {
                 TotalSlots = totalSlots,
                 ContextSizePerSlot = ctxPerSlot,
@@ -457,14 +481,6 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                 ModelPath = modelPath,
                 BuildInfo = buildInfo,
             };
-
-            await LogProviderMessage(ServerLogLevel.Info,
-                $"Server /props: {(totalSlots?.ToString() ?? "?")} slot(s), ctx/slot {(ctxPerSlot?.ToString() ?? "?")}" +
-                $"{(vision == true ? ", vision" : "")}{(audio == true ? ", audio" : "")}.");
-        }
-        catch
-        {
-            // Ignore — will retry on the next health check.
         }
     }
 
@@ -1268,7 +1284,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     /// Creates a request to <paramref name="path"/> on the running server with
     /// <see cref="ApplyRequestHeaders"/> applied.
     /// </summary>
-    private HttpRequestMessage CreateRequest(HttpMethod method, string path)
+    protected HttpRequestMessage CreateRequest(HttpMethod method, string path)
     {
         var request = new HttpRequestMessage(method, $"{ServerUrl}{path}");
         ApplyRequestHeaders(request);

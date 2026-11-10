@@ -21,6 +21,12 @@ public sealed record LlamaServerProps
     /// </summary>
     public int? ContextSizePerSlot { get; init; }
 
+    /// <summary>
+    /// vLLM's <c>max_model_len</c> from <c>/v1/models</c> — the context window the server actually
+    /// runs with (prompt plus output of one request). Null for llama.cpp.
+    /// </summary>
+    public int? MaxModelLength { get; init; }
+
     /// <summary><c>modalities.vision</c> — the loaded model accepts image input.</summary>
     public bool? Vision { get; init; }
 
