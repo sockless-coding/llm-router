@@ -28,7 +28,7 @@ public sealed class ResolveReleaseAssetStep : IBuildStep
             : $"Looking up release {ctx.ReleaseTag}…");
 
         var release = ctx.ReleaseTag is null
-            ? await _github.GetLatestReleaseAsync(ctx.Repo, ct)
+            ? await ctx.Profile.GetLatestReleaseAsync(_github, ct)
             : await _github.GetReleaseByTagAsync(ctx.Repo, ctx.ReleaseTag, ct);
 
         if (release is null)
@@ -154,6 +154,16 @@ public sealed class FinalizeBuildStep : IBuildStep
     public Task ExecuteAsync(BuildContext ctx, CancellationToken ct)
     {
         var serverName = ctx.Profile.ServerExecutableName;
+
+        // An engine whose executable needs the folders beside it (bin/ next to lib/) keeps the
+        // archive root as its install folder.
+        if (ctx.Profile.ExecutableSubfolder is { Length: > 0 } subfolder)
+        {
+            var expected = Path.Combine(ctx.OutputDir, subfolder, serverName);
+            if (File.Exists(expected))
+                return ctx.Sink.PhaseAsync(Phase, $"Ready: {expected}");
+        }
+
         var serverPath = Directory.EnumerateFiles(ctx.OutputDir, serverName, SearchOption.AllDirectories).FirstOrDefault()
             ?? throw new InvalidOperationException($"{serverName} was not found under {ctx.OutputDir} after install.");
 

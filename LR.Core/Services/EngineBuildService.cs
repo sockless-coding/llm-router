@@ -102,7 +102,7 @@ public partial class EngineBuildService
         // Resolve "latest" up front so the folder is named for the actual build number.
         if (releaseTag is null)
         {
-            var latest = await _github.GetLatestReleaseAsync(profile.Repo)
+            var latest = await profile.GetLatestReleaseAsync(_github)
                 ?? throw new InvalidOperationException("Could not reach GitHub to look up the latest release.");
             releaseTag = profile.VersionTagOf(latest.TagName);
         }
@@ -240,6 +240,12 @@ public partial class EngineBuildService
                 return buildId;
             }
 
+            if (build.Engine == ServerEngine.TensorFold && TensorFoldDocker.IsDockerFolder(build.InstallPath))
+            {
+                await StartTensorFoldDockerUpdateAsync(context, build, refOverride, workspaceRoot);
+                return buildId;
+            }
+
             if (build.Engine == ServerEngine.Vllm)
             {
                 await StartVllmUpdateAsync(context, build, refOverride, workspaceRoot);
@@ -311,6 +317,7 @@ public partial class EngineBuildService
             WorkRoot = workRoot,
             OutputDir = staging,
             SourceDirOverride = sharedSrc,
+            ToolsDirOverride = Path.Combine(workspaceRoot, ".tools"),
             EnvSetupCommand = recipe?.EnvironmentSetupCommand,
             Sink = sink,
         };
@@ -323,14 +330,7 @@ public partial class EngineBuildService
                 new ExtractArchiveStep(),
                 new FinalizeBuildStep(),
             }
-            : new IBuildStep[]
-            {
-                new GitSyncStep(),
-                new CMakeConfigureStep(),
-                new CMakeBuildStep(),
-                new CollectArtifactsStep(),
-                new FinalizeBuildStep(),
-            };
+            : TensorFoldSourceBuild.SourcePipeline(profile.Engine);
 
         try
         {
@@ -450,18 +450,12 @@ public partial class EngineBuildService
             WorkRoot = workRoot,
             OutputDir = outputDir,
             SourceDirOverride = sharedSrc,
+            ToolsDirOverride = Path.Combine(workspaceRoot, ".tools"),
             EnvSetupCommand = recipe.EnvironmentSetupCommand,
             Sink = sink,
         };
 
-        var pipeline = new IBuildStep[]
-        {
-            new GitSyncStep(),
-            new CMakeConfigureStep(),
-            new CMakeBuildStep(),
-            new CollectArtifactsStep(),
-            new FinalizeBuildStep(),
-        };
+        var pipeline = TensorFoldSourceBuild.SourcePipeline(recipe.Engine);
 
         try
         {

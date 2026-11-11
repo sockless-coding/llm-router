@@ -24,6 +24,13 @@ public abstract class EngineReleaseProfile
     /// <summary>The server executable for this OS that a finished install must contain.</summary>
     public abstract string ServerExecutableName { get; }
 
+    /// <summary>
+    /// The subfolder of the unpacked archive that holds <see cref="ServerExecutableName"/>, for an
+    /// engine whose executable needs the folders beside it (TensorFold's <c>bin/</c> next to <c>lib/</c>).
+    /// The install folder then stays the archive root. Empty: the install folder is wherever the executable is.
+    /// </summary>
+    public virtual string ExecutableSubfolder => "";
+
     /// <summary>Prefix for install folder names, so builds of different engines never collide.</summary>
     public abstract string FolderPrefix { get; }
 
@@ -35,6 +42,13 @@ public abstract class EngineReleaseProfile
 
     /// <summary>The version recorded on the build row for a release tag (or a source build's <c>git describe</c>).</summary>
     public virtual string VersionTagOf(string tagName) => tagName;
+
+    /// <summary>
+    /// The newest release to install when no tag is given. GitHub's own "latest" by default; an engine
+    /// whose repo also publishes releases of something else overrides this to pick among its own.
+    /// </summary>
+    public virtual Task<GitHubRelease?> GetLatestReleaseAsync(LR.Core.Interfaces.IGitHubClient github, CancellationToken ct = default) =>
+        github.GetLatestReleaseAsync(Repo, ct);
 
     /// <summary>Regex the primary binary archive name must match, or null for a combo the engine doesn't publish.</summary>
     public abstract Regex? PrimaryAssetPattern(BackendType backend, string os, string arch);
@@ -74,6 +88,7 @@ public abstract class EngineReleaseProfile
     {
         ServerEngine.LlamaCpp => LlamaCppReleaseProfile.Instance,
         ServerEngine.StableDiffusionCpp => SdCppReleaseProfile.Instance,
+        ServerEngine.TensorFold => TensorFoldReleaseProfile.Instance,
         _ => null,
     };
 
@@ -180,4 +195,39 @@ public sealed class SdCppReleaseProfile : EngineReleaseProfile
         var m = Regex.Match(name, @"-(?:cuda|rocm-)(\d+)", RegexOptions.IgnoreCase);
         return m.Success ? int.Parse(m.Groups[1].Value) : 0;
     }
+}
+
+/// <summary>
+/// TensorFold's <c>v&lt;major&gt;.&lt;minor&gt;.&lt;patch&gt;</c> engine releases. Asset naming (as of v1.2.7):
+/// <c>tensorfold-&lt;ver&gt;-linux-x86_64.tar.gz</c>, <c>-linux-aarch64.tar.gz</c> (CUDA 13, NVIDIA driver R580+)
+/// and <c>-macos-arm64.tar.gz</c> (Metal), each unpacking to <c>bin/tensorfold-native</c> beside <c>lib/</c>.
+/// There is no Windows archive (Windows builds from source). The same repo publishes the Mac desktop
+/// app's releases (<c>app-v…</c>, <c>v1.0.0-beta.…</c>), which aren't engine installs, so "latest" is
+/// picked from the engine tags rather than taken from GitHub.
+/// </summary>
+public sealed class TensorFoldReleaseProfile : EngineReleaseProfile
+{
+    public static readonly TensorFoldReleaseProfile Instance = new();
+
+    public override ServerEngine Engine => ServerEngine.TensorFold;
+    public override string DisplayName => "TensorFold";
+    public override string Repo => TensorFoldLayout.Repo;
+    public override string ServerExecutableName => TensorFoldLayout.ExecutableName(OperatingSystem.IsWindows());
+    public override string ExecutableSubfolder => TensorFoldLayout.BinFolder;
+    public override string FolderPrefix => "tensorfold-";
+
+    public override IReadOnlyList<BackendType> CandidateBackends { get; } = [BackendType.Cuda, BackendType.Metal];
+
+    public override bool IsInstallableRelease(string tagName) => Regex.IsMatch(tagName, @"^v\d+\.\d+\.\d+$");
+
+    public override Regex? PrimaryAssetPattern(BackendType backend, string os, string arch) => (os, arch, backend) switch
+    {
+        ("ubuntu", "x64", BackendType.Cuda) => Rx(@"^tensorfold-[\d.]+-linux-x86_64\.tar\.gz$"),
+        ("ubuntu", "arm64", BackendType.Cuda) => Rx(@"^tensorfold-[\d.]+-linux-aarch64\.tar\.gz$"),
+        ("macos", "arm64", BackendType.Metal) => Rx(@"^tensorfold-[\d.]+-macos-arm64\.tar\.gz$"),
+        _ => null,
+    };
+
+    public override async Task<GitHubRelease?> GetLatestReleaseAsync(LR.Core.Interfaces.IGitHubClient github, CancellationToken ct = default) =>
+        (await github.ListReleasesAsync(Repo, 20, ct)).FirstOrDefault(r => !r.Prerelease && IsInstallableRelease(r.TagName));
 }

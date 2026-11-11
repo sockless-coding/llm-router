@@ -33,6 +33,7 @@ public class EngineRecipeModel : PageModel
     [
         (ServerEngine.LlamaCpp, "llama.cpp"),
         (ServerEngine.StableDiffusionCpp, "stable-diffusion.cpp"),
+        (ServerEngine.TensorFold, "TensorFold"),
     ];
 
     public EngineRecipeModel(IEngineBuildManager manager) => _manager = manager;
@@ -63,6 +64,7 @@ public class EngineRecipeModel : PageModel
         {
             Input.Engine = engine;
             Input.GitRepoUrl = LlamaCppBuildRecipe.DefaultRepoUrl(engine);
+            Input.GitRef = LlamaCppBuildRecipe.DefaultGitRef(engine);
         }
 
         AllRecipes = await _manager.GetRecipesAsync(Input.Engine);
@@ -163,7 +165,7 @@ public class EngineRecipeModel : PageModel
             Description = Description?.Trim(),
             BackendType = BackendType,
             GitRepoUrl = string.IsNullOrWhiteSpace(GitRepoUrl) ? LlamaCppBuildRecipe.DefaultRepoUrl(Engine) : GitRepoUrl.Trim(),
-            GitRef = string.IsNullOrWhiteSpace(GitRef) ? "master" : GitRef.Trim(),
+            GitRef = string.IsNullOrWhiteSpace(GitRef) ? LlamaCppBuildRecipe.DefaultGitRef(Engine) : GitRef.Trim(),
             CMakeArgs = SplitLines(CMakeArgsText),
             CMakeGenerator = string.IsNullOrWhiteSpace(CMakeGenerator) ? null : CMakeGenerator.Trim(),
             BuildConfig = string.IsNullOrWhiteSpace(BuildConfig) ? "Release" : BuildConfig.Trim(),

@@ -3,6 +3,7 @@
 @model LR.Application.Pages.Features.Models.ModelsDetailsModel
 @{
     ViewData["Title"] = Model.LocalModel.Name;
+    var isCheckpoint = Model.LocalModel.Format == ModelFormat.Checkpoint;
 
     string FormatSize(long? bytes)
     {
@@ -29,7 +30,8 @@
     <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-3">
         <h2 class="text-lg font-semibold text-text-primary mb-2">Overview</h2>
         <dl class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            <div><dt class="text-text-secondary">File Path</dt><dd class="text-text-primary break-all">@Model.LocalModel.FilePath</dd></div>
+            <div><dt class="text-text-secondary">@(isCheckpoint ? "Folder" : "File Path")</dt><dd class="text-text-primary break-all">@Model.LocalModel.FilePath</dd></div>
+            <div><dt class="text-text-secondary">Engines</dt><dd class="mt-0.5"><partial name="_EngineBadges" model="@LR.Application.Pages.Features.Models.EngineBadgesViewModel.For(Model.LocalModel)" /></dd></div>
             <div><dt class="text-text-secondary">Source</dt><dd class="text-text-primary">@Model.LocalModel.Source</dd></div>
             <div><dt class="text-text-secondary">Status</dt><dd class="text-text-primary">@Model.LocalModel.Status @(Model.LocalModel.StatusMessage is not null ? $"({Model.LocalModel.StatusMessage})" : "")</dd></div>
             <div><dt class="text-text-secondary">File Size</dt><dd class="text-text-primary">@FormatSize(Model.LocalModel.FileSizeBytes)</dd></div>
@@ -51,7 +53,7 @@
     </div>
 
     <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-3">
-        <h2 class="text-lg font-semibold text-text-primary mb-2">GGUF Metadata</h2>
+        <h2 class="text-lg font-semibold text-text-primary mb-2">@(isCheckpoint ? "Checkpoint config" : "GGUF Metadata")</h2>
         <dl class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
             <div><dt class="text-text-secondary">Architecture</dt><dd class="text-text-primary">@(Model.LocalModel.Architecture ?? "—")</dd></div>
             <div><dt class="text-text-secondary">Model Name</dt><dd class="text-text-primary">@(Model.LocalModel.GgufModelName ?? "—")</dd></div>
@@ -106,7 +108,7 @@
         @if (Model.KvPairs is not null)
         {
             <details class="mt-2">
-                <summary class="cursor-pointer text-sm text-neon-cyan">Raw GGUF key-value pairs (@Model.KvPairs.Count)</summary>
+                <summary class="cursor-pointer text-sm text-neon-cyan">@(isCheckpoint ? "Raw config.json" : "Raw GGUF key-value pairs") (@Model.KvPairs.Count)</summary>
                 <pre class="text-xs bg-cyber-bg-dark rounded-lg p-3 mt-2 overflow-x-auto text-text-primary">@System.Text.Json.JsonSerializer.Serialize(Model.KvPairs, new System.Text.Json.JsonSerializerOptions { WriteIndented = true })</pre>
             </details>
         }

@@ -41,6 +41,27 @@ public sealed class SdCppInstallHandler : IEngineInstallHandler
     public void RefreshFromDisk(EngineBuild build) { }
 }
 
+/// <summary>
+/// TensorFold installs: an unpacked release (<c>bin/tensorfold-native</c> beside <c>lib/</c>), or a folder
+/// holding a build from source. Compared against the newest engine release, not GitHub's "latest",
+/// which can be one of the desktop app's.
+/// </summary>
+public sealed class TensorFoldInstallHandler : IEngineInstallHandler
+{
+    public ServerEngine Engine => ServerEngine.TensorFold;
+
+    public string Repo => TensorFoldLayout.Repo;
+
+    public bool IsInstallPresent(string installPath) => TensorFoldLayout.IsInstall(installPath) || TensorFoldDocker.IsInstall(installPath);
+
+    public bool IsReady(string installPath) => IsInstallPresent(installPath);
+
+    public async Task<string?> GetLatestRefAsync(EngineBuild build, IGitHubClient github, CancellationToken ct = default) =>
+        (await TensorFoldReleaseProfile.Instance.GetLatestReleaseAsync(github, ct))?.TagName;
+
+    public void RefreshFromDisk(EngineBuild build) { }
+}
+
 /// <summary>vLLM installs: a venv holding <c>vllm</c> (in WSL on Windows), compared against the latest release by tag.</summary>
 public sealed class VllmInstallHandler : IEngineInstallHandler
 {

@@ -41,4 +41,10 @@ public interface IHuggingFaceClient
         string destinationPath,
         IProgress<DownloadProgress>? progress,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// A small text file from a repo (a checkpoint's <c>config.json</c>), or null when the repo or file
+    /// can't be read.
+    /// </summary>
+    Task<string?> GetFileTextAsync(string repoId, string filename, string revision = "main", CancellationToken ct = default);
 }

@@ -83,6 +83,8 @@ public class EngineBuildManager : IEngineBuildManager
             {
                 if (build.Engine == ServerEngine.Vllm)
                     await VllmInstaller.DeleteAsync(build.InstallPath);
+                else if (build.Engine == ServerEngine.TensorFold && TensorFoldDocker.IsDockerFolder(build.InstallPath))
+                    await TensorFoldDocker.DeleteAsync(build.InstallPath);
                 else
                     Directory.Delete(build.InstallPath, recursive: true);
             }

@@ -229,15 +229,18 @@ public class VllmProvider : ManagedServerProviderBase
         return props;
     }
 
-    /// <summary>The served model's facts from a <c>/v1/models</c> response, or null when it lists none.</summary>
-    public static LlamaServerProps? PropsFromModels(JsonElement root)
+    /// <summary>
+    /// The served model's facts from a <c>/v1/models</c> response — the entry named
+    /// <paramref name="servedName"/> (vLLM's by default), else the first — or null when it lists none.
+    /// </summary>
+    public static LlamaServerProps? PropsFromModels(JsonElement root, string servedName = VllmLayout.ServedModelName)
     {
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
             return null;
 
-        // The router serves one model under VllmLayout.ServedModelName; take that entry, else the first.
+        // The router serves one model under a fixed name; take that entry, else the first.
         var model = data.EnumerateArray().FirstOrDefault(m =>
-            m.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == VllmLayout.ServedModelName);
+            m.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == servedName);
         if (model.ValueKind != JsonValueKind.Object)
             model = data.EnumerateArray().FirstOrDefault();
         if (model.ValueKind != JsonValueKind.Object)

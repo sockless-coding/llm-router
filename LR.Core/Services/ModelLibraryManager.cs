@@ -35,6 +35,9 @@ public class ModelLibraryManager : IModelLibrary
 
     public async Task<LocalModel> ImportFromPathAsync(string filePath, string? name = null)
     {
+        if (Directory.Exists(filePath))
+            return await ImportCheckpointAsync(filePath, name);
+
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"Model file not found: {filePath}", filePath);
 
@@ -49,6 +52,7 @@ public class ModelLibraryManager : IModelLibrary
             Name = name ?? Path.GetFileNameWithoutExtension(filePath),
             FilePath = normalizedPath,
             FileSizeBytes = new FileInfo(normalizedPath).Length,
+            Format = FormatOfFile(normalizedPath),
             Source = ModelSource.Local,
             Status = ModelStatus.Ready,
         };
@@ -66,17 +70,61 @@ public class ModelLibraryManager : IModelLibrary
             return Array.Empty<string>();
 
         var registered = await _context.LocalModels.Where(m => m.AgentId == null).Select(m => m.FilePath).ToListAsync();
-        var registeredSet = new HashSet<string>(registered, StringComparer.OrdinalIgnoreCase);
+        var registeredSet = new HashSet<string>(registered.Select(TrimSeparators), StringComparer.OrdinalIgnoreCase);
 
-        return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+        // A checkpoint folder is one entry; the safetensors shards inside it aren't models of their own.
+        var checkpoints = new[] { folder }.Concat(Directory.EnumerateDirectories(folder, "*", SearchOption.AllDirectories))
+            .Where(CheckpointMetadataReader.IsCheckpointFolder)
+            .Select(d => TrimSeparators(Path.GetFullPath(d)))
+            .ToList();
+        bool InCheckpoint(string file) => checkpoints.Any(c => file.StartsWith(c + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+
+        var files = Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
             .Where(IsModelFile)
             .Select(Path.GetFullPath)
-            .Where(p => !registeredSet.Contains(p))
+            .Where(p => !InCheckpoint(p))
             // shards 2..N of a split model belong to its first shard's entry
-            .Where(p => SplitGguf.Parse(p) is not { Index: > 1 })
+            .Where(p => SplitGguf.Parse(p) is not { Index: > 1 });
+
+        return checkpoints.Concat(files)
+            .Where(p => !registeredSet.Contains(p))
             .OrderBy(p => p)
             .ToList();
     }
+
+    /// <summary>Registers a checkpoint folder (config.json and safetensors weights), read from its config.</summary>
+    private async Task<LocalModel> ImportCheckpointAsync(string folder, string? name)
+    {
+        var normalized = TrimSeparators(Path.GetFullPath(folder));
+        if (!CheckpointMetadataReader.IsCheckpointFolder(normalized))
+            throw new InvalidOperationException($"'{normalized}' isn't a checkpoint folder: it needs a config.json and .safetensors weights.");
+        if (await _context.LocalModels.AnyAsync(m => m.FilePath == normalized && m.AgentId == null))
+            throw new InvalidOperationException($"A model already exists for path: {normalized}");
+
+        var model = new LocalModel
+        {
+            Id = Guid.NewGuid(),
+            Name = name ?? Path.GetFileName(normalized),
+            FilePath = normalized,
+            Format = ModelFormat.Checkpoint,
+            FileSizeBytes = CheckpointMetadataReader.FolderSize(normalized),
+            Source = ModelSource.Local,
+            Status = ModelStatus.Ready,
+        };
+        CheckpointMetadataReader.Apply(model);
+
+        _context.LocalModels.Add(model);
+        await _context.SaveChangesAsync();
+        return model;
+    }
+
+    private static string TrimSeparators(string path) => path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    /// <summary>The format of a model file, from its extension.</summary>
+    public static ModelFormat FormatOfFile(string path) =>
+        path.EndsWith(".safetensors", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".sft", StringComparison.OrdinalIgnoreCase)
+            ? ModelFormat.Safetensors
+            : ModelFormat.Gguf;
 
     public async Task<bool> RefreshMetadataAsync(Guid id)
     {
@@ -87,16 +135,30 @@ public class ModelLibraryManager : IModelLibrary
         if (model.AgentId is not null)
             throw new InvalidOperationException("This model lives on a remote agent — refresh it from the agent.");
 
-        if (!File.Exists(model.FilePath))
+        if (model.Format == ModelFormat.Checkpoint)
+        {
+            if (!CheckpointMetadataReader.IsCheckpointFolder(model.FilePath))
+            {
+                model.Status = ModelStatus.Missing;
+                model.StatusMessage = "Checkpoint folder (config.json and .safetensors weights) not found on disk.";
+                await _context.SaveChangesAsync();
+                return true;
+            }
+            model.FileSizeBytes = CheckpointMetadataReader.FolderSize(model.FilePath);
+            CheckpointMetadataReader.Apply(model);
+        }
+        else if (!File.Exists(model.FilePath))
         {
             model.Status = ModelStatus.Missing;
             model.StatusMessage = "File not found on disk.";
             await _context.SaveChangesAsync();
             return true;
         }
-
-        model.FileSizeBytes = new FileInfo(model.FilePath).Length;
-        await ApplyGgufMetadataAsync(model, model.FilePath);
+        else
+        {
+            model.FileSizeBytes = new FileInfo(model.FilePath).Length;
+            await ApplyGgufMetadataAsync(model, model.FilePath);
+        }
         model.Status = ModelStatus.Ready;
         model.StatusMessage = null;
         model.LastVerifiedAt = DateTimeOffset.UtcNow;
@@ -135,7 +197,12 @@ public class ModelLibraryManager : IModelLibrary
         await _context.SaveChangesAsync();
 
         // A remote agent's file is deleted by that agent; never touch a same-named path here.
-        if (deleteFile && model.AgentId is null)
+        if (deleteFile && model.AgentId is null && model.Format == ModelFormat.Checkpoint)
+        {
+            try { if (Directory.Exists(model.FilePath)) Directory.Delete(model.FilePath, recursive: true); }
+            catch { /* best effort — registry entry is already gone */ }
+        }
+        else if (deleteFile && model.AgentId is null)
         {
             // every shard of a split model
             foreach (var path in SplitGguf.AllShards(model.FilePath).Where(File.Exists))

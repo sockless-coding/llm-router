@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
@@ -12,11 +14,13 @@ public class ModelsHuggingFaceModel : PageModel
 {
     private readonly IHuggingFaceClient _hfClient;
     private readonly IModelLibrary _modelLibrary;
+    private readonly IEngineCatalog _engines;
 
-    public ModelsHuggingFaceModel(IHuggingFaceClient hfClient, IModelLibrary modelLibrary)
+    public ModelsHuggingFaceModel(IHuggingFaceClient hfClient, IModelLibrary modelLibrary, IEngineCatalog engines)
     {
         _hfClient = hfClient;
         _modelLibrary = modelLibrary;
+        _engines = engines;
     }
 
     /// <summary>
@@ -48,7 +52,7 @@ public class ModelsHuggingFaceModel : PageModel
     public static string BrowseRepoUrl(string repoId, HfModelFormat format)
     {
         var url = $"/Features/Models/HuggingFace?repoId={Uri.EscapeDataString(repoId)}";
-        return format == HfModelFormat.Safetensors ? url + $"&format={format}" : url;
+        return format == HfModelFormat.Gguf ? url : url + $"&format={format}";
     }
 
     public async Task<IActionResult> OnGetSearchAsync(string q, HfModelFormat format, bool textToImage, CancellationToken ct)
@@ -79,6 +83,8 @@ public class ModelsHuggingFaceModel : PageModel
                 return new JsonResult(new { files = Array.Empty<object>(), guide = (object?)null });
 
             var library = await _modelLibrary.GetAllAsync();
+            if (format == HfModelFormat.Checkpoint)
+                return new JsonResult(await CheckpointSummaryAsync(detail, library, ct));
             var downloaded = library
                 .Where(m => string.Equals(m.HfRepoId, repoId, StringComparison.OrdinalIgnoreCase) && m.HfFilename is not null)
                 .Select(m => m.HfFilename!)
@@ -140,6 +146,50 @@ public class ModelsHuggingFaceModel : PageModel
         {
             return new JsonResult(new { error = ex.Message }) { StatusCode = 502 };
         }
+    }
+
+    /// <summary>
+    /// A repo on the Checkpoint tab: one item to download whole, described from its config.json — what it is,
+    /// how it's quantized, its size and the engines that can serve it — or why it isn't a checkpoint.
+    /// </summary>
+    private async Task<object> CheckpointSummaryAsync(HfRepoDetail detail, IReadOnlyList<LocalModel> library, CancellationToken ct)
+    {
+        var files = CheckpointDownload.Select(detail.Siblings);
+        if (files is null)
+            return new { checkpoint = (object?)null, error = "Not a checkpoint: TensorFold and vLLM need a config.json and .safetensors weights at the repo's top level." };
+
+        var revision = detail.Sha ?? "main";
+        JsonObject? config = null, quantizeConfig = null;
+        try { config = JsonNode.Parse(await _hfClient.GetFileTextAsync(detail.Id, "config.json", revision, ct) ?? "null") as JsonObject; }
+        catch (System.Text.Json.JsonException) { }
+        if (files.Any(f => f.Filename == "quantize_config.json"))
+        {
+            try { quantizeConfig = JsonNode.Parse(await _hfClient.GetFileTextAsync(detail.Id, "quantize_config.json", revision, ct) ?? "null") as JsonObject; }
+            catch (System.Text.Json.JsonException) { }
+        }
+
+        var probe = new LocalModel { FilePath = detail.Id, Format = ModelFormat.Checkpoint };
+        if (config is not null)
+            CheckpointMetadataReader.ApplyConfig(probe, config, quantizeConfig, detail.Id[(detail.Id.IndexOf('/') + 1)..]);
+
+        var inLibrary = library.FirstOrDefault(m => m.Format == ModelFormat.Checkpoint && m.AgentId is null
+            && string.Equals(m.HfRepoId, detail.Id, StringComparison.OrdinalIgnoreCase));
+        return new
+        {
+            checkpoint = new
+            {
+                architecture = probe.Architecture,
+                className = config is null ? null : CheckpointMetadataReader.ArchitectureClass(config),
+                quantization = probe.QuantizationLevel,
+                parameters = probe.ParameterSize,
+                contextLength = probe.ContextLength,
+                fileCount = files.Count,
+                sizeBytes = files.All(f => f.SizeBytes is not null) ? files.Sum(f => f.SizeBytes!.Value) : (long?)null,
+                engines = ModelEngineSupport.For(probe).Select(e => _engines.Get(e)?.DisplayName ?? e.ToString()),
+                inLibrary = inLibrary?.Name,
+            },
+            error = (string?)null,
+        };
     }
 
     public async Task<IActionResult> OnGetDetailsAsync(string repoId, HfModelFormat format, CancellationToken ct)

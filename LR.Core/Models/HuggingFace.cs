@@ -11,6 +11,9 @@ public enum HfModelFormat
 {
     Gguf,
     Safetensors,
+
+    /// <summary>A whole repo as one checkpoint folder (config, tokenizer, safetensors shards) for TensorFold and vLLM.</summary>
+    Checkpoint,
 }
 
 public static class HfModelFormatExtensions
@@ -18,19 +21,20 @@ public static class HfModelFormatExtensions
     /// <summary>The hub's library filter for repos containing this format (<c>?filter=</c>).</summary>
     public static string HubFilter(this HfModelFormat format) => format switch
     {
-        HfModelFormat.Safetensors => "safetensors",
+        HfModelFormat.Safetensors or HfModelFormat.Checkpoint => "safetensors",
         _ => "gguf",
     };
 
     public static string FileExtension(this HfModelFormat format) => format switch
     {
-        HfModelFormat.Safetensors => ".safetensors",
+        HfModelFormat.Safetensors or HfModelFormat.Checkpoint => ".safetensors",
         _ => ".gguf",
     };
 
     public static string DisplayName(this HfModelFormat format) => format switch
     {
         HfModelFormat.Safetensors => "Safetensors",
+        HfModelFormat.Checkpoint => "Checkpoint (TensorFold, vLLM)",
         _ => "GGUF",
     };
 }
@@ -69,6 +73,10 @@ public class HfRepoFile
 
     [JsonPropertyName("size")]
     public long? SizeBytes { get; set; }
+
+    /// <summary>The file's git blob id (with <c>?blobs=true</c>): changes whenever the file's content does.</summary>
+    [JsonPropertyName("blobId")]
+    public string? BlobId { get; set; }
 }
 
 /// <summary>

@@ -443,6 +443,9 @@ namespace LR.Core.Migrations
                     b.Property<long?>("FileSizeBytes")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Format")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("GgufModelName")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");

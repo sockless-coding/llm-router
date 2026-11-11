@@ -156,13 +156,14 @@ public sealed class JobRunner
             WorkRoot = workRoot,
             OutputDir = job.InPlace ? staging : job.OutputDir,
             SourceDirOverride = sharedSrc,
+            ToolsDirOverride = Path.Combine(_config.ResolvedDataDirectory, ".tools"),
             EnvSetupCommand = job.Recipe?.EnvironmentSetupCommand,
             Sink = sink,
         };
 
         IBuildStep[] pipeline = job.Recipe is null
             ? [new ResolveReleaseAssetStep(github), new DownloadArchiveStep(github), new ExtractArchiveStep(), new FinalizeBuildStep()]
-            : [new GitSyncStep(), new CMakeConfigureStep(), new CMakeBuildStep(), new CollectArtifactsStep(), new FinalizeBuildStep()];
+            : TensorFoldSourceBuild.SourcePipeline(job.Engine);
 
         await EngineBuildRunner.RunAsync(pipeline, ctx, ct);
 

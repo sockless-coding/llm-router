@@ -128,6 +128,7 @@ builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuil
 builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.StrataInstallHandler>();
 builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.SdCppInstallHandler>();
 builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.VllmInstallHandler>();
+builder.Services.AddSingleton<IEngineInstallHandler, LR.Core.Services.EngineBuilds.TensorFoldInstallHandler>();
 builder.Services.AddHttpClient(VllmRecipeClient.HttpClientName, client =>
 {
     client.DefaultRequestHeaders.UserAgent.ParseAdd("llm-router");

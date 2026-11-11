@@ -21,6 +21,7 @@ public static class EngineDisplay
         BackendType.Metal => "bg-gray-400/10 text-gray-300 border-gray-400/20",
         BackendType.OpenCL => "bg-amber-500/10 text-amber-400 border-amber-500/20",
         BackendType.OpenVino => "bg-blue-500/10 text-blue-400 border-blue-500/20",
+        BackendType.Xpu => "bg-sky-500/10 text-sky-400 border-sky-500/20",
         _ => "bg-gray-700/30 text-text-secondary border-gray-600/20",
     };
 
@@ -29,6 +30,7 @@ public static class EngineDisplay
         BackendType.Hip => "HIP/ROCm",
         BackendType.OpenVino => "OpenVINO",
         BackendType.OpenCL => "OpenCL",
+        BackendType.Xpu => "XPU (Level Zero)",
         _ => b.ToString(),
     };
 }

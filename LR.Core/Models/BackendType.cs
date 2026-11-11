@@ -33,4 +33,7 @@ public enum BackendType
 
     /// <summary>Huawei Ascend CANN (Linux).</summary>
     Cann = 10,
+
+    /// <summary>Intel GPUs through Level Zero directly, without SYCL (TensorFold's XPU engine; Linux).</summary>
+    Xpu = 11,
 }

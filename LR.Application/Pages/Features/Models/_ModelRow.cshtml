@@ -32,6 +32,9 @@
         }
     </td>
     <td class="px-4 py-3">
+        <partial name="_EngineBadges" model="@EngineBadgesViewModel.For(lm)" />
+    </td>
+    <td class="px-4 py-3">
         @if (lm.Source == ModelSource.HuggingFace)
         {
             <span class="text-xs px-2 py-0.5 rounded bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/20">Hugging&nbsp;Face</span>
@@ -69,7 +72,7 @@
         {
             <a href="https://huggingface.co/@lm.HfRepoId" target="_blank" rel="noopener noreferrer" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium" title="Open this model's page on Hugging Face">Model Card</a>
         }
-        @if (!Model.Indented)
+        @if (!Model.Indented && lm.Format != ModelFormat.Checkpoint)
         {
             if (lm.Source == ModelSource.HuggingFace && !string.IsNullOrEmpty(lm.HfRepoId))
             {

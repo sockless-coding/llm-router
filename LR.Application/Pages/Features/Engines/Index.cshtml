@@ -139,6 +139,16 @@ else
                 if (result.success) toDetail(result.buildId); else alert(result.message || 'Could not start the update.');
             };
 
+            // --- TensorFold ---
+
+            window.installTensorFoldXpu = async function () {
+                const value = id => document.getElementById(id)?.value.trim() ?? '';
+                const result = await postAction({
+                    Command: 'installTensorFoldXpu', GitRef: value('tf-xpu-ref'), XpuDevice: value('tf-xpu-device'), Name: value('tf-xpu-name'),
+                });
+                if (result.success) toDetail(result.buildId); else alert(result.message || 'Could not start the image build.');
+            };
+
             // --- Strata ---
 
             window.registerStrata = async function () {

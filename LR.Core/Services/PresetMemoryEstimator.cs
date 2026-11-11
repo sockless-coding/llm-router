@@ -41,6 +41,14 @@ public static class PresetMemoryEstimator
                 ? (long)(vram * 1024 * Mb)
                 : ComputeBufferBytes;
 
+        // A TensorFold model is a repo id or a checkpoint folder, not a GGUF: the preset's own figure, else the
+        // linked library checkpoint's size (its weights load as stored) plus overhead, else just the buffers.
+        if (engine == ServerEngine.TensorFold)
+            return TensorFoldPresetSettings.VramBytes(preset)
+                ?? (model is { Format: ModelFormat.Checkpoint, FileSizeBytes: > 0 } checkpoint
+                    ? checkpoint.FileSizeBytes.Value + (long)(checkpoint.FileSizeBytes.Value * 0.05) + ComputeBufferBytes
+                    : ComputeBufferBytes);
+
         long weights = ModelFileBytes(preset.ModelPath, fileSize);
         int? layers = model?.BlockCount;
 

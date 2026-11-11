@@ -36,7 +36,7 @@ public static class BuiltInRecipeTemplates
         ? new[] { "-DCMAKE_C_COMPILER=cl", "-DCMAKE_CXX_COMPILER=icx" }
         : new[] { "-DCMAKE_C_COMPILER=icx", "-DCMAKE_CXX_COMPILER=icpx" };
 
-    public static IEnumerable<LlamaCppBuildRecipe> All() => LlamaCpp().Concat(StableDiffusionCpp());
+    public static IEnumerable<LlamaCppBuildRecipe> All() => LlamaCpp().Concat(StableDiffusionCpp()).Concat(TensorFold());
 
     private static IEnumerable<LlamaCppBuildRecipe> LlamaCpp()
     {
@@ -242,6 +242,74 @@ public static class BuiltInRecipeTemplates
             BackendType = BackendType.Metal,
             GitRepoUrl = repo,
             CMakeArgs = new() { "-DSD_METAL=ON" },
+        };
+    }
+
+    /// <summary>
+    /// TensorFold templates, from its <c>docs/WINDOWS.md</c>, <c>docs/xpu/README.md</c> and the
+    /// <c>-Dgpu</c> product build (<c>zig/build/product.zig</c>). The arguments are <c>zig build</c>'s; the
+    /// pipeline adds <c>-Dnvcc</c>, <c>-Dhipcc</c>, <c>-Docloc</c> and <c>-Dngen-include</c> from what's installed
+    /// or fetched, and on Windows CUDA runs under MSVC's vcvars64.bat. A CUDA or HIP server is built for one
+    /// GPU architecture: pick the template for your card, or change the architecture in a copy.
+    /// </summary>
+    private static IEnumerable<LlamaCppBuildRecipe> TensorFold()
+    {
+        var repo = LlamaCppBuildRecipe.DefaultRepoUrl(ServerEngine.TensorFold);
+        const string cuda = "NVIDIA CUDA server for one GPU architecture (zig build -Dgpu). Needs the CUDA Toolkit 13 and, on Windows, " +
+                            "the Visual Studio C++ build tools. Source: TensorFold docs/WINDOWS.md, zig/build/product.zig.";
+        foreach (var (sm, cards) in new[]
+        {
+            ("sm_120", "RTX 50 series / RTX PRO Blackwell"),
+            ("sm_89", "RTX 40 series / L4 / L40"),
+            ("sm_86", "RTX 30 series / A10 / A40"),
+            ("sm_80", "A100"),
+            ("sm_121", "GB10 / DGX Spark / RTX Spark"),
+        })
+        {
+            yield return new LlamaCppBuildRecipe
+            {
+                Engine = ServerEngine.TensorFold,
+                Name = $"CUDA {sm} ({cards})",
+                Description = cuda,
+                BackendType = BackendType.Cuda,
+                GitRepoUrl = repo,
+                GitRef = "main",
+                CMakeArgs = new() { $"-Dgpu={sm}" },
+            };
+        }
+
+        const string hip = "AMD HIP server for one GPU architecture (zig build native-hip). Needs AMD's HIP SDK (Windows) or ROCm (Linux); " +
+                           "check your card's arch with hipInfo / rocminfo. Source: TensorFold docs/WINDOWS.md.";
+        foreach (var (arch, cards) in new[]
+        {
+            ("gfx1151", "Ryzen AI Max (Strix Halo)"),
+            ("gfx1201", "RX 9070 / Radeon AI PRO R9700"),
+            ("gfx1100", "RX 7900"),
+        })
+        {
+            yield return new LlamaCppBuildRecipe
+            {
+                Engine = ServerEngine.TensorFold,
+                Name = $"HIP {arch} ({cards})",
+                Description = hip,
+                BackendType = BackendType.Hip,
+                GitRepoUrl = repo,
+                GitRef = "main",
+                CMakeArgs = new() { "native-hip", "-Dhip=true", $"-Dhip-arch={arch}" },
+            };
+        }
+
+        yield return new LlamaCppBuildRecipe
+        {
+            Engine = ServerEngine.TensorFold,
+            Name = "XPU bmg (Intel Arc B-series / Arc Pro B60, B70)",
+            Description = "Intel Xe2 server over Level Zero (zig build xpu-native) — Linux only. Needs Intel's compute runtime (Level Zero), " +
+                          "ocloc and a C++17 compiler; oneDNN's nGEN headers are fetched. For Gen12 GPUs set -Dxpu-device (tgllp, dg2…). " +
+                          "Source: TensorFold docs/xpu/README.md.",
+            BackendType = BackendType.Xpu,
+            GitRepoUrl = repo,
+            GitRef = "main",
+            CMakeArgs = new() { "xpu-native", "-Dxpu-device=bmg" },
         };
     }
 }

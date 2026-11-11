@@ -57,6 +57,14 @@ public sealed class BuildContext
     public string? SourceDirOverride { get; init; }
 
     public string SourceDir => SourceDirOverride ?? Path.Combine(WorkRoot, "src");
+
+    /// <summary>
+    /// Where downloaded build tools (a Zig toolchain) and helper checkouts (xgrammar, nGEN) are cached,
+    /// shared by every build in the workspace. Defaults under the work root.
+    /// </summary>
+    public string? ToolsDirOverride { get; init; }
+
+    public string ToolsDir => ToolsDirOverride ?? Path.Combine(WorkRoot, "tools");
     public string BuildDir => Path.Combine(WorkRoot, "build");
 
     public string? EnvSetupCommand { get; init; }

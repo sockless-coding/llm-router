@@ -71,6 +71,10 @@ public static class ModelKindClassifier
 
     public static ModelType Classify(LocalModel model)
     {
+        // A checkpoint folder is a language model for TensorFold / vLLM; its config has no GGUF signals.
+        if (model.Format == ModelFormat.Checkpoint)
+            return ModelType.Chat;
+
         var fileName = Path.GetFileName(model.FilePath);
 
         // llama.cpp's mmproj converter always writes general.architecture = "clip"; the filename
