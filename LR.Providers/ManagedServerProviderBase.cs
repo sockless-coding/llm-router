@@ -208,6 +208,20 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     protected virtual void OnRequestCompleted(RouteResponse response) { }
 
     /// <summary>
+    /// Async counterpart of <see cref="OnRequestStarting"/>, awaited just before the request is
+    /// sent — for an engine whose out-of-band metrics have to be read over HTTP (vLLM's
+    /// <c>/metrics</c> counters). Failures should be swallowed: metrics never fail a request.
+    /// </summary>
+    protected virtual Task OnRequestStartingAsync(RouteResponse response, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Async counterpart of <see cref="OnRequestCompleted"/>, awaited after it and after the
+    /// router's own timings were filled in. Runs even when the request was cancelled, so it
+    /// takes no token; implementations bound their own work.
+    /// </summary>
+    protected virtual Task OnRequestCompletedAsync(RouteResponse response) => Task.CompletedTask;
+
+    /// <summary>
     /// Adds engine-specific headers (e.g. an API key) to every request sent to the server,
     /// including <c>/props</c> and <c>/slots</c> reads.
     /// </summary>
@@ -395,9 +409,9 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             if (!response.IsSuccessStatusCode)
                 return false;
 
-            // Now that the server is up, read its /props once — slot count (the resolved -np,
+            // Now that the server is up, read its props once — slot count (the resolved -np,
             // used by the router to cap concurrency), context window, modalities, build info.
-            if (_serverProps is null && HasLlamaServerEndpoints)
+            if (_serverProps is null)
                 await TryRefreshServerPropsAsync(httpClient, cancellationToken);
 
             return true;
@@ -409,18 +423,38 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     }
 
     /// <summary>
-    /// Best-effort read of the server's llama.cpp-style <c>/props</c> endpoint. Any failure is
-    /// swallowed — the server is already known healthy and callers fall back to preset/GGUF data
-    /// until this succeeds on a later health check.
+    /// Best-effort read of the running server's props (see <see cref="ReadServerPropsAsync"/>). Any
+    /// failure is swallowed — the server is already known healthy and callers fall back to
+    /// preset/GGUF data until this succeeds on a later health check.
     /// </summary>
     private async Task TryRefreshServerPropsAsync(HttpClient httpClient, CancellationToken cancellationToken)
     {
         try
         {
+            if (await ReadServerPropsAsync(httpClient, cancellationToken) is { } props)
+                _serverProps = props;
+        }
+        catch
+        {
+            // Ignore — will retry on the next health check.
+        }
+    }
+
+    /// <summary>
+    /// Reads the runtime facts the server reports about itself, or null when it can't (yet). The
+    /// default reads llama.cpp's <c>/props</c>; an engine without it overrides this. Exceptions are
+    /// caught by the caller.
+    /// </summary>
+    protected virtual async Task<LlamaServerProps?> ReadServerPropsAsync(HttpClient httpClient, CancellationToken cancellationToken)
+    {
+        if (!HasLlamaServerEndpoints)
+            return null;
+
+        {
             using var request = CreateRequest(HttpMethod.Get, "/props");
             using var response = await httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
-                return;
+                return null;
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -448,7 +482,11 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             string? buildInfo = root.TryGetProperty("build_info", out var bi) && bi.ValueKind == JsonValueKind.String
                 ? bi.GetString() : null;
 
-            _serverProps = new LlamaServerProps
+            await LogProviderMessage(ServerLogLevel.Info,
+                $"Server /props: {(totalSlots?.ToString() ?? "?")} slot(s), ctx/slot {(ctxPerSlot?.ToString() ?? "?")}" +
+                $"{(vision == true ? ", vision" : "")}{(audio == true ? ", audio" : "")}.");
+
+            return new LlamaServerProps
             {
                 TotalSlots = totalSlots,
                 ContextSizePerSlot = ctxPerSlot,
@@ -457,14 +495,6 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                 ModelPath = modelPath,
                 BuildInfo = buildInfo,
             };
-
-            await LogProviderMessage(ServerLogLevel.Info,
-                $"Server /props: {(totalSlots?.ToString() ?? "?")} slot(s), ctx/slot {(ctxPerSlot?.ToString() ?? "?")}" +
-                $"{(vision == true ? ", vision" : "")}{(audio == true ? ", audio" : "")}.");
-        }
-        catch
-        {
-            // Ignore — will retry on the next health check.
         }
     }
 
@@ -527,6 +557,8 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
 
                 var routeResponse = new RouteResponse();
                 OnRequestStarting(routeResponse);
+                await OnRequestStartingAsync(routeResponse, cancellationToken);
+                var sentAt = System.Diagnostics.Stopwatch.GetTimestamp();
 
                 // This method reads the entire response body as one JSON document, so the
                 // backend must not switch to SSE framing ("data: {...}\n\n") — force "stream"
@@ -554,6 +586,11 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                     LlamaCppResponseParser.ParseRouteResponseInto(jsonDoc.RootElement, routeResponse);
 
                 OnRequestCompleted(routeResponse);
+                // A whole response can't be split into prompt and generation time, but the
+                // total is still known when the engine (vLLM) reports no timings of its own.
+                if (routeResponse.TotalLatencyMs <= 0)
+                    routeResponse.TotalLatencyMs = System.Diagnostics.Stopwatch.GetElapsedTime(sentAt).TotalMilliseconds;
+                await OnRequestCompletedAsync(routeResponse);
 
                 return routeResponse;
             }
@@ -692,6 +729,8 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
 
         var streamResponse = new RouteResponse();
         OnRequestStarting(streamResponse);
+        await OnRequestStartingAsync(streamResponse, cancellationToken);
+        var clock = new StreamClock();
 
         // Whatever the original client asked for, this path reads SSE — make sure the body says
         // so (a payload queued from a non-streaming request may still have "stream": false).
@@ -729,6 +768,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                 httpRequest?.Dispose(); // dispose a prior attempt's request, if this is a retry
                 httpRequest = CreateRequest(HttpMethod.Post, endpoint);
                 httpRequest.Content = requestContent;
+                clock.Sent();
                 response = await _httpClient.SendAsync(
                     httpRequest,
                     HttpCompletionOption.ResponseHeadersRead,
@@ -792,7 +832,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
         {
         if (protocol == ApiProtocol.Claude)
         {
-            await foreach (var claudeChunk in ReadClaudeSseStreamAsync(reader!, streamResponse, cancellationToken))
+            await foreach (var claudeChunk in ReadClaudeSseStreamAsync(reader!, streamResponse, clock, cancellationToken))
                 yield return claudeChunk;
             yield break;
         }
@@ -842,7 +882,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                 // choices, which the code below folds into streamResponse as it's seen).
                 streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
                 streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
-                OnRequestCompleted(streamResponse);
+                await FinishStreamAsync(streamResponse, clock);
                 completed = true;
                 yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
                 break;
@@ -989,6 +1029,19 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                         reasoningContentChunkCount++;
                     }
 
+                    // vLLM with stream_options.continuous_usage_stats puts the running usage on
+                    // every frame. Under speculative/MTP decoding one frame carries several
+                    // tokens, so this — not the frame count — is how many have been generated.
+                    if (chunksToYield.Count > 0
+                        && root.TryGetProperty("usage", out JsonElement frameUsage)
+                        && frameUsage.ValueKind == JsonValueKind.Object
+                        && frameUsage.TryGetProperty("completion_tokens", out JsonElement soFar)
+                        && soFar.TryGetInt32(out var tokensSoFar))
+                    {
+                        foreach (var c in chunksToYield)
+                            c.CompletionTokens = tokensSoFar;
+                    }
+
                     // finish_reason marks the end of content, but usage/timings may still
                     // arrive in a later frame — capture what's here and keep reading until
                     // [DONE] instead of finalizing immediately.
@@ -1013,6 +1066,8 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                 continue;
             }
 
+            if (chunksToYield.Exists(c => !c.IsFinal))
+                clock.Output();
             foreach (var chunk in chunksToYield)
                 yield return chunk;
         }
@@ -1024,7 +1079,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             streamResponse.ReasoningTokenCount = reasoningContentChunkCount;
             streamResponse.Payload = accumulatedText ?? string.Empty;
             streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
-            OnRequestCompleted(streamResponse);
+            await FinishStreamAsync(streamResponse, clock);
             yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
         }
         }
@@ -1048,7 +1103,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     /// sequence of "choices" deltas terminated by a literal "[DONE]" marker.
     /// </summary>
     private async IAsyncEnumerable<RouteStreamChunk> ReadClaudeSseStreamAsync(
-        StreamReader reader, RouteResponse streamResponse, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        StreamReader reader, RouteResponse streamResponse, StreamClock clock, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         string? accumulatedText = null;
         string? accumulatedThinking = null;
@@ -1188,7 +1243,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                         streamResponse.Payload = accumulatedText ?? string.Empty;
                         streamResponse.ReasoningContent = accumulatedThinking;
                         streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
-                        OnRequestCompleted(streamResponse);
+                        await FinishStreamAsync(streamResponse, clock);
                         completed = true;
                         chunksToYield.Add(new RouteStreamChunk { IsFinal = true, Response = streamResponse });
                         break;
@@ -1206,6 +1261,8 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
                 continue;
             }
 
+            if (chunksToYield.Exists(c => !c.IsFinal))
+                clock.Output();
             foreach (var chunk in chunksToYield)
                 yield return chunk;
         }
@@ -1217,7 +1274,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             streamResponse.Payload = accumulatedText ?? string.Empty;
             streamResponse.ReasoningContent = accumulatedThinking;
             streamResponse.ToolCalls = FinalizeToolCalls(accumulatedToolCalls);
-            OnRequestCompleted(streamResponse);
+            await FinishStreamAsync(streamResponse, clock);
             yield return new RouteStreamChunk { IsFinal = true, Response = streamResponse };
         }
     }
@@ -1238,6 +1295,95 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
             .ToList();
 
         return calls.Count > 0 ? calls : null;
+    }
+
+    /// <summary>
+    /// When a streamed request was sent and when its first and latest output frames arrived, for
+    /// engines that report no timings of their own.
+    /// </summary>
+    private sealed class StreamClock
+    {
+        private long _sentAt, _firstAt, _lastAt;
+
+        public void Sent() { _sentAt = System.Diagnostics.Stopwatch.GetTimestamp(); _firstAt = _lastAt = 0; }
+
+        public void Output()
+        {
+            _lastAt = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (_firstAt == 0) _firstAt = _lastAt;
+        }
+
+        public double? FirstOutputMs => _sentAt == 0 || _firstAt == 0 ? null : Ms(_sentAt, _firstAt);
+        public double? LastOutputMs => _sentAt == 0 || _lastAt == 0 ? null : Ms(_sentAt, _lastAt);
+        public double? ElapsedMs => _sentAt == 0 ? null : System.Diagnostics.Stopwatch.GetElapsedTime(_sentAt).TotalMilliseconds;
+
+        private static double Ms(long from, long to) => System.Diagnostics.Stopwatch.GetElapsedTime(from, to).TotalMilliseconds;
+    }
+
+    private async Task FinishStreamAsync(RouteResponse response, StreamClock clock)
+    {
+        OnRequestCompleted(response);
+        ApplyMeasuredTimings(response, clock.FirstOutputMs, clock.LastOutputMs, clock.ElapsedMs);
+        await OnRequestCompletedAsync(response);
+    }
+
+    /// <summary>
+    /// Fills in prompt and generation timings measured by the router, for a streamed response
+    /// from an engine that reported none (vLLM sends token counts but no timings). Prompt
+    /// processing is the time to the first output frame, so it also covers any wait in the
+    /// engine's own queue. Generation is the span from the first to the last frame: the first
+    /// token comes out of prefill, so that span holds the other <c>n − 1</c> tokens, and the
+    /// time per token is span / (n − 1). Generation time is reported as n × that, so that
+    /// tokens ÷ time gives the true rate wherever it's divided out. Leaves a response that
+    /// already has timings alone.
+    /// </summary>
+    /// <param name="firstOutputMs">Time from sending to the first output frame.</param>
+    /// <param name="lastOutputMs">Time from sending to the last output frame.</param>
+    /// <param name="totalMs">Time from sending to the end of the stream.</param>
+    public static void ApplyMeasuredTimings(RouteResponse response, double? firstOutputMs, double? lastOutputMs, double? totalMs)
+    {
+        if (response.BackendTimings is not null || response.PromptProcessingMs > 0 || response.GenerationMs > 0)
+            return;
+
+        if (response.TotalLatencyMs <= 0 && totalMs is > 0)
+            response.TotalLatencyMs = totalMs.Value;
+
+        if (firstOutputMs is not > 0 || lastOutputMs is not { } last)
+            return;
+        var first = firstOutputMs.Value;
+
+        if (response.FirstTokenLatencyMs <= 0)
+            response.FirstTokenLatencyMs = first;
+
+        int cached = Math.Clamp(response.CachedPromptTokens ?? 0, 0, Math.Max(response.PromptTokensProcessed, 0));
+        int computed = response.PromptTokensProcessed - cached;
+        var timings = new LlamaCppTimings
+        {
+            PromptN = computed,
+            CacheN = response.CachedPromptTokens is null ? null : cached,
+            PromptMs = first,
+        };
+        response.PromptProcessingMs = first;
+        if (computed > 0)
+        {
+            timings.PromptPerTokenMs = first / computed;
+            timings.PromptPerSecond = computed / (first / 1000.0);
+            response.PromptTokensPerSecond = timings.PromptPerSecond;
+        }
+
+        int generated = response.GeneratedTokenCount;
+        double span = last - first;
+        if (generated > 1 && span > 0)
+        {
+            double perToken = span / (generated - 1);
+            response.GenerationMs = perToken * generated;
+            timings.GenerationN = generated;
+            timings.GenerationMs = response.GenerationMs;
+            timings.GenerationPerTokenMs = perToken;
+            timings.GenerationPerSecond = 1000.0 / perToken;
+        }
+
+        response.BackendTimings = timings;
     }
 
     public virtual string? GetStartCommand(ModelPreset preset, int? port = null)
@@ -1268,7 +1414,7 @@ public abstract class ManagedServerProviderBase : IBackendProvider, IWrapperDiag
     /// Creates a request to <paramref name="path"/> on the running server with
     /// <see cref="ApplyRequestHeaders"/> applied.
     /// </summary>
-    private HttpRequestMessage CreateRequest(HttpMethod method, string path)
+    protected HttpRequestMessage CreateRequest(HttpMethod method, string path)
     {
         var request = new HttpRequestMessage(method, $"{ServerUrl}{path}");
         ApplyRequestHeaders(request);

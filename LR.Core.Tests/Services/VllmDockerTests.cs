@@ -6,8 +6,8 @@ namespace LR.Core.Tests.Services;
 public class VllmDockerTests
 {
     [Theory]
-    [InlineData(@"D:\engines\vllm-v0.27.2rc1.dev77-xpu-docker", true)]
-    [InlineData(@"D:\engines\vllm-v0.27.2rc1.dev77-xpu-docker\", true)]
+    [InlineData(@"D:\engines\vllm-v0.33.0-xpu-docker", true)]
+    [InlineData(@"D:\engines\vllm-v0.33.0-xpu-docker\", true)]
     [InlineData("/data/engines/vllm-v1-XPU-DOCKER", true)]
     [InlineData(@"\\wsl.localhost\Ubuntu\home\me\.llm-router\engines\vllm-v0.33.0-cuda", false)]
     [InlineData(@"D:\xpu-docker\vllm", false)]
@@ -37,8 +37,8 @@ public class VllmDockerTests
     }
 
     [Theory]
-    [InlineData("0.33.0")]
-    [InlineData("0.27.2; rm -rf /")]
+    [InlineData("0.27.2rc1.dev77")]
+    [InlineData("0.33.0; rm -rf /")]
     public void ResolveTag_RefusesAnythingElse(string version)
     {
         Assert.Throws<InvalidOperationException>(() => VllmDocker.ResolveTag(version));
@@ -107,6 +107,31 @@ public class VllmDockerTests
     public void Dockerfile_HasWhatTheImageNeeds(string line)
     {
         Assert.Contains(line, VllmDocker.Dockerfile);
+    }
+
+    [Fact]
+    public void Dockerfile_AppliesTheCookbookPatchesInOrder_AsOneValidCommand()
+    {
+        var dockerfile = VllmDocker.Dockerfile;
+        var positions = VllmDocker.CookbookPatches.Select(p => dockerfile.IndexOf($"&& python /opt/llm-router/cookbook/{p} \\\n", StringComparison.Ordinal)).ToList();
+
+        Assert.All(positions, p => Assert.True(p > 0));
+        Assert.Equal(positions.Order(), positions);
+    }
+
+    [Fact]
+    public void Qwen38Preset_TurnsOnMtpAndLowReasoning_AndIsValidForTheServer()
+    {
+        var preset = new ModelPreset { ModelPath = "m/n", EngineSettings = new(VllmDocker.Qwen38Preset) };
+
+        var args = VllmPresetSettings.ServeArgs(preset);
+        var environment = VllmPresetSettings.EnvironmentOf(preset);
+
+        Assert.Equal("""{"method":"mtp","num_speculative_tokens":4}""", After(args, "--speculative-config"));
+        Assert.Equal("""{"reasoning_effort":"low"}""", After(args, "--default-chat-template-kwargs"));
+        Assert.Equal("1", environment["B70_MTP_BF16_DRAFT"]);
+        Assert.Equal("1", environment["B70_DRAFT_LMHEAD_INT4"]);
+        Assert.Equal("1", environment["B70_DRAFT_MTP_INT4"]);
     }
 
     [Fact]

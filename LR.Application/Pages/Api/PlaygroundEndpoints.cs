@@ -42,7 +42,7 @@ public static class PlaygroundEndpoints
                         serverName = server?.Name,
                         serverStatus = server?.Status.ToString(),
                         loaded = server is { Status: ServerStatus.Running } && server.ActivePresetId == p.Id,
-                        contextSize = p.ContextSize ?? p.GgufContextLength,
+                        contextSize = p.ServedContextSize(serverManager) ?? p.GgufContextLength,
                         parameterSize = p.GgufParameterSize,
                         quantization = p.GgufQuantizationLevel,
                         // The preset's own sampling values, keyed by request parameter name — shown

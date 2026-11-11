@@ -85,6 +85,22 @@ public class ServerDetailModel : PageModel
         }
     }
 
+    /// <summary>True if the server has written output since its last start (<see cref="ServerOutputLog"/>).</summary>
+    public bool HasOutput => System.IO.File.Exists(ServerOutputLog.GetPath(Id));
+
+    /// <summary>True if output from the start before the last one is kept.</summary>
+    public bool HasPreviousOutput => System.IO.File.Exists(ServerOutputLog.GetPath(Id, previous: true));
+
+    /// <summary>The server's output as plain text, read while it may still be written to.</summary>
+    public IActionResult OnGetOutput(bool previous = false)
+    {
+        var path = ServerOutputLog.GetPath(Id, previous);
+        if (Id == Guid.Empty || !System.IO.File.Exists(path))
+            return NotFound();
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        return File(stream, "text/plain; charset=utf-8");
+    }
+
     public async Task<JsonResult> OnPostClearLogsAsync()
     {
         if (!Id.Equals(Guid.Empty))

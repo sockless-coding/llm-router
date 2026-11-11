@@ -354,6 +354,9 @@
     // Map event type enum values: 0=Starting, 1=ProcessStarted, 2=HealthChecking, 3=Healthy, 4=Error
     const eventTypeMap = { 0: 'Starting', 1: 'Process Started', 2: 'Health Checking', 3: 'Ready', 4: 'Error' };
 
+    // A failed start's message runs to many lines; the server's page shows all of it.
+    const firstLine = (text) => (text || '').split('\n')[0];
+
     function handleStartupProgress(instanceId, eventType, message, elapsedSeconds) {
         const dotEl = document.getElementById('status-dot-' + instanceId);
         const textEl = document.getElementById('status-text-' + instanceId);
@@ -393,7 +396,7 @@
             case 4: // Error
                 if (dotEl) setDot(dotEl, 'bg-neon-red animate-pulse shadow-neon-red', '');
                 if (textEl) textEl.textContent = 'Error';
-                if (msgEl) { msgEl.textContent = message; msgEl.classList.remove('hidden'); }
+                if (msgEl) { msgEl.textContent = firstLine(message); msgEl.title = message; msgEl.classList.remove('hidden'); }
                 resetStartButton(instanceId);
                 break;
         }

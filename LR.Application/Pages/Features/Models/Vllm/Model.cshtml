@@ -1,0 +1,268 @@
+@page
+@using LR.Core.Models
+@using LR.Application.Pages.Features.Models.Vllm
+@model LR.Application.Pages.Features.Models.Vllm.VllmModelDetailsModel
+@{
+    var m = Model.VllmModel;
+    ViewData["Title"] = m.Name;
+    var selCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all text-sm";
+    var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500 text-sm";
+    var btnCyan = "inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium";
+    var btnSmall = "px-2.5 py-1 rounded-lg border transition-all text-xs font-medium";
+    var chip = "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border";
+    var site = Model.SiteRecipe;
+    // The hardware the site has commands for; preselect the list page's filter when it's one of them.
+    var siteHardware = site is null ? [] : site.Hardware.Select(id => Model.HardwareProfiles.FirstOrDefault(h => h.Id == id) ?? new LR.Core.Interfaces.VllmHardwareProfile(id, id, "", 0, 0)).ToList();
+    var preselected = site?.Hardware.FirstOrDefault(h => string.Equals(h, Model.Hardware, StringComparison.OrdinalIgnoreCase)) ?? site?.DefaultHardware;
+    var hardwareQuery = Model.Hardware is null ? "" : $"&hardware={Uri.EscapeDataString(Model.Hardware)}";
+}
+
+<div class="max-w-5xl mx-auto space-y-6">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+                <h1 class="text-2xl font-bold text-text-primary">@m.Name</h1>
+                @if (m.HasSiteRecipe)
+                {
+                    <span class="@chip text-neon-cyan border-neon-cyan/30">recipes.vllm.ai</span>
+                }
+            </div>
+            <p class="text-sm text-text-secondary font-mono mt-1">
+                <a href="https://huggingface.co/@m.HfId" target="_blank" rel="noopener noreferrer" class="hover:text-neon-cyan">@m.HfId</a>@(m.Provider is not null ? $" · {m.Provider}" : "")
+            </p>
+        </div>
+        <a href="/Features/Models/Vllm@(Model.Hardware is not null ? $"?hardware={Uri.EscapeDataString(Model.Hardware)}" : "")" class="px-4 py-2 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all text-sm font-medium">Back to vLLM models</a>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <div class="rounded-lg border border-neon-green/30 bg-neon-green/5 px-4 py-3 text-sm text-neon-green" role="status">@Model.Message</div>
+    }
+    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+    {
+        <div class="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-400" role="alert">@Model.ErrorMessage</div>
+    }
+
+    <!-- Overview -->
+    <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
+        @if (!string.IsNullOrWhiteSpace(m.Description))
+        {
+            <p class="text-sm text-text-secondary">@m.Description</p>
+        }
+        <dl class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><dt class="text-text-secondary">Context</dt><dd class="text-text-primary">@(m.ContextLength is { } c ? $"{c:N0} tokens" : "—")</dd></div>
+            <div><dt class="text-text-secondary">Needs vLLM</dt><dd class="text-text-primary">@(m.MinVllmVersion is { } v ? $"{v}+" : "—")</dd></div>
+            <div><dt class="text-text-secondary">Task</dt><dd class="text-text-primary">@(m.PipelineTag ?? "—")</dd></div>
+            <div><dt class="text-text-secondary">Recipes</dt><dd class="text-text-primary">@m.Recipes.Count</dd></div>
+        </dl>
+        <form method="post" asp-page-handler="SaveNotes" class="space-y-2">
+            <input type="hidden" name="Id" value="@m.Id" />
+            <input type="hidden" name="Hardware" value="@Model.Hardware" />
+            <label for="notes" class="block text-sm font-medium text-text-secondary">Notes</label>
+            <textarea id="notes" name="notes" rows="2" class="@inpCls" placeholder="Anything worth remembering about this model">@m.Notes</textarea>
+            <button type="submit" class="@btnSmall bg-gray-700/30 text-text-secondary border-gray-600/20 hover:bg-gray-700/50">Save notes</button>
+        </form>
+    </div>
+
+    <!-- Recipes -->
+    <div class="space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="text-lg font-semibold text-text-primary">Recipes</h2>
+            <div class="flex flex-wrap gap-2">
+                <a href="/Features/Models/Vllm/Recipe?modelId=@m.Id@hardwareQuery" class="@btnCyan">New recipe</a>
+                <a href="/Features/Models/Vllm/Recipe?modelId=@m.Id&template=qwen38-b70" class="@btnCyan" title="The settings tuned for Qwen3.8-27B GPTQ INT4 on an Intel Arc Pro B70 (XPU Docker install)">New from Qwen3.8 / Arc Pro B70 template</a>
+            </div>
+        </div>
+
+        @if (m.Recipes.Count == 0)
+        {
+            <div class="bg-cyber-card rounded-xl border border-gray-600/20 p-6 text-sm text-text-secondary">
+                No recipes yet. @(site is not null ? "Save one from recipes.vllm.ai below, or write your own." : "Write one with the settings you run this model with.")
+            </div>
+        }
+
+        @foreach (var r in m.Recipes)
+        {
+            var (args, error) = VllmModelDetailsModel.Command(r);
+            var presets = Model.PresetsByRecipe.GetValueOrDefault(r.Id) ?? [];
+            var env = r.Settings.GetValueOrDefault(LR.Core.Services.EngineBuilds.VllmPresetSettings.Environment);
+            <div id="recipe-@r.Id" class="bg-cyber-card rounded-xl border border-gray-600/20 p-5 space-y-3 scroll-mt-24">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h3 class="text-base font-semibold text-text-primary">@r.Name</h3>
+                            <span class="@chip @(r.Origin == VllmRecipeOrigin.Site ? "text-neon-cyan border-neon-cyan/30" : "text-neon-magenta border-neon-magenta/30")">@(r.Origin == VllmRecipeOrigin.Site ? "recipes.vllm.ai" : "custom")</span>
+                            <span class="@chip text-text-secondary border-gray-600/30">@Model.HardwareLabel(r.Hardware)</span>
+                            @if (r.Variant is not null)
+                            {
+                                <span class="@chip text-text-secondary border-gray-600/30 font-mono">@r.Variant</span>
+                            }
+                            @if (r.VramGb is { } vram)
+                            {
+                                <span class="@chip text-text-secondary border-gray-600/30">≥ @vram.ToString("0.#") GB VRAM</span>
+                            }
+                        </div>
+                        <p class="text-xs text-text-secondary mt-1">
+                            Serves <span class="font-mono">@r.ServedModel</span>
+                            @if (r.FetchedAt is { } fetched)
+                            {
+                                <text> · fetched @fetched.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</text>
+                            }
+                            @if (r.PageUrl is not null)
+                            {
+                                <text> · </text><a href="@r.PageUrl" target="_blank" rel="noopener noreferrer" class="text-neon-cyan hover:underline">recipe page</a>
+                            }
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <a href="/Features/Presets/Create?vllmRecipe=@r.Id" class="@btnSmall bg-neon-magenta/10 text-neon-magenta border-neon-magenta/30 hover:bg-neon-magenta/20">Create preset</a>
+                        <a href="/Features/Models/Vllm/Recipe?id=@r.Id" class="@btnSmall bg-neon-cyan/10 text-neon-cyan border-neon-cyan/30 hover:bg-neon-cyan/20">Edit</a>
+                        @if (r.Origin == VllmRecipeOrigin.Site)
+                        {
+                            <form method="post" asp-page-handler="Refresh" class="inline">
+                                <input type="hidden" name="Id" value="@m.Id" /><input type="hidden" name="Hardware" value="@Model.Hardware" /><input type="hidden" name="recipeId" value="@r.Id" />
+                                <button type="submit" class="@btnSmall bg-gray-700/30 text-text-secondary border-gray-600/20 hover:bg-gray-700/50" title="Fetch the command for the same choices again">Refresh</button>
+                            </form>
+                        }
+                        <form method="post" asp-page-handler="Duplicate" class="inline">
+                            <input type="hidden" name="Id" value="@m.Id" /><input type="hidden" name="Hardware" value="@Model.Hardware" /><input type="hidden" name="recipeId" value="@r.Id" />
+                            <button type="submit" class="@btnSmall bg-gray-700/30 text-text-secondary border-gray-600/20 hover:bg-gray-700/50">Duplicate</button>
+                        </form>
+                        <form method="post" asp-page-handler="DeleteRecipe" class="inline" onsubmit="return confirm('Delete the recipe \'@r.Name.Replace("'", "")\'? Presets made from it keep their settings.')">
+                            <input type="hidden" name="Id" value="@m.Id" /><input type="hidden" name="Hardware" value="@Model.Hardware" /><input type="hidden" name="recipeId" value="@r.Id" />
+                            <button type="submit" class="@btnSmall bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20">Delete</button>
+                        </form>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(r.Notes))
+                {
+                    <p class="text-sm text-text-secondary whitespace-pre-line">@r.Notes</p>
+                }
+
+                @if (r.WarningLines.Any())
+                {
+                    <details class="rounded-lg border border-amber-400/30 bg-amber-400/5 p-3">
+                        <summary class="cursor-pointer text-xs font-medium text-amber-400">Check before using (@r.WarningLines.Count())</summary>
+                        <ul class="list-disc pl-4 space-y-1 text-xs text-text-secondary mt-2">
+                            @foreach (var w in r.WarningLines)
+                            {
+                                <li>@w</li>
+                            }
+                        </ul>
+                    </details>
+                }
+
+                <details>
+                    <summary class="cursor-pointer text-xs font-medium text-text-secondary hover:text-text-primary">Command</summary>
+                    @if (error is not null)
+                    {
+                        <p class="text-xs text-red-400 mt-2">A preset from this recipe wouldn't start: @error</p>
+                    }
+                    else
+                    {
+                        <pre class="mt-2 p-3 rounded-lg bg-cyber-bg-dark text-xs text-text-primary font-mono whitespace-pre-wrap break-all">vllm @string.Join(" ", args!.Select(a => a.Contains(' ') || a.Contains('"') ? $"'{a}'" : a))</pre>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(env))
+                    {
+                        <pre class="mt-2 p-3 rounded-lg bg-cyber-bg-dark text-xs text-text-secondary font-mono whitespace-pre-wrap break-all">@env</pre>
+                    }
+                </details>
+
+                @if (presets.Count > 0)
+                {
+                    <p class="text-xs text-text-secondary">
+                        Presets made from it:
+                        @for (int i = 0; i < presets.Count; i++)
+                        {
+                            <a href="/Features/Presets/Edit?id=@presets[i].Id" class="text-neon-cyan hover:underline">@presets[i].Name</a>@(i < presets.Count - 1 ? ", " : "")
+                        }
+                    </p>
+                }
+            </div>
+        }
+    </div>
+
+    <!-- Add from recipes.vllm.ai -->
+    <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-4">
+        <h2 class="text-lg font-semibold text-text-primary">Add from recipes.vllm.ai</h2>
+        @if (Model.SiteError is not null)
+        {
+            <p class="text-sm text-amber-400">recipes.vllm.ai didn't answer: @Model.SiteError Saved recipes still work, and you can write your own.</p>
+        }
+        else if (site is null)
+        {
+            <p class="text-sm text-text-secondary">recipes.vllm.ai has no recipe for <span class="font-mono">@m.HfId</span>. Write one with <a href="/Features/Models/Vllm/Recipe?modelId=@m.Id@hardwareQuery" class="text-neon-cyan hover:underline">New recipe</a>.</p>
+        }
+        else
+        {
+            <p class="text-xs text-text-secondary">
+                The site renders a command for the choices below, which is saved as a recipe here. Nothing it sends is run until you start a preset made from it.
+                @if (site.Hardware.Count > 0)
+                {
+                    <text>It has commands for @site.Hardware.Count hardware profile@(site.Hardware.Count == 1 ? "" : "s").</text>
+                }
+            </p>
+            <form method="post" asp-page-handler="AddSiteRecipe" class="space-y-3">
+                <input type="hidden" name="Id" value="@m.Id" />
+                <input type="hidden" name="Hardware" value="@Model.Hardware" />
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                        <label for="site-hardware" class="block text-xs font-medium text-text-secondary mb-1">Hardware</label>
+                        <select id="site-hardware" name="siteHardware" class="@selCls">
+                            @foreach (var h in siteHardware)
+                            {
+                                <option value="@h.Id" selected="@(h.Id == preselected)">@h.DisplayName@(h.GpuCount > 0 ? $" ({h.GpuCount} × GPU, {h.VramGb} GB)" : "")@(h.Id == site.DefaultHardware ? " · default" : "")</option>
+                            }
+                        </select>
+                    </div>
+                    <div>
+                        <label for="site-variant" class="block text-xs font-medium text-text-secondary mb-1">Variant</label>
+                        <select id="site-variant" name="variant" class="@selCls">
+                            @foreach (var v in site.Variants)
+                            {
+                                <option value="@v.Key">@string.Join(" · ", new[] { v.Label ?? v.Key, v.Precision, v.VramMinimumGb is { } g ? $"≥ {g:0.#} GB VRAM" : null }.Where(s => !string.IsNullOrEmpty(s)))</option>
+                            }
+                        </select>
+                    </div>
+                    <div>
+                        <label for="site-strategy" class="block text-xs font-medium text-text-secondary mb-1">Strategy</label>
+                        <select id="site-strategy" name="strategy" class="@selCls">
+                            <option value="">Recipe's default</option>
+                            @foreach (var s in Model.Strategies)
+                            {
+                                <option value="@s.Id">@s.DisplayName</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                @if (site.Features.Count > 0)
+                {
+                    <input type="hidden" name="featuresShown" value="true" />
+                    <fieldset class="space-y-1">
+                        <legend class="text-xs font-medium text-text-secondary mb-1">Features</legend>
+                        @foreach (var f in site.Features)
+                        {
+                            <label class="flex items-start gap-2 text-xs text-text-secondary">
+                                <input type="checkbox" name="features" value="@f.Key" checked="@(!f.OptIn)" class="mt-0.5 rounded border-gray-600/30 bg-cyber-bg-dark text-neon-magenta focus:ring-neon-magenta/30" />
+                                <span>@(f.Description is not null ? $"{f.Key}: {f.Description}" : f.Key)</span>
+                            </label>
+                        }
+                    </fieldset>
+                }
+                <div class="flex flex-wrap items-end gap-3">
+                    <div class="grow max-w-md">
+                        <label for="site-name" class="block text-xs font-medium text-text-secondary mb-1">Name</label>
+                        <input id="site-name" name="name" placeholder="From the hardware and variant" class="@inpCls" />
+                    </div>
+                    <button type="submit" class="@btnCyan">Save recipe</button>
+                </div>
+            </form>
+        }
+    </div>
+
+    <form method="post" asp-page-handler="DeleteModel" onsubmit="return confirm('Remove this model and all its recipes? Presets made from them keep their settings.')" class="flex justify-end">
+        <input type="hidden" name="Id" value="@m.Id" />
+        <button type="submit" class="@btnSmall bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20">Remove model and recipes</button>
+    </form>
+</div>

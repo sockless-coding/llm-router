@@ -15,12 +15,39 @@ public class ActionsModel : PageModel
     private readonly IServerManager _serverManager;
     private readonly LRDbContext _context;
     private readonly IVllmRecipeClient _recipes;
+    private readonly IVllmModelLibrary _vllmLibrary;
 
-    public ActionsModel(IServerManager serverManager, LRDbContext context, IVllmRecipeClient recipes)
+    public ActionsModel(IServerManager serverManager, LRDbContext context, IVllmRecipeClient recipes, IVllmModelLibrary vllmLibrary)
     {
         _serverManager = serverManager;
         _context = context;
         _recipes = recipes;
+        _vllmLibrary = vllmLibrary;
+    }
+
+    /// <summary>
+    /// The recipes saved in the vLLM model library, per model, with what picking one puts in the form.
+    /// Read from the router's own database, so it works without the recipe site.
+    /// </summary>
+    public async Task<IActionResult> OnGetVllmSavedAsync()
+    {
+        var models = await _vllmLibrary.GetModelsAsync(HttpContext.RequestAborted);
+        return new JsonResult(models.Where(m => m.Recipes.Count > 0).Select(m => new
+        {
+            m.Id,
+            m.Name,
+            m.HfId,
+            Recipes = m.Recipes.Select(r => new
+            {
+                r.Id,
+                r.Name,
+                r.Hardware,
+                Origin = r.Origin.ToString(),
+                Model = r.ServedModel,
+                Settings = VllmPresetSettings.ForPreset(r),
+                Warnings = r.WarningLines,
+            }),
+        }));
     }
 
     /// <summary>The vLLM recipe list and hardware vocabulary, for the picker on the preset form.</summary>

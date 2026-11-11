@@ -12,6 +12,7 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
     private readonly IServerManager _serverManager;
     private readonly IModelLibrary _modelLibrary;
     private readonly IChatTemplateVariableExtractor _templateVariableExtractor;
+    private readonly IVllmModelLibrary _vllmLibrary;
 
     [BindProperty]
     public PresetViewModel ViewModel { get; set; } = new();
@@ -25,20 +26,45 @@ public class PresetCreateModel : PageModel, IPresetFormPageModel
     // kwargs editor falls back to its client-side AJAX fetch once a model is picked.
     public IReadOnlyList<ChatTemplateVariable> DetectedTemplateVariables { get; set; } = Array.Empty<ChatTemplateVariable>();
 
-    public PresetCreateModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary, IChatTemplateVariableExtractor templateVariableExtractor)
+    /// <summary>What to tell the user about the vLLM recipe the form was filled in from (<c>?vllmRecipe=</c>).</summary>
+    public IReadOnlyList<string> StartingRecipeWarnings { get; private set; } = [];
+
+    public PresetCreateModel(IPresetManager presetManager, IServerManager serverManager, IModelLibrary modelLibrary, IChatTemplateVariableExtractor templateVariableExtractor, IVllmModelLibrary vllmLibrary)
     {
+        _vllmLibrary = vllmLibrary;
         _presetManager = presetManager;
         _serverManager = serverManager;
         _modelLibrary = modelLibrary;
         _templateVariableExtractor = templateVariableExtractor;
     }
 
-    public async Task OnGetAsync()
+    /// <param name="vllmRecipe">A saved vLLM recipe to start from: its settings and model are filled in, on the first vLLM server.</param>
+    public async Task OnGetAsync(Guid? vllmRecipe)
     {
         Servers = _serverManager.GetAllInstances();
         FallbackCandidates = _presetManager.GetAllPresets();
         Models = await _modelLibrary.GetAllAsync();
         MmprojCandidates = Models.Where(m => ModelKindClassifier.Classify(m) == ModelType.Projector).ToList();
+
+        if (vllmRecipe is { } recipeId && await _vllmLibrary.GetRecipeAsync(recipeId) is { } recipe)
+        {
+            ViewModel.ModelPath = recipe.ServedModel;
+            ViewModel.EngineSettings = LR.Core.Services.EngineBuilds.VllmPresetSettings.ForPreset(recipe);
+            ViewModel.Name = UniquePresetName(recipe.VllmModel?.HfId ?? recipe.ServedModel);
+            if (Servers.FirstOrDefault(s => s.Engine == ServerEngine.Vllm) is { } server)
+                ViewModel.ServerInstanceId = server.Id;
+            StartingRecipeWarnings = recipe.WarningLines.ToList();
+        }
+    }
+
+    private string UniquePresetName(string model)
+    {
+        var name = model.Split('/').Last().ToLowerInvariant();
+        var taken = _presetManager.GetAllPresets().Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var candidate = name;
+        for (int i = 2; taken.Contains(candidate); i++)
+            candidate = $"{name}-{i}";
+        return candidate;
     }
 
     /// <summary>

@@ -70,6 +70,7 @@ public static class LlamaCppResponseParser
         {
             response.PromptTokensProcessed = GetInt32(usage, "prompt_tokens") ?? 0;
             response.GeneratedTokenCount = GetInt32(usage, "completion_tokens") ?? 0;
+            response.CachedPromptTokens = CachedTokens(usage) ?? response.CachedPromptTokens;
         }
 
         // Extract timing data (llama.cpp may include these in the top-level or under usage)
@@ -136,6 +137,7 @@ public static class LlamaCppResponseParser
         {
             response.PromptTokensProcessed = GetInt32(usage, "prompt_tokens") ?? 0;
             response.GeneratedTokenCount = GetInt32(usage, "completion_tokens") ?? 0;
+            response.CachedPromptTokens = CachedTokens(usage) ?? response.CachedPromptTokens;
 
             // Some llama.cpp versions put timing data in the usage object of streaming responses
             if (response.PromptProcessingMs == 0)
@@ -212,6 +214,14 @@ public static class LlamaCppResponseParser
 
         return result;
     }
+
+    /// <summary><c>usage.prompt_tokens_details.cached_tokens</c> (vLLM with <c>--enable-prompt-tokens-details</c>, newer llama.cpp).</summary>
+    private static int? CachedTokens(JsonElement usage) =>
+        usage.ValueKind == JsonValueKind.Object
+            && usage.TryGetProperty("prompt_tokens_details", out var details)
+            && details.ValueKind == JsonValueKind.Object
+            ? GetInt32(details, "cached_tokens")
+            : null;
 
     private static int? GetInt32(JsonElement element, string propertyName)
     {

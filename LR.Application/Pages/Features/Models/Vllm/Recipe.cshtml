@@ -1,0 +1,154 @@
+@page
+@using LR.Core.Models
+@using LR.Core.Services.EngineBuilds
+@using LR.Application.Pages.Features.Models.Vllm
+@model LR.Application.Pages.Features.Models.Vllm.VllmRecipeEditModel
+@{
+    ViewData["Title"] = Model.IsNew ? $"New recipe · {Model.VllmModel.Name}" : $"{Model.Input.Name} · {Model.VllmModel.Name}";
+    var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500";
+    var selCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all";
+    var box = "mt-0.5 rounded border-gray-600/30 bg-cyber-bg-dark text-neon-magenta focus:ring-neon-magenta/30";
+    string N(string key) => $"Input.Settings[{key}]";
+}
+
+<form method="post" class="max-w-4xl mx-auto space-y-6">
+    <input type="hidden" asp-for="Input.Id" />
+    <input type="hidden" asp-for="Input.ModelId" />
+    @foreach (var (key, value) in Model.Input.Settings.Where(kv => !VllmRecipeEditModel.EditedKeys.Contains(kv.Key)))
+    {
+        <input type="hidden" name="@N(key)" value="@value" />
+    }
+
+    <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-text-primary">@(Model.IsNew ? "New recipe" : "Edit recipe")</h1>
+            <p class="text-sm text-text-secondary mt-1">For <a href="/Features/Models/Vllm/Model?id=@Model.VllmModel.Id" class="text-neon-cyan hover:underline">@Model.VllmModel.Name</a> <span class="font-mono">(@Model.VllmModel.HfId)</span></p>
+        </div>
+        <a href="/Features/Models/Vllm/Model?id=@Model.VllmModel.Id" class="px-4 py-2 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all text-sm font-medium">Cancel</a>
+    </div>
+
+    @if (Model.Error is not null)
+    {
+        <div class="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-400" role="alert">@Model.Error</div>
+    }
+    @if (!Model.IsNew && Model.Origin == VllmRecipeOrigin.Site)
+    {
+        <div class="rounded-lg border border-neon-cyan/30 bg-neon-cyan/5 px-4 py-3 text-sm text-text-secondary">
+            This recipe came from recipes.vllm.ai. Changing its settings makes it a custom recipe, which a refresh no longer overwrites.
+        </div>
+    }
+
+    <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label asp-for="Input.Name" class="block text-sm font-medium text-text-secondary mb-1">Name</label>
+                <input asp-for="Input.Name" required class="@inpCls" placeholder="RTX 5090 · FP8, long context" />
+            </div>
+            <div>
+                <label asp-for="Input.Hardware" class="block text-sm font-medium text-text-secondary mb-1">Hardware</label>
+                <select asp-for="Input.Hardware" class="@selCls">
+                    <option value="">Any hardware</option>
+                    @foreach (var brand in Model.HardwareProfiles.GroupBy(h => h.Brand))
+                    {
+                        <optgroup label="@(brand.Key.Length > 0 ? brand.Key : "Other")">
+                            @foreach (var h in brand)
+                            {
+                                <option value="@h.Id" selected="@(h.Id == Model.Input.Hardware)">@h.DisplayName@(h.GpuCount > 0 ? $" ({h.GpuCount} × GPU, {h.VramGb} GB)" : "")</option>
+                            }
+                        </optgroup>
+                    }
+                </select>
+                <p class="text-xs text-text-secondary mt-1">What it's tuned for, using recipes.vllm.ai's profiles so the hardware filter finds it.</p>
+            </div>
+            <div>
+                <label asp-for="Input.ServedModel" class="block text-sm font-medium text-text-secondary mb-1">Served model</label>
+                <input asp-for="Input.ServedModel" required class="@inpCls font-mono text-sm" />
+                <p class="text-xs text-text-secondary mt-1">What <span class="font-mono">vllm serve</span> loads: this model's id, a quantized upload of it, or a model folder.</p>
+            </div>
+            <div>
+                <label asp-for="Input.VramGb" class="block text-sm font-medium text-text-secondary mb-1">Minimum VRAM (GB)</label>
+                <input asp-for="Input.VramGb" type="number" min="0" step="0.1" class="@inpCls" placeholder="unknown" />
+                <p class="text-xs text-text-secondary mt-1">Used as the preset's memory estimate for memory groups.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-4">
+        <h2 class="text-lg font-semibold text-text-primary">vLLM settings</h2>
+        <p class="text-xs text-text-secondary">The same settings as a vLLM preset; a preset made from this recipe starts with them. Leave one blank for vLLM's default.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label for="max-len" class="block text-sm font-medium text-text-secondary mb-1">Max context length</label>
+                <input id="max-len" name="@N(VllmPresetSettings.MaxModelLen)" value="@Model.Setting(VllmPresetSettings.MaxModelLen)" placeholder="from the model's config" class="@inpCls" />
+                <p class="text-xs text-text-secondary mt-1"><span class="font-mono">--max-model-len</span>: 32768, 32k or auto.</p>
+            </div>
+            <div>
+                <label for="gmu" class="block text-sm font-medium text-text-secondary mb-1">GPU memory share</label>
+                <input id="gmu" name="@N(VllmPresetSettings.GpuMemoryUtilization)" value="@Model.Setting(VllmPresetSettings.GpuMemoryUtilization)" inputmode="decimal" placeholder="vLLM's default" class="@inpCls" />
+                <p class="text-xs text-text-secondary mt-1"><span class="font-mono">--gpu-memory-utilization</span>, 0–1.</p>
+            </div>
+            <div>
+                <label for="dtype" class="block text-sm font-medium text-text-secondary mb-1">Data type</label>
+                <select id="dtype" name="@N(VllmPresetSettings.Dtype)" class="@selCls">
+                    <option value="">Automatic</option>
+                    @foreach (var t in VllmPresetSettings.DtypeValues.Where(t => t != "auto"))
+                    {
+                        <option value="@t" selected="@(Model.Setting(VllmPresetSettings.Dtype) == t)">@t</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label for="concurrent" class="block text-sm font-medium text-text-secondary mb-1">Max concurrent requests</label>
+                <input id="concurrent" name="@N(VllmPresetSettings.MaxConcurrentRequests)" value="@Model.Setting(VllmPresetSettings.MaxConcurrentRequests)" type="number" min="1" placeholder="@LR.Providers.Vllm.VllmProvider.DefaultMaxConcurrentRequests" class="@inpCls" />
+                <p class="text-xs text-text-secondary mt-1">How many the router sends at once.</p>
+            </div>
+            <div>
+                <label for="tool-parser" class="block text-sm font-medium text-text-secondary mb-1">Tool call parser</label>
+                <input id="tool-parser" name="@N(VllmPresetSettings.ToolCallParser)" value="@Model.Setting(VllmPresetSettings.ToolCallParser)" placeholder="hermes, mistral, …" class="@inpCls font-mono text-sm" />
+            </div>
+            <div>
+                <label for="reasoning-parser" class="block text-sm font-medium text-text-secondary mb-1">Reasoning parser</label>
+                <input id="reasoning-parser" name="@N(VllmPresetSettings.ReasoningParser)" value="@Model.Setting(VllmPresetSettings.ReasoningParser)" placeholder="qwen3, deepseek_r1, …" class="@inpCls font-mono text-sm" />
+            </div>
+        </div>
+        <div class="space-y-2">
+            <label class="flex items-start gap-2 text-sm text-text-secondary">
+                <input type="checkbox" name="@N(VllmPresetSettings.AutoToolChoice)" value="true" checked="@Model.Flag(VllmPresetSettings.AutoToolChoice)" class="@box" />
+                <span><span class="font-medium">Automatic tool choice</span><span class="block text-xs"><span class="font-mono">--enable-auto-tool-choice</span>. Needs a tool call parser.</span></span>
+            </label>
+            <label class="flex items-start gap-2 text-sm text-text-secondary">
+                <input type="checkbox" name="@N(VllmPresetSettings.TrustRemoteCode)" value="true" checked="@Model.Flag(VllmPresetSettings.TrustRemoteCode)" class="@box" />
+                <span><span class="font-medium">Trust remote code</span><span class="block text-xs"><span class="font-mono">--trust-remote-code</span>. Runs Python code from the model's repository; only for repositories you trust.</span></span>
+            </label>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label for="extra" class="block text-sm font-medium text-text-secondary mb-1">Extra arguments</label>
+                <textarea id="extra" name="@N(VllmPresetSettings.ExtraArgs)" rows="8" placeholder="--tensor-parallel-size&#10;1" class="@inpCls font-mono text-sm">@Model.Setting(VllmPresetSettings.ExtraArgs)</textarea>
+                <p class="text-xs text-text-secondary mt-1">One token per line, no quoting needed. The router sets the host, port and served model name.</p>
+            </div>
+            <div>
+                <label for="env" class="block text-sm font-medium text-text-secondary mb-1">Environment variables</label>
+                <textarea id="env" name="@N(VllmPresetSettings.Environment)" rows="8" placeholder="VLLM_USE_V2_MODEL_RUNNER=1" class="@inpCls font-mono text-sm">@Model.Setting(VllmPresetSettings.Environment)</textarea>
+                <p class="text-xs text-text-secondary mt-1"><span class="font-mono">NAME=value</span> per line.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-cyber-card rounded-xl p-6 border border-gray-600/20 space-y-4">
+        <div>
+            <label asp-for="Input.Notes" class="block text-sm font-medium text-text-secondary mb-1">Notes</label>
+            <textarea asp-for="Input.Notes" rows="3" class="@inpCls" placeholder="What it was tested with, what to watch out for"></textarea>
+        </div>
+        <div>
+            <label asp-for="Input.Warnings" class="block text-sm font-medium text-text-secondary mb-1">Check before using</label>
+            <textarea asp-for="Input.Warnings" rows="4" class="@inpCls text-sm" placeholder="One point per line"></textarea>
+            <p class="text-xs text-text-secondary mt-1">Shown when a preset is filled in from this recipe. A recipe from recipes.vllm.ai lists what the router noticed about its command.</p>
+        </div>
+    </div>
+
+    <div class="flex justify-end gap-2">
+        <a href="/Features/Models/Vllm/Model?id=@Model.VllmModel.Id" class="px-4 py-2 rounded-lg bg-gray-700/30 text-text-secondary border border-gray-600/20 hover:bg-gray-700/50 transition-all text-sm font-medium">Cancel</a>
+        <button type="submit" class="px-5 py-2 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all text-sm font-medium">Save recipe</button>
+    </div>
+</form>

@@ -27,6 +27,8 @@ public class LRDbContext : DbContext
     public DbSet<Models.MemoryGroup> MemoryGroups => Set<Models.MemoryGroup>();
     public DbSet<Models.RemoteAgent> RemoteAgents => Set<Models.RemoteAgent>();
     public DbSet<Models.AgentSettings> AgentSettings => Set<Models.AgentSettings>();
+    public DbSet<Models.VllmModel> VllmModels => Set<Models.VllmModel>();
+    public DbSet<Models.VllmRecipe> VllmRecipes => Set<Models.VllmRecipe>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -179,6 +181,29 @@ public class LRDbContext : DbContext
         {
             entity.ToTable("LocalModels");
             entity.HasIndex(e => e.FilePath).IsUnique();
+        });
+
+        // vLLM models and their saved recipes. A preset only copies a recipe's settings, so
+        // deleting a model or recipe leaves presets made from it working.
+        modelBuilder.Entity<Models.VllmModel>(entity =>
+        {
+            entity.ToTable("VllmModels");
+            entity.HasIndex(e => e.HfId).IsUnique();
+            entity.HasMany(m => m.Recipes)
+                .WithOne(r => r.VllmModel)
+                .HasForeignKey(r => r.VllmModelId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<Models.VllmRecipe>(entity =>
+        {
+            entity.ToTable("VllmRecipes");
+            entity.Property(e => e.Settings).HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v),
+                v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v) ?? new Dictionary<string, string>(),
+                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<Dictionary<string, string>>(
+                    (a, b) => a!.Count == b!.Count && !a.Except(b).Any(),
+                    v => v.Aggregate(0, (h, kv) => HashCode.Combine(h, kv.Key, kv.Value)),
+                    v => new Dictionary<string, string>(v)));
         });
 
         // ModelLibrarySettings configurations

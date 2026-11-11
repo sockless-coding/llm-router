@@ -21,9 +21,9 @@ namespace LR.Core.Services.EngineBuilds;
 public static partial class VllmDocker
 {
     /// <summary>The vLLM in <see cref="BaseImage"/>; the version every install of this backend has.</summary>
-    public const string PinnedVersion = "0.27.2rc1.dev77";
+    public const string PinnedVersion = "0.33.0";
 
-    public const string BaseImage = "vllm/vllm-openai-xpu@sha256:f01e24f6c7ff01f1e0662234255a1372297d1dbd89d003cf13c8fad3eab1ba4f";
+    public const string BaseImage = "vllm/vllm-openai-xpu:v0.33.0@sha256:be3a9aea234be64ffc2816ac561c597e0f0b1f44a61a7f4912780e4d77450086";
 
     /// <summary>The image installs build. Fixed, so a server keeps working across an update of the install it's bound to.</summary>
     public const string ImageTag = "llm-router/vllm-xpu:managed";
@@ -112,6 +112,58 @@ public static partial class VllmDocker
     /// <summary>Removes a server's container. Killing the <c>docker</c> client doesn't: the container would keep the GPU and the port.</summary>
     public static List<string> StopArgs(int port) => [.. Context, "rm", "--force", ContainerName(port)];
 
+    /// <summary>
+    /// The MTP speculative-decoding patches for Qwen3.8 from the MIT-licensed
+    /// github.com/SergiioB/intel-arc-pro-b70-inference-cookbook (see <c>VllmXpuPatches/LICENSE</c>), in the order
+    /// they apply. Unmodified, except that <c>patch_mtp_boundary.py</c> was brought up to vLLM 0.33.0. Without a speculative config they change nothing, and the draft ones are also
+    /// gated on the variables in <see cref="Qwen38Preset"/>, so one image serves every preset.
+    /// </summary>
+    public static readonly IReadOnlyList<string> CookbookPatches =
+    [
+        "patch_mtp_nightly.py",
+        "patch_mtp_boundary.py",
+        "patch_gdn_mixed_split_v5.py",
+        "patch_draft_lmhead_int4.py",
+        "patch_draft_mtp_int4.py",
+    ];
+
+    /// <summary>
+    /// The settings proven with Qwen3.8-27B GPTQ INT4 on an Arc Pro B70: MTP with four speculative tokens and a
+    /// 100K context. Reasoning defaults to low because that model's own template defaults to xhigh, which
+    /// writes far more before answering; a request can still ask for more.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> Qwen38Preset = new Dictionary<string, string>
+    {
+        [VllmPresetSettings.MaxModelLen] = "100000",
+        [VllmPresetSettings.GpuMemoryUtilization] = "0.75",
+        [VllmPresetSettings.Dtype] = "float16",
+        [VllmPresetSettings.ToolCallParser] = "qwen3_coder",
+        [VllmPresetSettings.AutoToolChoice] = "true",
+        [VllmPresetSettings.ReasoningParser] = "qwen3",
+        [VllmPresetSettings.ExtraArgs] = string.Join('\n',
+            "--quantization", "gptq",
+            "--kv-cache-dtype", "fp8",
+            // The cookbook's 4617089843 (4.30 GiB) fit exactly on vLLM 0.27; 0.33.0 pads the cache layout and
+            // then had 4.25 GiB usable against the 4.26 GiB a 100K request needs, so this leaves some headroom.
+            "--kv-cache-memory-bytes", "4831838208",
+            "--max-num-seqs", "1",
+            "--max-num-batched-tokens", "8192",
+            "--enable-prefix-caching",
+            "--language-model-only",
+            "--generation-config", "auto",
+            "--default-chat-template-kwargs", """{"reasoning_effort":"low"}""",
+            "--speculative-config", """{"method":"mtp","num_speculative_tokens":4}"""),
+        [VllmPresetSettings.Environment] = "B70_MTP_BF16_DRAFT=1\nB70_DRAFT_LMHEAD_INT4=1\nB70_DRAFT_MTP_INT4=1",
+    };
+
+    private static string ReadCookbookFile(string file)
+    {
+        using var stream = typeof(VllmDocker).Assembly.GetManifestResourceStream("VllmXpuPatches." + file)
+            ?? throw new InvalidOperationException($"{file} is missing from this build of LLM Router.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd().ReplaceLineEndings("\n");
+    }
+
     /// <summary>What the container needs to reach the GPU through WSL. No <c>--privileged</c>.</summary>
     private static readonly string[] GpuArgs =
     [
@@ -136,6 +188,10 @@ public static partial class VllmDocker
         await File.WriteAllTextAsync(Path.Combine(request.OutputDir, "Dockerfile"), Dockerfile, ct);
         await File.WriteAllTextAsync(Path.Combine(request.OutputDir, "patch_vllm.py"), PatchScript, ct);
         await File.WriteAllTextAsync(Path.Combine(request.OutputDir, "probe.py"), ProbeScript, ct);
+        var cookbook = Path.Combine(request.OutputDir, "cookbook");
+        Directory.CreateDirectory(cookbook);
+        foreach (var file in CookbookPatches.Append("LICENSE"))
+            await File.WriteAllTextAsync(Path.Combine(cookbook, file), ReadCookbookFile(file), ct);
 
         await sink.PhaseAsync("docker", "Building the vLLM image. The first build downloads about 18 GB…");
         var (build, buildOutput) = await RunDockerAsync([.. Context, "build", "--progress", "plain", "--tag", ImageTag, request.OutputDir],
@@ -224,7 +280,10 @@ public static partial class VllmDocker
         FROM {{BaseImage}}
 
         COPY patch_vllm.py probe.py /opt/llm-router/
-        RUN python /opt/llm-router/patch_vllm.py && ln -s /workspace/vllm/examples /opt/llm-router/examples
+        COPY cookbook/ /opt/llm-router/cookbook/
+        RUN python /opt/llm-router/patch_vllm.py \
+            {{string.Join("\n    ", CookbookPatches.Select(p => $"&& python /opt/llm-router/cookbook/{p} \\"))}}
+            && ln -s /workspace/vllm/examples /opt/llm-router/examples
 
         ENV VLLM_TARGET_DEVICE=xpu \
             CUDA_VISIBLE_DEVICES=-1 \
@@ -233,7 +292,6 @@ public static partial class VllmDocker
             LD_LIBRARY_PATH=/usr/lib/wsl/lib:/tmp/ucx_install/lib:/opt/venv/lib:/usr/local/lib \
             ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE \
             ZE_AFFINITY_MASK=0 \
-            VLLM_XPU_ENABLE_XPU_GRAPH=1 \
             PYTORCH_ALLOC_CONF=expandable_segments:True \
             CCL_ZE_IPC_EXCHANGE=sockets \
             CCL_ATL_TRANSPORT=ofi \
@@ -282,6 +340,15 @@ public static partial class VllmDocker
             "v1/worker/xpu_worker.py",
             r"^([ \t]+)(torch\.distributed\.all_reduce\(torch\.zeros\(1\)\.xpu\(\)\))[ \t]*$",
             r"\1if self.parallel_config.world_size > 1:\n\1    \2",
+        )
+
+        # vLLM turns XPU graphs on whenever torch is new enough, but the GPU as WSL presents it can't record them
+        # ("Device does not support graph record and replay"), and capturing anyway can corrupt the heap.
+        # LR_XPU_GRAPH=1 in a preset's environment turns them back on, for a driver that can.
+        patch(
+            "platforms/xpu.py",
+            r"^([ \t]+)if not supports_xpu_graph\(\):$",
+            r'\1if not supports_xpu_graph() or os.environ.get("LR_XPU_GRAPH") != "1":',
         )
 
         """.ReplaceLineEndings("\n");

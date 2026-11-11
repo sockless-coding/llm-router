@@ -1622,6 +1622,134 @@ namespace LR.Core.Migrations
                     b.ToTable("StoredResponses", (string)null);
                 });
 
+            modelBuilder.Entity("LR.Core.Models.VllmModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ContextLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("HasSiteRecipe")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("HfId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MinVllmVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PipelineTag")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Provider")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HfId")
+                        .IsUnique();
+
+                    b.ToTable("VllmModels", (string)null);
+                });
+
+            modelBuilder.Entity("LR.Core.Models.VllmRecipe", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Features")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("FetchedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Hardware")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Origin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PageUrl")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ServedModel")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Settings")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Strategy")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Variant")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("VllmModelId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("VramGb")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Warnings")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VllmModelId");
+
+                    b.ToTable("VllmRecipes", (string)null);
+                });
+
             modelBuilder.Entity("LR.Core.Models.ApiKeyModelPreset", b =>
                 {
                     b.HasOne("LR.Core.Models.ApiKey", "ApiKey")
@@ -1816,6 +1944,17 @@ namespace LR.Core.Migrations
                     b.Navigation("ServerInstance");
                 });
 
+            modelBuilder.Entity("LR.Core.Models.VllmRecipe", b =>
+                {
+                    b.HasOne("LR.Core.Models.VllmModel", "VllmModel")
+                        .WithMany("Recipes")
+                        .HasForeignKey("VllmModelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("VllmModel");
+                });
+
             modelBuilder.Entity("LR.Core.Models.ApiKey", b =>
                 {
                     b.Navigation("AllowedPresets");
@@ -1838,6 +1977,11 @@ namespace LR.Core.Migrations
                     b.Navigation("Logs");
 
                     b.Navigation("Presets");
+                });
+
+            modelBuilder.Entity("LR.Core.Models.VllmModel", b =>
+                {
+                    b.Navigation("Recipes");
                 });
 #pragma warning restore 612, 618
         }

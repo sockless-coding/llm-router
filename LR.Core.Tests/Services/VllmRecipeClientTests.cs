@@ -97,6 +97,44 @@ public class VllmRecipeClientTests
     }
 
     [Fact]
+    public async Task Recipe_ListsEveryHardwareItHasACommandFor()
+    {
+        const string withByHardware = """
+            {
+              "hf_id": "a/b",
+              "recommended_command": { "hardware": "h200", "by_hardware": { "h200": "/a/b/hw/h200.json", "arc_pro_b70": "/a/b/hw/arc_pro_b70.json" } },
+              "variants": { "default": { "supported_hardware": null }, "fp8": { "supported_hardware": ["mi300x", "h200"] } }
+            }
+            """;
+        var (client, _) = Create(_ => Json(withByHardware));
+
+        var recipe = await client.GetRecipeAsync("a/b");
+
+        Assert.Equal(["h200", "arc_pro_b70", "mi300x"], recipe!.Hardware);
+        Assert.Equal(["h100", "rtx_5090"], (await Create(_ => Json(RecipeDocument)).Client.GetRecipeAsync("x/y"))!.Hardware);
+    }
+
+    [Fact]
+    public async Task HardwareIndex_ReadsEveryRecipeOnce_SkipsUnreadableOnes_AndIsCached()
+    {
+        const string twoModels = """[{"hf_id":"Google/gemma-4-E4B-it","title":"G"},{"hf_id":"broken/one","title":"B"}]""";
+        var (client, handler) = Create(r => r.RequestUri!.AbsolutePath switch
+        {
+            "/models.json" => Json(twoModels),
+            "/taxonomy.json" => Json(Taxonomy),
+            "/broken/one.json" => new HttpResponseMessage(HttpStatusCode.InternalServerError),
+            _ => Json(RecipeDocument),
+        });
+
+        var index = await client.GetHardwareIndexAsync();
+        await client.GetHardwareIndexAsync();
+
+        Assert.Equal(["h100", "rtx_5090"], index["google/GEMMA-4-E4B-it"]);
+        Assert.False(index.ContainsKey("broken/one"));
+        Assert.Equal(4, handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task UnknownRecipe_IsNull()
     {
         var (client, _) = Create(_ => new HttpResponseMessage(HttpStatusCode.NotFound));

@@ -205,7 +205,7 @@
                 break;
             case 4: // Error
                 if (statusEl) {
-                    statusEl.innerHTML = '<span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-neon-red"></span>Error</span><div class="text-xs text-neon-red mt-1">' + escapeHtml(message) + '</div>';
+                    statusEl.innerHTML = '<span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-neon-red"></span>Error</span><div class="text-xs text-neon-red mt-1">' + escapeHtml((message || '').split('\n')[0]) + '</div>';
                 }
                 break;
         }

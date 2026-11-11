@@ -88,7 +88,7 @@ public static class PresetMemoryEstimator
         if (model is not { BlockCount: > 0, HeadCount: > 0, EmbeddingLength: > 0 })
             return 0;
 
-        long context = preset.ContextSize is > 0 ? preset.ContextSize.Value : preset.GgufContextLength ?? model.ContextLength ?? 4096;
+        long context = preset.ConfiguredContextSize() ?? preset.GgufContextLength ?? model.ContextLength ?? 4096;
         int kvHeads = model.KvHeadCount is > 0 ? model.KvHeadCount.Value : model.HeadCount!.Value;
         double headDim = (double)model.EmbeddingLength!.Value / model.HeadCount!.Value;
         double perToken = model.BlockCount!.Value * kvHeads * headDim

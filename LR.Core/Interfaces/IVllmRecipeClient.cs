@@ -15,6 +15,13 @@ public interface IVllmRecipeClient
 
     /// <summary>The command for the given choices (null = the recipe's default), or null if there's no such recipe.</summary>
     Task<VllmRecipeRendering?> RenderAsync(string hfId, VllmRecipeSelection selection, CancellationToken ct = default);
+
+    /// <summary>
+    /// The hardware profiles each recipe has a command for, keyed by Hugging Face id (case-insensitive).
+    /// The site has no index of its own, so the first call reads every recipe (about a minute); the result
+    /// is cached for 12 hours. A recipe that can't be read is left out rather than failing the whole index.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> GetHardwareIndexAsync(CancellationToken ct = default);
 }
 
 public sealed record VllmRecipeCatalog(
@@ -38,6 +45,7 @@ public sealed record VllmRecipeVariant(string Key, string? Label, string? Precis
 
 public sealed record VllmRecipeFeature(string Key, string? Description, bool OptIn);
 
+/// <param name="Hardware">Every hardware profile the recipe has a command for (any variant).</param>
 public sealed record VllmRecipeDetails(
     string HfId,
     string Title,
@@ -48,7 +56,8 @@ public sealed record VllmRecipeDetails(
     string? DefaultHardware,
     IReadOnlyList<VllmRecipeVariant> Variants,
     IReadOnlyList<VllmRecipeFeature> Features,
-    string? Dependencies);
+    string? Dependencies,
+    IReadOnlyList<string> Hardware);
 
 public sealed record VllmRecipeSelection(string? Hardware = null, string? Variant = null, string? Strategy = null, IReadOnlyList<string>? Features = null);
 
