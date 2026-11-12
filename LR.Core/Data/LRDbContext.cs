@@ -29,6 +29,7 @@ public class LRDbContext : DbContext
     public DbSet<Models.AgentSettings> AgentSettings => Set<Models.AgentSettings>();
     public DbSet<Models.VllmModel> VllmModels => Set<Models.VllmModel>();
     public DbSet<Models.VllmRecipe> VllmRecipes => Set<Models.VllmRecipe>();
+    public DbSet<Models.DiscoveryExclusion> DiscoveryExclusions => Set<Models.DiscoveryExclusion>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -54,6 +55,8 @@ public class LRDbContext : DbContext
             .HasOne(b => b.Agent).WithMany().HasForeignKey(b => b.AgentId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Models.LocalModel>()
             .HasOne(m => m.Agent).WithMany().HasForeignKey(m => m.AgentId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Models.DiscoveryExclusion>()
+            .HasIndex(e => new { e.Kind, e.Path }).IsUnique();
         modelBuilder.Entity<Models.AgentSettings>(entity =>
         {
             entity.ToTable("AgentSettings");

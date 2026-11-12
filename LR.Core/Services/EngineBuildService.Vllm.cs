@@ -124,6 +124,7 @@ public partial class EngineBuildService
                 await context.SaveChangesAsync(ct);
             }
 
+            await WriteInstallManifestAsync(buildId);
             await sink.CompletedAsync($"vLLM {installed.VersionTag} is ready in {installed.InstallPath}.");
         }
         catch (OperationCanceledException)

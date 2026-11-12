@@ -165,7 +165,7 @@ public partial class EngineBuildService
                 ?? throw new InvalidOperationException($"{recipe.Engine} can't be compiled from a recipe.");
 
             var refLabel = string.IsNullOrWhiteSpace(gitRefOverride) ? recipe.GitRef : gitRefOverride!;
-            var recipeSlug = SanitizeFolder(recipe.Name).Replace(' ', '-').ToLowerInvariant();
+            var recipeSlug = RecipeSlug(recipe.Name);
             var folderName = SanitizeFolder($"{profile.FolderPrefix}{refLabel}-{recipe.BackendType.ToString().ToLowerInvariant()}-{recipeSlug}");
             outputDir = Path.GetFullPath(Path.Combine(installRoot, folderName));
 
@@ -360,6 +360,7 @@ public partial class EngineBuildService
                 await context.SaveChangesAsync(ct);
             }
 
+            await WriteInstallManifestAsync(buildId);
             await sink.CompletedAsync($"Updated in place to {ctx.ResolvedVersionTag ?? "the latest version"}.");
             TryDelete(staging);
             TryDelete(Path.Combine(workRoot, "download"));
@@ -478,6 +479,7 @@ public partial class EngineBuildService
                 await context.SaveChangesAsync(ct);
             }
 
+            await WriteInstallManifestAsync(buildId);
             await sink.CompletedAsync($"Built to {ctx.OutputDir}.");
             TryDelete(Path.Combine(workRoot, "build"));
         }
@@ -549,6 +551,7 @@ public partial class EngineBuildService
                 await context.SaveChangesAsync(ct);
             }
 
+            await WriteInstallManifestAsync(buildId);
             await sink.CompletedAsync($"Installed to {ctx.OutputDir}.");
             // Keep build.log (and the cached git clone, for source builds) — just drop the bulky
             // download/extraction scratch.
@@ -583,6 +586,31 @@ public partial class EngineBuildService
         build.Status = EngineBuildStatus.Error;
         build.StatusMessage = message;
         await context.SaveChangesAsync();
+    }
+
+    /// <summary>How a recipe's name appears at the end of a source build's folder name.</summary>
+    public static string RecipeSlug(string recipeName) => SanitizeFolder(recipeName).Replace(' ', '-').ToLowerInvariant();
+
+    /// <summary>
+    /// Writes <see cref="EngineInstallManifest"/> into a finished install, so other router instances
+    /// sharing the install root can register it (or see that it was updated in place). Best effort.
+    /// </summary>
+    private async Task WriteInstallManifestAsync(Guid buildId)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
+            var build = await context.EngineBuilds.Include(b => b.Recipe).FirstOrDefaultAsync(b => b.Id == buildId);
+            if (build is null || build.AgentId is not null || string.IsNullOrWhiteSpace(build.InstallPath))
+                return;
+            if (!EngineInstallManifest.FromBuild(build, build.Recipe?.Name).TryWrite(build.InstallPath))
+                _logger.LogDebug("Could not write the install manifest into {Path}.", build.InstallPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not write the install manifest for build {BuildId}.", buildId);
+        }
     }
 
     private static string SanitizeFolder(string name)

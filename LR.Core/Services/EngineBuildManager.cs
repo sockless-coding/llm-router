@@ -93,6 +93,10 @@ public class EngineBuildManager : IEngineBuildManager
 
         _context.EngineBuilds.Remove(build);
         await _context.SaveChangesAsync();
+
+        // Files left on disk would otherwise be registered again by discovery on the next scan.
+        if (build.AgentId is null && !string.IsNullOrWhiteSpace(build.InstallPath) && Directory.Exists(build.InstallPath))
+            await SharedLibraryDiscovery.ExcludeAsync(_context, DiscoveryExclusionKind.Engine, build.InstallPath);
         return true;
     }
 
@@ -209,7 +213,7 @@ public class EngineBuildManager : IEngineBuildManager
     public async Task ReconcileAsync(CancellationToken ct = default)
     {
         // Only this machine's installs — an agent's are reconciled against its disk when it connects.
-        var builds = await _context.EngineBuilds.Where(b => b.AgentId == null).ToListAsync(ct);
+        var builds = await _context.EngineBuilds.Include(b => b.Recipe).Where(b => b.AgentId == null).ToListAsync(ct);
         var changed = false;
 
         foreach (var build in builds)
@@ -248,6 +252,13 @@ public class EngineBuildManager : IEngineBuildManager
             var (versionBefore, backendBefore) = (build.VersionTag, build.BackendType);
             handler.RefreshFromDisk(build);
             changed |= build.VersionTag != versionBefore || build.BackendType != backendBefore;
+
+            // The install's manifest is the latest word on what it holds: another instance sharing the
+            // install root may have updated it in place. An install from before manifests gets one.
+            if (EngineInstallManifest.TryRead(build.InstallPath) is { } manifest)
+                changed |= manifest.ApplyTo(build);
+            else if (build.Status is EngineBuildStatus.Ready or EngineBuildStatus.NeedsSetup)
+                EngineInstallManifest.FromBuild(build, build.Recipe?.Name).TryWrite(build.InstallPath);
 
             // Error rows keep their error until the next install/update attempt.
             var expected = handler.IsReady(build.InstallPath) ? EngineBuildStatus.Ready : EngineBuildStatus.NeedsSetup;

@@ -121,6 +121,7 @@ public partial class EngineBuildService
                 await context.SaveChangesAsync(ct);
             }
 
+            await WriteInstallManifestAsync(buildId);
             await sink.CompletedAsync($"TensorFold {installed.VersionTag} for Intel XPU is ready (image {TensorFoldDocker.ImageTag}).");
         }
         catch (Exception ex)

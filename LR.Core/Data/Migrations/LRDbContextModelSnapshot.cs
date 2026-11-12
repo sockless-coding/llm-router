@@ -15,7 +15,7 @@ namespace LR.Core.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.15");
 
             modelBuilder.Entity("LR.Core.Models.AgentSettings", b =>
                 {
@@ -219,6 +219,31 @@ namespace LR.Core.Migrations
                         .IsUnique();
 
                     b.ToTable("BackendConfigs", (string)null);
+                });
+
+            modelBuilder.Entity("LR.Core.Models.DiscoveryExclusion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "Path")
+                        .IsUnique();
+
+                    b.ToTable("DiscoveryExclusions");
                 });
 
             modelBuilder.Entity("LR.Core.Models.EngineBuild", b =>

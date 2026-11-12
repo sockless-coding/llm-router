@@ -148,6 +148,11 @@ builder.Services.AddScoped<LR.Application.Services.EngineBuildReconciliationServ
 // (Scoped — needs DbContext; invoked explicitly below, not a BackgroundService).
 builder.Services.AddScoped<ModelLibraryReconciliationService>();
 
+// Picks up engine installs and model files other router instances put in a shared install root or
+// model root, and links models to their Hugging Face repo (startup + every few minutes, or "Scan now").
+builder.Services.AddScoped<SharedLibraryDiscovery>();
+builder.Services.AddHostedService<LR.Application.Services.SharedLibrarySyncService>();
+
 // Logging & auto-restart services (Scoped — need DbContext access per request)
 builder.Services.AddScoped<IServerLogService, LR.Core.Services.ServerLogService>();
 builder.Services.AddScoped<IAutoRestartService, AutoRestartService>();

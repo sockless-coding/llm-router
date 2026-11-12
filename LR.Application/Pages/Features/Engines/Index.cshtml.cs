@@ -18,6 +18,7 @@ public class EnginesIndexModel : PageModel
     private readonly IEngineBuildManager _manager;
     private readonly IEngineBuildSettingsService _settings;
     private readonly EngineBuildService _buildService;
+    private readonly SharedLibraryDiscovery _discovery;
 
     /// <summary>The engines shown as tabs.</summary>
     public IReadOnlyList<IEngineDescriptor> Engines { get; }
@@ -47,8 +48,12 @@ public class EnginesIndexModel : PageModel
 
     public string? StatusMessage { get; set; }
 
-    public EnginesIndexModel(IEngineBuildManager manager, IEngineBuildSettingsService settings, EngineBuildService buildService, IEngineCatalog engines)
+    /// <summary>The result of a "Scan install root" click.</summary>
+    public string? ScanMessage { get; set; }
+
+    public EnginesIndexModel(IEngineBuildManager manager, IEngineBuildSettingsService settings, EngineBuildService buildService, IEngineCatalog engines, SharedLibraryDiscovery discovery)
     {
+        _discovery = discovery;
         _manager = manager;
         _settings = settings;
         _buildService = buildService;
@@ -76,6 +81,31 @@ public class EnginesIndexModel : PageModel
             StatusMessage = $"Failed to save settings: {ex.Message}";
         }
 
+        await LoadAsync();
+        return Page();
+    }
+
+    /// <summary>
+    /// Registers installs in the install root this instance doesn't track yet (made by another router
+    /// instance sharing the folder), and re-reads the ones it does.
+    /// </summary>
+    public async Task<IActionResult> OnPostScanAsync()
+    {
+        try
+        {
+            var added = await _discovery.DiscoverEnginesAsync(HttpContext.RequestAborted);
+            await _manager.ReconcileAsync(HttpContext.RequestAborted);
+            ScanMessage = added > 0 ? $"Found {added} new install(s) in the install root." : "No new installs found in the install root.";
+        }
+        catch (Exception ex)
+        {
+            ScanMessage = $"Scan failed: {ex.Message}";
+        }
+
+        var settings = await _settings.GetAsync();
+        InstallRootFolder = settings.InstallRootFolder;
+        BuildWorkspaceFolder = settings.BuildWorkspaceFolder;
+        GitHubApiToken = settings.GitHubApiToken;
         await LoadAsync();
         return Page();
     }

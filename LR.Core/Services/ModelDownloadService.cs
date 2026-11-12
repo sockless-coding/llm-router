@@ -219,6 +219,8 @@ public class ModelDownloadService
             {
                 model.HfRevision = detail.Sha ?? model.HfRevision;
                 await context.SaveChangesAsync();
+                // Lets other router instances sharing the model root link the folder to its repo.
+                HfSourceManifest.RecordCheckpoint(folder, repoId, model.HfRevision);
             }
 
             // Reads config.json, sizes the folder and flips Status -> Ready.
@@ -333,6 +335,8 @@ public class ModelDownloadService
                 if (!string.IsNullOrEmpty(resolvedSha))
                     model.HfRevision = resolvedSha;
                 await context.SaveChangesAsync();
+                // Lets other router instances sharing the model root link the file to its repo.
+                HfSourceManifest.RecordFile(destinationPath, repoId, filename, model.HfRevision);
             }
 
             // Re-reads GGUF metadata from the now-downloaded file and flips Status -> Ready.

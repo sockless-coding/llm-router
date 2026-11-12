@@ -61,6 +61,7 @@ public class ModelLibraryManager : IModelLibrary
 
         _context.LocalModels.Add(model);
         await _context.SaveChangesAsync();
+        await SharedLibraryDiscovery.ClearExclusionAsync(_context, DiscoveryExclusionKind.Model, model.FilePath);
         return model;
     }
 
@@ -115,6 +116,7 @@ public class ModelLibraryManager : IModelLibrary
 
         _context.LocalModels.Add(model);
         await _context.SaveChangesAsync();
+        await SharedLibraryDiscovery.ClearExclusionAsync(_context, DiscoveryExclusionKind.Model, model.FilePath);
         return model;
     }
 
@@ -211,6 +213,10 @@ public class ModelLibraryManager : IModelLibrary
                 catch { /* best effort — registry entry is already gone */ }
             }
         }
+
+        // Files left on disk would otherwise be registered again by discovery on the next scan.
+        if (model.AgentId is null && (File.Exists(model.FilePath) || Directory.Exists(model.FilePath)))
+            await SharedLibraryDiscovery.ExcludeAsync(_context, DiscoveryExclusionKind.Model, model.FilePath);
 
         return true;
     }

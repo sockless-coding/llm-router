@@ -12,6 +12,7 @@ public class ModelsIndexModel : PageModel
     private readonly IModelLibrary _modelLibrary;
     private readonly IPresetManager _presetManager;
     private readonly IModelLibrarySettingsService _settings;
+    private readonly SharedLibraryDiscovery _discovery;
 
     public IReadOnlyList<LocalModel> Models { get; set; } = new List<LocalModel>();
     public IReadOnlyList<ModelGroupViewModel> ModelGroups { get; set; } = new List<ModelGroupViewModel>();
@@ -43,8 +44,12 @@ public class ModelsIndexModel : PageModel
 
     public string? StatusMessage { get; set; }
 
-    public ModelsIndexModel(IModelLibrary modelLibrary, IPresetManager presetManager, IModelLibrarySettingsService settings)
+    /// <summary>The result of a "Scan library root" click.</summary>
+    public string? ScanMessage { get; set; }
+
+    public ModelsIndexModel(IModelLibrary modelLibrary, IPresetManager presetManager, IModelLibrarySettingsService settings, SharedLibraryDiscovery discovery)
     {
+        _discovery = discovery;
         _modelLibrary = modelLibrary;
         _presetManager = presetManager;
         _settings = settings;
@@ -81,6 +86,31 @@ public class ModelsIndexModel : PageModel
         ModelState.Clear();
         SavedTokenHint = TokenHint((await _settings.GetAsync()).HuggingFaceApiToken);
 
+        await LoadModelsAsync();
+        return Page();
+    }
+
+    /// <summary>
+    /// Registers model files in the library root this instance doesn't have yet (put there by another
+    /// router instance, or by hand) and links models to the Hugging Face repo they came from.
+    /// </summary>
+    public async Task<IActionResult> OnPostScanAsync()
+    {
+        try
+        {
+            var ct = HttpContext.RequestAborted;
+            var (added, missing, restored) = await _discovery.DiscoverModelsAsync(ct);
+            var linked = await _discovery.LinkHuggingFaceAsync(retryHubLookups: true, ct);
+            ScanMessage = new DiscoveryResult(0, added, linked, missing, restored).Summary();
+        }
+        catch (Exception ex)
+        {
+            ScanMessage = $"Scan failed: {ex.Message}";
+        }
+
+        var settings = await _settings.GetAsync();
+        RootFolder = settings.RootFolder;
+        SavedTokenHint = TokenHint(settings.HuggingFaceApiToken);
         await LoadModelsAsync();
         return Page();
     }

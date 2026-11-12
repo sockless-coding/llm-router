@@ -449,6 +449,7 @@ public partial class EngineBuildService
                     (StrataLayout.ReadEngineVersion(checkout) is { } ev ? $", engine {ev}" : "") + ".";
             }
 
+            await WriteInstallManifestAsync(buildId);
             await sink.CompletedAsync(summary);
         }
         catch (OperationCanceledException)
