@@ -239,6 +239,48 @@ public sealed class TensorFoldProviderTests : IDisposable
             TensorFoldPresetSettings.EnvironmentOf(Preset("a/b", (TensorFoldPresetSettings.Environment, "LD_PRELOAD=/tmp/x.so"))));
     }
 
+    [Theory]
+    [InlineData("1", "1")]
+    [InlineData("0.5", "0.5")]
+    [InlineData("0", "0")]
+    public void ServeArgs_PassesThePromptCacheSize(string value, string expected)
+    {
+        var args = TensorFoldPresetSettings.ServeArgs(Preset("a/b", (TensorFoldPresetSettings.PromptCacheGib, value)));
+
+        Assert.Equal(["--prompt-cache-gib", expected], args.Skip(4));
+    }
+
+    [Theory]
+    [InlineData(TensorFoldPresetSettings.PromptCacheGib, "-1")]
+    [InlineData(TensorFoldPresetSettings.PromptCacheGib, "lots")]
+    [InlineData(TensorFoldPresetSettings.WddmChunkMb, "0")]
+    [InlineData(TensorFoldPresetSettings.WddmChunkMb, "4k")]
+    public void NumericSettings_RejectBadValues(string key, string value)
+    {
+        var preset = Preset("a/b", (key, value));
+
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            TensorFoldPresetSettings.ServeArgs(preset);
+            TensorFoldPresetSettings.EnvironmentOf(preset);
+        });
+    }
+
+    [Fact]
+    public void Environment_WddmChunkSize_SetsIntelsDebugKeys_AndTypedLinesWin()
+    {
+        var env = TensorFoldPresetSettings.EnvironmentOf(Preset("a/b", (TensorFoldPresetSettings.WddmChunkMb, "4096")));
+        Assert.Equal("4096", env[TensorFoldPresetSettings.WddmChunkVariable]);
+        Assert.Equal("1", env["NEOReadDebugKeys"]);
+
+        var overridden = TensorFoldPresetSettings.EnvironmentOf(Preset("a/b",
+            (TensorFoldPresetSettings.WddmChunkMb, "4096"),
+            (TensorFoldPresetSettings.Environment, "ForceWddmHugeChunkSizeMB=2048")));
+        Assert.Equal("2048", overridden[TensorFoldPresetSettings.WddmChunkVariable]);
+
+        Assert.DoesNotContain(TensorFoldPresetSettings.WddmChunkVariable, TensorFoldPresetSettings.EnvironmentOf(Preset("a/b")).Keys);
+    }
+
     [Fact]
     public void MemoryEstimate_IsThePresetsOwnFigure()
     {

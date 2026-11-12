@@ -768,6 +768,24 @@
                            inputmode="decimal" placeholder="for memory groups" class="@inpCls" />
                     <p class="text-xs text-text-secondary mt-1">What the model takes on the device, for memory-group budgeting. The model table lists most.</p>
                 </div>
+                <div>
+                    <label for="tf-prompt-cache" class="block text-sm font-medium text-text-secondary mb-1">Prompt cache (GiB)</label>
+                    <input id="tf-prompt-cache" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.PromptCacheGib]" value="@Tf(TensorFoldPresetSettings.PromptCacheGib)"
+                           inputmode="decimal" placeholder="2 (0 turns it off)" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1">
+                        <span class="font-mono">--prompt-cache-gib</span>: saved prompt states, so a follow-up turn skips re-reading the conversation.
+                        On Intel XPU it takes GPU memory from the context: lower it when a long context doesn't fit.
+                    </p>
+                </div>
+                <div>
+                    <label for="tf-wddm-chunk" class="block text-sm font-medium text-text-secondary mb-1">Intel WDDM chunk size (MB)</label>
+                    <input id="tf-wddm-chunk" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.WddmChunkMb]" value="@Tf(TensorFoldPresetSettings.WddmChunkMb)"
+                           type="number" min="1" placeholder="the driver's default" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1">
+                        Intel XPU under WSL/Docker only: sets <span class="font-mono">@TensorFoldPresetSettings.WddmChunkVariable</span>.
+                        Try 4096 if loading aborts in <span class="font-mono">wddm_memory_manager.cpp</span>.
+                    </p>
+                </div>
             </div>
 
             <label class="flex items-start gap-3 text-sm text-text-secondary">

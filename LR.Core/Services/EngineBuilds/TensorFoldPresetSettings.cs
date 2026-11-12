@@ -21,6 +21,19 @@ public static class TensorFoldPresetSettings
     public const string Drafter = "tensorfold.drafter";
     public const string Vision = "tensorfold.vision";
 
+    /// <summary>GiB kept for reused prompt states (<c>--prompt-cache-gib</c>; 0 turns it off). On Intel XPU it sits in GPU memory beside the streams.</summary>
+    public const string PromptCacheGib = "tensorfold.promptCacheGib";
+
+    /// <summary>
+    /// Intel's driver under WSL/Docker (WDDM) splits device allocations larger than this many MB into chunks
+    /// (<c>ForceWddmHugeChunkSizeMB</c>). On some boots that chunked path aborts in <c>wddm_memory_manager.cpp</c> for any
+    /// allocation over ~512 MB; 4096 keeps a model's buffers in one piece (the largest WDDM allows).
+    /// </summary>
+    public const string WddmChunkMb = "tensorfold.wddmChunkMb";
+
+    /// <summary>The variable <see cref="WddmChunkMb"/> sets; Intel reads it only with <c>NEOReadDebugKeys=1</c>.</summary>
+    public const string WddmChunkVariable = "ForceWddmHugeChunkSizeMB";
+
     /// <summary>When to run <c>tensorfold-native pull</c> before serving a repo id: <see cref="PullValues"/>.</summary>
     public const string Pull = "tensorfold.pull";
 
@@ -88,6 +101,7 @@ public static class TensorFoldPresetSettings
         if (OneOf(s, ReasoningEffort, ReasoningEffortValues) is { } effort) args.AddRange(["--reasoning-effort", effort]);
         if (Text(s, Drafter) is { } drafter) args.AddRange(["--drafter", drafter]);
         if (Bool(s, Vision)) args.Add("--vision");
+        if (Decimal(s, PromptCacheGib) is { } cacheGib) args.AddRange(["--prompt-cache-gib", cacheGib.ToString(CultureInfo.InvariantCulture)]);
 
         foreach (var arg in Lines(s, ExtraArgs))
         {
@@ -129,10 +143,18 @@ public static class TensorFoldPresetSettings
         "fi; " +
         "exec \"$exe\" \"$@\"";
 
-    /// <summary>The preset's environment variables. Throws <see cref="InvalidOperationException"/> for a malformed or protected one.</summary>
+    /// <summary>
+    /// The preset's environment variables: <see cref="WddmChunkMb"/>'s, then the typed lines (which win). Throws
+    /// <see cref="InvalidOperationException"/> for a malformed or protected one.
+    /// </summary>
     public static Dictionary<string, string> EnvironmentOf(ModelPreset preset)
     {
         var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (Int(preset.EngineSettings, WddmChunkMb, min: 1) is { } chunkMb)
+        {
+            environment["NEOReadDebugKeys"] = "1";
+            environment[WddmChunkVariable] = Str(chunkMb);
+        }
         foreach (var line in Lines(preset.EngineSettings, Environment))
         {
             var eq = line.IndexOf('=');
@@ -193,6 +215,15 @@ public static class TensorFoldPresetSettings
             return null;
         if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) || value < min)
             throw new InvalidOperationException($"TensorFold setting {key} must be a whole number of at least {min}, not '{raw}'.");
+        return value;
+    }
+
+    private static double? Decimal(IReadOnlyDictionary<string, string> s, string key)
+    {
+        if (Text(s, key) is not { } raw)
+            return null;
+        if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || value < 0 || !double.IsFinite(value))
+            throw new InvalidOperationException($"TensorFold setting {key} must be a number of at least 0, not '{raw}'.");
         return value;
     }
 
