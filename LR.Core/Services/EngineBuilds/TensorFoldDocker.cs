@@ -87,7 +87,7 @@ public static partial class TensorFoldDocker
     public static List<string> RunArgs(int port, string listenAddress, string? modelFolder, IEnumerable<string> environmentNames, string? entrypoint, IEnumerable<string> args, string? drafterFolder = null)
     {
         var portText = port.ToString(CultureInfo.InvariantCulture);
-        var run = new List<string>(DockerDesktop.Context)
+        var run = new List<string>(DockerDesktop.Host)
         {
             "run", "--rm", "--name", ContainerName(port),
             "--publish", $"{listenAddress}:{portText}:{portText}",
@@ -108,7 +108,7 @@ public static partial class TensorFoldDocker
     }
 
     /// <summary>Removes a server's container. Killing the <c>docker</c> client doesn't: the container would keep the GPU and the port.</summary>
-    public static List<string> StopArgs(int port) => [.. DockerDesktop.Context, "rm", "--force", ContainerName(port)];
+    public static List<string> StopArgs(int port) => [.. DockerDesktop.Host, "rm", "--force", ContainerName(port)];
 
     /// <summary>The result of an install: where it is, what it's at and how big the image is.</summary>
     public sealed record InstallResult(string InstallPath, string VersionTag, long? SizeBytes);
@@ -135,7 +135,7 @@ public static partial class TensorFoldDocker
 
         await sink.PhaseAsync("docker", $"Building the TensorFold XPU image at {gitRef} for {device}. The first build downloads about 1 GB and compiles for a few minutes…");
         var (build, buildOutput) = await DockerDesktop.RunAsync("TensorFold",
-            [.. DockerDesktop.Context, "build", "--progress", "plain", "--tag", ImageTag, "--build-arg", $"TF_REF={gitRef}", "--build-arg", $"XPU_DEVICE={device}", outputDir],
+            [.. DockerDesktop.Host, "build", "--progress", "plain", "--tag", ImageTag, "--build-arg", $"TF_REF={gitRef}", "--build-arg", $"XPU_DEVICE={device}", outputDir],
             line => sink.LineAsync("docker", line), ct);
         if (build.ExitCode != 0)
             throw new InvalidOperationException($"Building the TensorFold image failed (exit code {build.ExitCode}): {DockerDesktop.Summary(buildOutput)}");
@@ -147,7 +147,7 @@ public static partial class TensorFoldDocker
                 $"The TensorFold image couldn't compute on an Intel GPU (exit code {probe.ExitCode}): {DockerDesktop.Summary(probeOutput)}. " +
                 "Update the Windows Intel graphics driver, and check that Docker Desktop uses the WSL 2 engine.");
 
-        var (version, versionOutput) = await DockerDesktop.RunAsync("TensorFold", [.. DockerDesktop.Context, "run", "--rm", ImageTag, "--version"], null, ct);
+        var (version, versionOutput) = await DockerDesktop.RunAsync("TensorFold", [.. DockerDesktop.Host, "run", "--rm", ImageTag, "--version"], null, ct);
         var reported = versionOutput.Select(l => VersionPattern().Match(l)).FirstOrDefault(m => m.Success)?.Groups[1].Value;
         var tag = reported is not null ? "v" + reported : gitRef;
 
@@ -161,7 +161,7 @@ public static partial class TensorFoldDocker
             Directory.Delete(installPath, recursive: true);
         try
         {
-            await DockerDesktop.RunAsync("TensorFold", [.. DockerDesktop.Context, "image", "rm", ImageTag], null, ct);
+            await DockerDesktop.RunAsync("TensorFold", [.. DockerDesktop.Host, "image", "rm", ImageTag], null, ct);
         }
         catch (InvalidOperationException)
         {
@@ -171,7 +171,7 @@ public static partial class TensorFoldDocker
 
     /// <summary>TensorFold's own model-free device test: group means on the GPU against FP64.</summary>
     private static List<string> ProbeArgs() =>
-        [.. DockerDesktop.Context, "run", "--rm", "--entrypoint", "/opt/tensorfold/probe/tf-xpu-qwen27-means-test", .. DockerDesktop.GpuArgs, ImageTag];
+        [.. DockerDesktop.Host, "run", "--rm", "--entrypoint", "/opt/tensorfold/probe/tf-xpu-qwen27-means-test", .. DockerDesktop.GpuArgs, ImageTag];
 
     private static string RuntimeChecksums =>
         string.Concat(IntelRuntime.Select(r => $"{r.Sha256}  {Uri.UnescapeDataString(r.Url[(r.Url.LastIndexOf('/') + 1)..])}\n"));

@@ -13,8 +13,12 @@ public static partial class DockerDesktop
 {
     public const string Executable = "docker.exe";
 
-    /// <summary>Only Docker Desktop's Linux engine exposes <c>/dev/dxg</c>, and a fresh install can leave the CLI on another context.</summary>
-    public static readonly string[] Context = ["--context", "desktop-linux"];
+    /// <summary>
+    /// Addresses Docker Desktop's Linux engine (the only one exposing <c>/dev/dxg</c>) by its named pipe rather than the
+    /// <c>desktop-linux</c> context: contexts live in the signed-in user's <c>~\.docker</c>, which a LocalSystem service
+    /// doesn't have, while the pipe grants SYSTEM access. It also keeps working when the CLI is left on another context.
+    /// </summary>
+    public static readonly string[] Host = ["--host", "npipe:////./pipe/dockerDesktopLinuxEngine"];
 
     /// <summary>What a container needs to reach the GPU through WSL. No <c>--privileged</c>.</summary>
     public static readonly string[] GpuArgs =
@@ -48,12 +52,12 @@ public static partial class DockerDesktop
     /// <summary>The error for a Docker Desktop that can't be used, completed with what went wrong.</summary>
     public static string Unusable(string engine, string detail) =>
         $"{engine} on an Intel GPU runs in Docker Desktop, which isn't usable from this process: {detail} Install Docker Desktop, select its Linux/WSL 2 engine and " +
-        "wait until it reports that it's running. The account running LLM Router (or the agent) must be able to use it, so not a service under LocalSystem.";
+        "wait until it reports that it's running. Docker Desktop only runs while a user is signed in, so keep it started for that user even when LLM Router runs as a service.";
 
     /// <summary>Fails with <see cref="Unusable"/> when Docker Desktop's Linux engine doesn't answer.</summary>
     public static async Task EnsureUsableAsync(string engine, CancellationToken ct)
     {
-        var (check, output) = await RunAsync(engine, [.. Context, "info", "--format", "{{.ServerVersion}}"], null, ct);
+        var (check, output) = await RunAsync(engine, [.. Host, "info", "--format", "{{.ServerVersion}}"], null, ct);
         if (check.ExitCode != 0)
             throw new InvalidOperationException(Unusable(engine, Summary(output)));
     }
@@ -61,7 +65,7 @@ public static partial class DockerDesktop
     /// <summary>An image's size in bytes, or null when Docker can't say.</summary>
     public static async Task<long?> ImageSizeAsync(string engine, string imageTag, CancellationToken ct)
     {
-        var (result, output) = await RunAsync(engine, [.. Context, "image", "inspect", "--format", "{{.Size}}", imageTag], null, ct);
+        var (result, output) = await RunAsync(engine, [.. Host, "image", "inspect", "--format", "{{.Size}}", imageTag], null, ct);
         return result.ExitCode == 0 && long.TryParse(output.LastOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var size) ? size : null;
     }
 

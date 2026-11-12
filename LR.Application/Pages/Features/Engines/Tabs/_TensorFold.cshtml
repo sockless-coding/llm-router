@@ -24,8 +24,8 @@
         <p class="text-xs text-text-secondary">
             TensorFold's Intel engine only runs on Linux, so on Windows it runs in Docker Desktop, reaching the GPU through WSL. This builds an image
             (<span class="font-mono">@LR.Core.Services.EngineBuilds.TensorFoldDocker.ImageTag</span>) that compiles TensorFold over a pinned Intel compute runtime,
-            then checks it on the GPU. Tested on an Arc Pro B70 with Qwen3.8-27B GPTQ int4. Needs Docker Desktop running (WSL 2 engine) under your account,
-            not LLM Router as a LocalSystem service. Models are shared with vLLM's Intel image through the <span class="font-mono">@LR.Core.Services.EngineBuilds.DockerDesktop.HuggingFaceVolume</span> volume;
+            then checks it on the GPU. Tested on an Arc Pro B70 with Qwen3.8-27B GPTQ int4. Needs Docker Desktop running (WSL 2 engine); LLM Router can run as a LocalSystem service,
+            but Docker Desktop only runs while its user is signed in. Models are shared with vLLM's Intel image through the <span class="font-mono">@LR.Core.Services.EngineBuilds.DockerDesktop.HuggingFaceVolume</span> volume;
             a model folder on a local drive is mounted read-only.
         </p>
         <div class="grid grid-cols-3 gap-3">

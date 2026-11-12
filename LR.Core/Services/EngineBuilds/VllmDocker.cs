@@ -37,7 +37,7 @@ public static class VllmDocker
     /// <summary>Tells a Docker install from a venv by name alone, since the router can't look inside a folder on an agent.</summary>
     private const string FolderSuffix = "-xpu-docker";
 
-    private static readonly string[] Context = DockerDesktop.Context;
+    private static readonly string[] Host = DockerDesktop.Host;
 
     public static string FolderName => $"vllm-v{PinnedVersion}{FolderSuffix}";
 
@@ -77,7 +77,7 @@ public static class VllmDocker
     public static List<string> RunArgs(int port, string listenAddress, string? modelFolder, IEnumerable<string> environmentNames, IEnumerable<string> serveArgs)
     {
         var portText = port.ToString(CultureInfo.InvariantCulture);
-        var args = new List<string>(Context)
+        var args = new List<string>(Host)
         {
             "run", "--rm", "--name", ContainerName(port),
             "--publish", $"{listenAddress}:{portText}:{portText}",
@@ -94,7 +94,7 @@ public static class VllmDocker
     }
 
     /// <summary>Removes a server's container. Killing the <c>docker</c> client doesn't: the container would keep the GPU and the port.</summary>
-    public static List<string> StopArgs(int port) => [.. Context, "rm", "--force", ContainerName(port)];
+    public static List<string> StopArgs(int port) => [.. Host, "rm", "--force", ContainerName(port)];
 
     /// <summary>
     /// The MTP speculative-decoding patches for Qwen3.8 from the MIT-licensed
@@ -170,7 +170,7 @@ public static class VllmDocker
             await File.WriteAllTextAsync(Path.Combine(cookbook, file), ReadCookbookFile(file), ct);
 
         await sink.PhaseAsync("docker", "Building the vLLM image. The first build downloads about 18 GB…");
-        var (build, buildOutput) = await RunDockerAsync([.. Context, "build", "--progress", "plain", "--tag", ImageTag, request.OutputDir],
+        var (build, buildOutput) = await RunDockerAsync([.. Host, "build", "--progress", "plain", "--tag", ImageTag, request.OutputDir],
             line => sink.LineAsync("docker", line), ct);
         if (build.ExitCode != 0)
             throw new InvalidOperationException($"Building the vLLM image failed (exit code {build.ExitCode}): {Summary(buildOutput)}");
@@ -194,7 +194,7 @@ public static class VllmDocker
             Directory.Delete(installPath, recursive: true);
         try
         {
-            await RunDockerAsync([.. Context, "image", "rm", ImageTag], null, ct);
+            await RunDockerAsync([.. Host, "image", "rm", ImageTag], null, ct);
         }
         catch (InvalidOperationException)
         {
@@ -204,7 +204,7 @@ public static class VllmDocker
 
     private static List<string> ProbeArgs()
     {
-        var args = new List<string>(Context) { "run", "--rm", "--entrypoint", "python" };
+        var args = new List<string>(Host) { "run", "--rm", "--entrypoint", "python" };
         args.AddRange(GpuArgs);
         args.AddRange([ImageTag, "/opt/llm-router/probe.py"]);
         return args;

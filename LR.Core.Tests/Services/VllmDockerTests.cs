@@ -68,7 +68,7 @@ public class VllmDockerTests
     {
         var args = VllmDocker.RunArgs(8123, "127.0.0.1", @"D:\my models\qwen", ["HF_TOKEN"], ["serve", "/model"]);
 
-        Assert.Equal(["--context", "desktop-linux", "run", "--rm", "--name", "llm-router-vllm-8123"], args.Take(6));
+        Assert.Equal(["--host", "npipe:////./pipe/dockerDesktopLinuxEngine", "run", "--rm", "--name", "llm-router-vllm-8123"], args.Take(6));
         Assert.Equal("127.0.0.1:8123:8123", After(args, "--publish"));
         Assert.Equal("/dev/dxg", After(args, "--device"));
         Assert.Contains("/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro", args);
@@ -93,7 +93,7 @@ public class VllmDockerTests
     [Fact]
     public void StopArgs_RemoveTheContainerRunArgsNamed()
     {
-        Assert.Equal(["--context", "desktop-linux", "rm", "--force", VllmDocker.ContainerName(9000)], VllmDocker.StopArgs(9000));
+        Assert.Equal(["--host", "npipe:////./pipe/dockerDesktopLinuxEngine", "rm", "--force", VllmDocker.ContainerName(9000)], VllmDocker.StopArgs(9000));
     }
 
     [Theory]

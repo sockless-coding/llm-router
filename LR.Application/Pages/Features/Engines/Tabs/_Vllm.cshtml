@@ -16,7 +16,7 @@
     {
         <p class="text-xs text-amber-400">
             vLLM doesn't run natively on Windows, so NVIDIA installs here go in WSL (<span class="font-mono">wsl --install -d Ubuntu</span>), under
-            <span class="font-mono">~/@VllmLayout.WslInstallRoot</span>, and Intel installs build a Docker image, which needs Docker Desktop running. Both belong to a Windows user: this needs LLM Router running under your account, not as a service under LocalSystem.
+            <span class="font-mono">~/@VllmLayout.WslInstallRoot</span>, and Intel installs build a Docker image, which needs Docker Desktop running. WSL distros belong to a Windows user, so WSL installs need LLM Router running under your account, not as a service under LocalSystem; Intel installs work from a service while Docker Desktop's user is signed in.
             To install on another machine, use its page under <a href="/Features/Agents/Index" class="underline hover:text-neon-cyan">Agents</a>.
         </p>
     }
