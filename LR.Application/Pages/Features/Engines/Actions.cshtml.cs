@@ -42,6 +42,9 @@ public class EngineActionsModel : PageModel
     /// <summary>vLLM on Windows: the WSL distro to install in (the default one when empty).</summary>
     [BindProperty] public string? WslDistro { get; set; }
 
+    /// <summary>TensorFold's Intel image: the GPU its kernels are compiled for (ocloc's name; bmg when empty).</summary>
+    [BindProperty] public string? XpuDevice { get; set; }
+
     /// <summary>The engine a release install is for (llama.cpp when not given).</summary>
     [BindProperty] public ServerEngine? Engine { get; set; }
 
@@ -60,6 +63,8 @@ public class EngineActionsModel : PageModel
             }),
             "installvllm" => await RunAsync(async () =>
                 new { success = true, buildId = await _buildService.StartVllmInstallAsync(Backend, ReleaseTag, WslDistro, Name), message = "Install started." }),
+            "installtensorfoldxpu" => await RunAsync(async () =>
+                new { success = true, buildId = await _buildService.StartTensorFoldDockerInstallAsync(GitRef, XpuDevice, Name), message = "Image build started." }),
             "installrelease" => await InstallReleaseAsync(),
             "update" => await UpdateAsync(),
             "startbuild" => await StartBuildAsync(),

@@ -35,16 +35,23 @@ public class LlamaCppBuildRecipe
     public string GitRepoUrl { get; set; } = DefaultRepoUrl(ServerEngine.LlamaCpp);
 
     /// <summary>The upstream repo a new recipe for <paramref name="engine"/> builds from.</summary>
-    public static string DefaultRepoUrl(ServerEngine engine) => engine == ServerEngine.StableDiffusionCpp
-        ? "https://github.com/leejet/stable-diffusion.cpp"
-        : "https://github.com/ggml-org/llama.cpp";
+    public static string DefaultRepoUrl(ServerEngine engine) => engine switch
+    {
+        ServerEngine.StableDiffusionCpp => "https://github.com/leejet/stable-diffusion.cpp",
+        ServerEngine.TensorFold => "https://github.com/ashhart/TensorFold",
+        _ => "https://github.com/ggml-org/llama.cpp",
+    };
+
+    /// <summary>The branch a new recipe for <paramref name="engine"/> builds.</summary>
+    public static string DefaultGitRef(ServerEngine engine) => engine == ServerEngine.TensorFold ? "main" : "master";
 
     /// <summary>Branch, tag, or commit SHA to build. A source build may override this per-run.</summary>
     [MaxLength(256)]
     public string GitRef { get; set; } = "master";
 
     /// <summary>
-    /// CMake configure arguments, one token per entry
+    /// CMake configure arguments, one token per entry — for TensorFold, which builds with Zig, the
+    /// <c>zig build</c> arguments instead
     /// (e.g. <c>-DGGML_SYCL=ON</c>, <c>-DGGML_SYCL_F16=ON</c>). Stored as JSON.
     /// </summary>
     [Column(TypeName = "TEXT")]

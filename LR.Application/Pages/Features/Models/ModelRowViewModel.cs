@@ -28,6 +28,20 @@ public class ModelRowViewModel
     public ModelType? GroupType { get; set; }
 }
 
+/// <summary>What the <c>_EngineBadges</c> partial renders: the engines that can run a model (or a group), and its format.</summary>
+public sealed record EngineBadgesViewModel(IReadOnlyList<ServerEngine> Engines, ModelFormat Format)
+{
+    public static EngineBadgesViewModel For(LocalModel model) => new(ModelEngineSupport.For(model), model.Format);
+
+    /// <summary>A group: every engine some member runs on, in engine order.</summary>
+    public static EngineBadgesViewModel For(IEnumerable<LocalModel> models)
+    {
+        var list = models.ToList();
+        return new(list.SelectMany(ModelEngineSupport.For).Distinct().Order().ToList(),
+            list.Count > 0 && list.All(m => m.Format == ModelFormat.Checkpoint) ? ModelFormat.Checkpoint : ModelFormat.Gguf);
+    }
+}
+
 /// <summary>What the <c>_ModelTypeBadge</c> partial renders: a type's colour, with its label.</summary>
 /// <param name="Detail">Secondary text after the label, e.g. the decision type ("openjev").</param>
 public sealed record ModelTypeBadgeViewModel(ModelType Type, string Label, string? Detail = null);

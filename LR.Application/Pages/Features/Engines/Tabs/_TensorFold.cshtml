@@ -1,0 +1,49 @@
+@using LR.Core.Models
+@model LR.Application.Pages.Features.Engines.EnginesIndexModel
+
+<div class="flex items-center justify-between mb-4">
+    <p class="text-text-secondary text-sm">
+        Install official <a href="https://github.com/ashhart/TensorFold" target="_blank" rel="noopener" class="text-neon-cyan/80 hover:text-neon-cyan">TensorFold</a>
+        releases — CUDA for Linux (x86_64 and aarch64; NVIDIA driver R580+) and Metal for Apple-silicon Macs — and track what version each folder holds.
+        There's no Windows release: compile one from a recipe below (CUDA and HIP build natively on Windows), or build the Intel XPU image for Docker Desktop.
+        Models are Hugging Face repo ids in TensorFold's own formats (MLX, NVFP4, EXL3…), downloaded on the server's machine at first start.
+    </p>
+    <a href="/Features/Engines/Releases?engine=@ServerEngine.TensorFold" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium shrink-0">
+        <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+        Install a release
+    </a>
+</div>
+
+<partial name="~/Pages/Features/Engines/Tabs/_ReleaseBuilds.cshtml" model="Model" />
+
+@if (OperatingSystem.IsWindows())
+{
+    var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all placeholder-gray-500 text-sm";
+    <div class="bg-cyber-card rounded-xl border border-gray-700/30 p-4 space-y-3 max-w-xl mb-8">
+        <h3 class="text-sm font-semibold text-text-primary">Intel GPU (XPU) in Docker</h3>
+        <p class="text-xs text-text-secondary">
+            TensorFold's Intel engine only runs on Linux, so on Windows it runs in Docker Desktop, reaching the GPU through WSL. This builds an image
+            (<span class="font-mono">@LR.Core.Services.EngineBuilds.TensorFoldDocker.ImageTag</span>) that compiles TensorFold over a pinned Intel compute runtime,
+            then checks it on the GPU. Tested on an Arc Pro B70 with Qwen3.8-27B GPTQ int4. Needs Docker Desktop running (WSL 2 engine) under your account,
+            not LLM Router as a LocalSystem service. Models are shared with vLLM's Intel image through the <span class="font-mono">@LR.Core.Services.EngineBuilds.DockerDesktop.HuggingFaceVolume</span> volume;
+            a model folder on a local drive is mounted read-only.
+        </p>
+        <div class="grid grid-cols-3 gap-3">
+            <div>
+                <label for="tf-xpu-ref" class="block text-xs font-medium text-text-secondary mb-1">Version</label>
+                <input id="tf-xpu-ref" placeholder="newest release" class="@inpCls font-mono" />
+            </div>
+            <div>
+                <label for="tf-xpu-device" class="block text-xs font-medium text-text-secondary mb-1">GPU</label>
+                <input id="tf-xpu-device" placeholder="bmg (Arc B-series, B60/B70)" class="@inpCls font-mono" />
+            </div>
+            <div>
+                <label for="tf-xpu-name" class="block text-xs font-medium text-text-secondary mb-1">Name</label>
+                <input id="tf-xpu-name" placeholder="optional" class="@inpCls" />
+            </div>
+        </div>
+        <button type="button" onclick="installTensorFoldXpu()" class="text-xs px-3 py-1.5 rounded-md bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium">Build image</button>
+    </div>
+}
+
+<partial name="~/Pages/Features/Engines/Tabs/_Recipes.cshtml" model="Model" />

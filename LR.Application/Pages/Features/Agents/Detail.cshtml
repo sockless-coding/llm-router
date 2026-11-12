@@ -223,6 +223,7 @@
                         <option value="LlamaCpp">llama.cpp</option>
                         <option value="StableDiffusionCpp">stable-diffusion.cpp</option>
                         <option value="Vllm">vLLM</option>
+                        <option value="TensorFold">TensorFold</option>
                     </select>
                     <select id="relBackend" class="@input" aria-label="Backend"></select>
                 </div>
@@ -360,6 +361,7 @@
         LlamaCpp: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ReleaseBackends[ServerEngine.LlamaCpp].Select(b => b.ToString()))),
         StableDiffusionCpp: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ReleaseBackends[ServerEngine.StableDiffusionCpp].Select(b => b.ToString()))),
         Vllm: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ReleaseBackends[ServerEngine.Vllm].Select(b => b.ToString()))),
+        TensorFold: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ReleaseBackends[ServerEngine.TensorFold].Select(b => b.ToString()))),
     };
     const token = () => document.querySelector('#csrf-form input[name="__RequestVerificationToken"]')?.value || '';
     const val = (id) => document.getElementById(id).value.trim();

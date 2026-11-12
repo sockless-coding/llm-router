@@ -529,6 +529,23 @@ function textOf(content) {
     return '';
 }
 
+// Per-preset chars-per-token ratio for the live speed estimate, learned from finished replies.
+// A per-viewer convenience: without storage the estimate falls back to its default.
+const charsPerTokenKey = name => `playground.charsPerToken.${name}`;
+function loadCharsPerToken(name) {
+    try {
+        const v = parseFloat(localStorage.getItem(charsPerTokenKey(name)));
+        return isFinite(v) && v > 0 ? v : null;
+    } catch { return null; }
+}
+function saveCharsPerToken(name, ratio) {
+    if (!name || !isFinite(ratio) || ratio < 0.5 || ratio > 12) return;
+    try {
+        const prev = loadCharsPerToken(name);
+        localStorage.setItem(charsPerTokenKey(name), String(prev ? prev * 0.5 + ratio * 0.5 : ratio));
+    } catch { }
+}
+
 // Streams one reply into a new bubble and returns its measured metrics.
 async function runTurn(messages, caption, coldStart) {
     const bubble = addAssistantBubble(caption);
@@ -544,9 +561,17 @@ async function runTurn(messages, caption, coldStart) {
     let tokensSoFar = null;
     let usage = null, timings = null;
 
-    // Live elapsed/speed estimate while the reply streams (deltas ≈ tokens for llama.cpp; vLLM sends a count).
+    // Live elapsed/speed estimate while the reply streams. vLLM sends a running count. Other engines
+    // don't, and under speculative decoding (e.g. a TensorFold DFlash drafter) one delta carries a
+    // whole block of accepted tokens, so the count comes from the streamed text length instead,
+    // using this preset's chars-per-token ratio from earlier replies (≈4 until one has finished).
     // Tokens after the first one: the first comes out of prompt processing, the rest are generation.
-    const liveTokens = () => Math.max((tokensSoFar ?? deltaCount) - 1, 0);
+    const charsPerToken = loadCharsPerToken(presetName);
+    const estimatedTokens = () => {
+        const chars = m.content.length + m.reasoning.length;
+        return charsPerToken ? chars / charsPerToken : Math.max(deltaCount, chars / 4);
+    };
+    const liveTokens = () => Math.max((tokensSoFar ?? estimatedTokens()) - 1, 0);
     const ticker = setInterval(() => {
         const now = performance.now();
         let html = chip(firstTokenAt ? 'TTFT' : (coldStart ? 'Loading model' : 'Waiting'), fmtMs(firstTokenAt ? firstTokenAt - started : now - started));
@@ -639,6 +664,8 @@ async function runTurn(messages, caption, coldStart) {
         m.draftAccepted = timings.draft_n_accepted ?? null;
     }
     if (m.genTps == null && m.genMs && m.completionTokens) m.genTps = m.completionTokens / (m.genMs / 1000);
+    const streamedChars = m.content.length + m.reasoning.length;
+    if (!m.error && m.completionTokens >= 50 && streamedChars >= 200) saveCharsPerToken(presetName, streamedChars / m.completionTokens);
 
     bubble.setContent(m.content);
     if (m.reasoning) bubble.setReasoning(m.reasoning, true);

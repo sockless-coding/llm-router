@@ -13,6 +13,25 @@ public enum ModelSource
 }
 
 /// <summary>
+/// What a <see cref="LocalModel"/>'s <see cref="LocalModel.FilePath"/> points at, which decides the
+/// engines that can run it (<see cref="Services.ModelEngineSupport"/>). Values are persisted.
+/// </summary>
+public enum ModelFormat
+{
+    /// <summary>A .gguf file (a split model's first shard): llama.cpp, Strata, stable-diffusion.cpp.</summary>
+    Gguf = 0,
+
+    /// <summary>A single .safetensors file — a diffusion checkpoint or component for stable-diffusion.cpp.</summary>
+    Safetensors = 1,
+
+    /// <summary>
+    /// A Hugging Face checkpoint folder (config.json, tokenizer, safetensors shards), as TensorFold and
+    /// vLLM load it. <see cref="LocalModel.FilePath"/> is the folder.
+    /// </summary>
+    Checkpoint = 2,
+}
+
+/// <summary>
 /// Lifecycle status of a <see cref="LocalModel"/>'s underlying file.
 /// </summary>
 public enum ModelStatus
@@ -39,12 +58,16 @@ public class LocalModel
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
-    /// Absolute path to the .gguf file on disk.
+    /// Absolute path to the model file on disk (.gguf, .safetensors), or to the folder of a
+    /// <see cref="ModelFormat.Checkpoint"/>.
     /// </summary>
     [Required, MaxLength(1024)]
     public string FilePath { get; set; } = string.Empty;
 
     public long? FileSizeBytes { get; set; }
+
+    /// <summary>What <see cref="FilePath"/> is: a GGUF or safetensors file, or a checkpoint folder.</summary>
+    public ModelFormat Format { get; set; } = ModelFormat.Gguf;
 
     public ModelSource Source { get; set; } = ModelSource.Local;
 

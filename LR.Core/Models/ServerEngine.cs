@@ -22,4 +22,7 @@ public enum ServerEngine
 
     /// <summary>vLLM (github.com/vllm-project/vllm) — <c>vllm serve</c>, on Linux natively and on Windows through WSL.</summary>
     Vllm = 4,
+
+    /// <summary>TensorFold (github.com/ashhart/TensorFold) — native <c>tensorfold-native serve</c>, CUDA on Linux and Metal on macOS.</summary>
+    TensorFold = 5,
 }

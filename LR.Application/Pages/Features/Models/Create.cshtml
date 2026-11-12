@@ -19,11 +19,31 @@
         }
 
         <div class="bg-cyber-card rounded-xl p-6 border border-neon-magenta/10 space-y-4">
-            <h2 class="text-lg font-semibold text-text-primary">Import Local File</h2>
+            <h2 class="text-lg font-semibold text-text-primary">Import Local Model</h2>
+
+            <fieldset>
+                <legend class="block text-sm font-medium text-text-secondary mb-2">Model type</legend>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label class="flex items-start gap-3 rounded-lg border border-gray-600/30 p-3 cursor-pointer has-[:checked]:border-neon-magenta/50 has-[:checked]:bg-neon-magenta/5">
+                        <input type="radio" asp-for="Kind" value="File" class="mt-1 accent-neon-magenta" />
+                        <span class="text-sm">
+                            <span class="font-medium text-text-primary">Model file</span>
+                            <span class="block text-xs text-text-secondary">A .gguf for llama.cpp (and Strata, stable-diffusion.cpp), or a .safetensors diffusion file for stable-diffusion.cpp.</span>
+                        </span>
+                    </label>
+                    <label class="flex items-start gap-3 rounded-lg border border-gray-600/30 p-3 cursor-pointer has-[:checked]:border-neon-magenta/50 has-[:checked]:bg-neon-magenta/5">
+                        <input type="radio" asp-for="Kind" value="Checkpoint" class="mt-1 accent-neon-magenta" />
+                        <span class="text-sm">
+                            <span class="font-medium text-text-primary">Checkpoint folder</span>
+                            <span class="block text-xs text-text-secondary">A Hugging Face model folder (config.json, tokenizer, .safetensors weights) for TensorFold and vLLM.</span>
+                        </span>
+                    </label>
+                </div>
+            </fieldset>
 
             <div>
-                <label asp-for="FilePath" class="block text-sm font-medium text-text-secondary mb-1"></label>
-                <input asp-for="FilePath" required placeholder="C:\models\llama-3-8b-q4_k_m.gguf" class="@inpCls" />
+                <label asp-for="FilePath" id="path-label" class="block text-sm font-medium text-text-secondary mb-1">@(Model.Kind == LR.Application.Pages.Features.Models.ModelsCreateModel.ImportKind.Checkpoint ? "Folder" : "File path")</label>
+                <input asp-for="FilePath" required placeholder="@(Model.Kind == LR.Application.Pages.Features.Models.ModelsCreateModel.ImportKind.Checkpoint ? "C:\\models\\Qwen3.8-27B-GPTQ-Int4" : "C:\\models\\llama-3-8b-q4_k_m.gguf")" class="@inpCls" />
             </div>
             <div>
                 <label asp-for="Name" class="block text-sm font-medium text-text-secondary mb-1">Display Name (optional)</label>
@@ -49,8 +69,13 @@
             <ul class="space-y-1">
                 @foreach (var candidate in Model.ScannedCandidates)
                 {
-                    <li>
-                        <button type="button" class="pick-candidate text-sm text-neon-cyan hover:underline text-left" data-path="@candidate">
+                    var isCheckpoint = System.IO.Directory.Exists(candidate);
+                    <li class="flex items-center gap-2">
+                        @if (isCheckpoint)
+                        {
+                            <span class="text-[11px] px-1.5 py-0.5 rounded border border-gray-600/30 bg-gray-700/30 text-text-secondary shrink-0">checkpoint</span>
+                        }
+                        <button type="button" class="pick-candidate text-sm text-neon-cyan hover:underline text-left break-all" data-path="@candidate" data-kind="@(isCheckpoint ? "Checkpoint" : "File")">
                             @candidate
                         </button>
                     </li>
@@ -66,11 +91,21 @@
 
 @section Scripts {
     <script>
+        const kindInputs = document.querySelectorAll('input[name=Kind]');
+        const pathInput = document.querySelector('[name=FilePath]');
+        const pathLabel = document.getElementById('path-label');
+        const showKind = () => {
+            const checkpoint = document.querySelector('input[name=Kind]:checked')?.value === 'Checkpoint';
+            pathLabel.textContent = checkpoint ? 'Folder' : 'File path';
+            pathInput.placeholder = checkpoint ? 'C:\\models\\Qwen3.8-27B-GPTQ-Int4' : 'C:\\models\\llama-3-8b-q4_k_m.gguf';
+        };
+        kindInputs.forEach(i => i.addEventListener('change', showKind));
         document.querySelectorAll('.pick-candidate').forEach(btn => {
             btn.addEventListener('click', () => {
-                const input = document.querySelector('[name=FilePath]');
-                input.value = btn.dataset.path;
-                input.scrollIntoView();
+                pathInput.value = btn.dataset.path;
+                const kind = document.querySelector(`input[name=Kind][value=${btn.dataset.kind}]`);
+                if (kind) { kind.checked = true; showKind(); }
+                pathInput.scrollIntoView();
             });
         });
     </script>

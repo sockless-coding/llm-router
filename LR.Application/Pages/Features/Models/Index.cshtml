@@ -32,7 +32,7 @@
         </a>
         <a href="/Features/Models/Create" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all text-sm font-medium">
             <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
-            Import Local File
+            Import Local Model
         </a>
     </div>
 </div>
@@ -86,7 +86,7 @@
     <div class="text-center py-16 bg-cyber-card rounded-xl border border-neon-cyan/10">
         <svg class="w-12 h-12 mx-auto text-text-secondary mb-3" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375" /></svg>
         <p class="text-text-secondary">No models registered</p>
-        <p class="text-text-secondary text-sm mt-1">Import a local .gguf file or browse Hugging Face to get started.</p>
+        <p class="text-text-secondary text-sm mt-1">Import a local model file or checkpoint folder, or browse Hugging Face to get started.</p>
     </div>
 }
 else
@@ -142,6 +142,7 @@ else
                 <tr class="border-b border-gray-700/50 bg-gray-800/30">
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Type</th>
+                    <th class="text-left px-4 py-3 text-text-secondary font-medium" title="The server engines that can run the model">Engines</th>
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Source</th>
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Quant</th>
                     <th class="text-left px-4 py-3 text-text-secondary font-medium">Params</th>
@@ -169,7 +170,8 @@ else
                         }
                         var usageTotal = group.AllModels.Sum(m => Model.PresetUsageCounts.GetValueOrDefault(m.Id, 0));
                         var groupRepoId = group.AllModels.FirstOrDefault(m => !string.IsNullOrEmpty(m.HfRepoId))?.HfRepoId;
-                        var groupFolder = System.IO.Path.GetDirectoryName(group.AllModels.First().FilePath);
+                        var groupIsCheckpoint = group.AllModels.All(m => m.Format == ModelFormat.Checkpoint);
+                        var groupFolder = groupIsCheckpoint ? null : System.IO.Path.GetDirectoryName(group.AllModels.First().FilePath);
 
                         <tr class="border-b border-gray-700/30 bg-gray-800/30 hover:bg-gray-800/40 cursor-pointer select-none" onclick="toggleModelGroup('@groupDomId')">
                             <td class="px-4 py-3">
@@ -184,6 +186,9 @@ else
                             </td>
                             <td class="px-4 py-3">
                                 <partial name="_ModelTypeBadge" model="@(new ModelTypeBadgeViewModel(group.Type, group.TypeLabel, group.DecisionType))" />
+                            </td>
+                            <td class="px-4 py-3">
+                                <partial name="_EngineBadges" model="@EngineBadgesViewModel.For(group.PrimaryModels)" />
                             </td>
                             <td class="px-4 py-3"></td>
                             <td class="px-4 py-3 text-text-secondary">@quantLabel</td>
@@ -213,6 +218,9 @@ else
                                 @if (!string.IsNullOrEmpty(groupRepoId))
                                 {
                                     <a href="https://huggingface.co/@groupRepoId" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-gray-700/30 text-text-secondary hover:bg-gray-700/50 transition-all font-medium" title="Open this model's page on Hugging Face">Model Card</a>
+                                }
+                                @if (!string.IsNullOrEmpty(groupRepoId) && !groupIsCheckpoint)
+                                {
                                     <a href="@LR.Application.Pages.Features.Models.ModelsHuggingFaceModel.BrowseRepoUrl(groupRepoId, group.AllModels.First(m => m.HfRepoId == groupRepoId).FilePath)" onclick="event.stopPropagation()" class="text-xs px-2 py-1 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium" title="Download another quant of this model from Hugging Face">+ Version</a>
                                 }
                                 @if (!string.IsNullOrEmpty(groupFolder))

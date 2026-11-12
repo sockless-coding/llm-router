@@ -1,0 +1,22 @@
+@using LR.Core.Models
+@inject LR.Core.Interfaces.IEngineCatalog EngineCatalog
+@model LR.Application.Pages.Features.Models.EngineBadgesViewModel
+@* The server engines that can run a model (ModelEngineSupport), and for a checkpoint folder its format. *@
+<span class="inline-flex flex-wrap items-center gap-1">
+    @if (Model.Format == ModelFormat.Checkpoint)
+    {
+        <span class="text-[11px] px-1.5 py-0.5 rounded border border-gray-600/30 bg-gray-700/30 text-text-secondary whitespace-nowrap" title="A checkpoint folder: config.json, tokenizer and safetensors weights">checkpoint</span>
+    }
+    @foreach (var engine in Model.Engines)
+    {
+        var cls = engine switch
+        {
+            ServerEngine.LlamaCpp => "bg-neon-cyan/10 text-neon-cyan border-neon-cyan/20",
+            ServerEngine.StableDiffusionCpp => "bg-neon-magenta/10 text-neon-magenta border-neon-magenta/20",
+            ServerEngine.TensorFold => "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30",
+            ServerEngine.Vllm => "bg-neon-green/10 text-neon-green border-neon-green/20",
+            _ => "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30",
+        };
+        <span class="text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap @cls">@(EngineCatalog.Get(engine)?.DisplayName ?? engine.ToString())</span>
+    }
+</span>

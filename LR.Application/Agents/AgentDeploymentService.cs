@@ -96,7 +96,7 @@ public sealed class AgentDeploymentService
 
         if (string.IsNullOrWhiteSpace(releaseTag))
         {
-            var latest = await _github.GetLatestReleaseAsync(profile.Repo)
+            var latest = await profile.GetLatestReleaseAsync(_github)
                 ?? throw new InvalidOperationException("Could not reach GitHub to look up the latest release.");
             releaseTag = profile.VersionTagOf(latest.TagName);
         }
@@ -340,6 +340,7 @@ public sealed class AgentDeploymentService
         {
             Name = string.IsNullOrWhiteSpace(name) ? ModelDownloadService.DefaultName(repoId, filename) : name.Trim(),
             FilePath = destination,
+            Format = ModelLibraryManager.FormatOfFile(destination),
             Source = ModelSource.HuggingFace,
             Status = ModelStatus.Downloading,
             HfRepoId = repoId,
@@ -404,6 +405,8 @@ public sealed class AgentDeploymentService
         if (shards.FirstOrDefault(p => !File.Exists(p)) is { } missing)
             throw new InvalidOperationException($"{missing} is missing on the router.");
 
+        if (source.Format == ModelFormat.Checkpoint)
+            throw new InvalidOperationException("Copying a checkpoint folder to an agent isn't supported yet. Download it on the agent's machine and import the folder there.");
         var subfolder = !string.IsNullOrEmpty(source.HfRepoId)
             ? AgentPaths.SafeSegment(source.HfRepoId.Replace('/', '_'))
             : "library";
@@ -416,6 +419,7 @@ public sealed class AgentDeploymentService
         {
             Name = string.IsNullOrWhiteSpace(name) ? source.Name : name.Trim(),
             FilePath = destination,
+            Format = ModelLibraryManager.FormatOfFile(destination),
             Source = source.Source,
             Status = ModelStatus.Downloading,
             HfRepoId = source.HfRepoId,
@@ -453,6 +457,7 @@ public sealed class AgentDeploymentService
         {
             Name = string.IsNullOrWhiteSpace(name) ? Path.GetFileNameWithoutExtension(AgentPaths.FileName(filePath)) : name.Trim(),
             FilePath = filePath,
+            Format = ModelLibraryManager.FormatOfFile(filePath),
             Source = ModelSource.Local,
             Status = ModelStatus.Downloading,
             StatusMessage = "Reading metadata on the agent…",

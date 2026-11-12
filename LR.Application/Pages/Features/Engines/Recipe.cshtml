@@ -5,6 +5,9 @@
     ViewData["Title"] = Model.IsExisting ? "Edit recipe" : "New recipe";
     string input = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all";
     string label = "block text-sm font-medium text-text-secondary mb-1";
+    // TensorFold builds with Zig: its recipe's arguments are zig build's, and the CMake-only fields go.
+    var zig = Model.Input.Engine == ServerEngine.TensorFold;
+    var argsPlaceholder = zig ? "-Dgpu=sm_120" : "-DGGML_SYCL=ON\n-DGGML_SYCL_F16=ON";
 }
 
 <div class="flex items-center gap-3 mb-6">
@@ -36,7 +39,7 @@
             <select class="@input" asp-for="Input.Engine">
                 @foreach (var (engine, engineLabel) in LR.Application.Pages.Features.Engines.EngineRecipeModel.RecipeEngines)
                 {
-                    <option value="@engine" data-repo="@LlamaCppBuildRecipe.DefaultRepoUrl(engine)" selected="@(engine == Model.Input.Engine)">@engineLabel</option>
+                    <option value="@engine" data-repo="@LlamaCppBuildRecipe.DefaultRepoUrl(engine)" data-ref="@LlamaCppBuildRecipe.DefaultGitRef(engine)" data-zig="@(engine == ServerEngine.TensorFold ? "true" : "false")" selected="@(engine == Model.Input.Engine)">@engineLabel</option>
                 }
             </select>
         </div>
@@ -60,11 +63,24 @@
         </div>
     </div>
     <div>
-        <label class="@label" asp-for="Input.CMakeArgsText">CMake arguments (one per line)</label>
-        <textarea class="@input font-mono text-xs" rows="6" asp-for="Input.CMakeArgsText" placeholder="-DGGML_SYCL=ON&#10;-DGGML_SYCL_F16=ON"></textarea>
+        <label class="@label" asp-for="Input.CMakeArgsText" id="args-label" data-cmake="CMake arguments (one per line)" data-zig="zig build arguments (one per line)">@(zig ? "zig build arguments (one per line)" : "CMake arguments (one per line)")</label>
+        <textarea class="@input font-mono text-xs" rows="6" asp-for="Input.CMakeArgsText" placeholder="@argsPlaceholder"></textarea>
+        <div id="zig-help" class="@(zig ? "" : "hidden") text-xs text-text-secondary mt-1 space-y-1">
+            <p>
+                Runs <span class="font-mono">zig build &lt;these&gt;</span> in the checkout with the Zig version it pins (downloaded once), then builds the
+                grammar library from the xgrammar tag it pins. The server must land in <span class="font-mono">zig-out/native</span> (CUDA,
+                <span class="font-mono">-Dgpu=sm_NN</span>), <span class="font-mono">zig-out/native-hip</span> (HIP, <span class="font-mono">native-hip -Dhip=true -Dhip-arch=gfxNNNN</span>)
+                or <span class="font-mono">zig-out/xpu</span> (XPU, <span class="font-mono">xpu-native</span>) — the backend above picks which.
+            </p>
+            <p>
+                Filled in when left out: <span class="font-mono">-Dnvcc</span> from the installed CUDA Toolkit, <span class="font-mono">-Dhipcc</span> from the HIP SDK / ROCm,
+                <span class="font-mono">-Docloc</span> and the nGEN headers for XPU. On Windows a CUDA build runs under Visual Studio's <span class="font-mono">vcvars64.bat</span>
+                unless an environment setup command is set below. XPU builds only on Linux.
+            </p>
+        </div>
     </div>
 
-    <details class="rounded-lg border border-gray-600/30 bg-cyber-bg-dark/40 group">
+    <details data-cmake-only class="@(zig ? "hidden" : "") rounded-lg border border-gray-600/30 bg-cyber-bg-dark/40 group">
         <summary class="cursor-pointer px-4 py-2.5 text-sm font-medium text-text-secondary hover:text-neon-cyan transition-colors [&::-webkit-details-marker]:hidden flex items-center gap-2">
             <svg class="w-4 h-4 group-open:rotate-90 transition-transform" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
             Upstream build reference
@@ -76,7 +92,7 @@
         </div>
     </details>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div data-cmake-only class="@(zig ? "hidden" : "") grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
             <label class="@label" asp-for="Input.CMakeGenerator">CMake generator (optional)</label>
             <input class="@input" asp-for="Input.CMakeGenerator" placeholder="Ninja" />
@@ -89,9 +105,9 @@
     <div>
         <label class="@label" asp-for="Input.EnvironmentSetupCommand">Environment setup command (optional)</label>
         <input class="@input font-mono text-xs" asp-for="Input.EnvironmentSetupCommand" placeholder="&quot;C:\Program Files (x86)\Intel\oneAPI\setvars.bat&quot; intel64" />
-        <p class="text-xs text-text-secondary mt-1">Sourced before git/cmake so toolchain vars (e.g. Intel oneAPI) are in scope.</p>
+        <p class="text-xs text-text-secondary mt-1">Sourced before git and the build so toolchain vars (e.g. Intel oneAPI, MSVC's vcvars64.bat) are in scope.</p>
     </div>
-    <div>
+    <div data-cmake-only class="@(zig ? "hidden" : "")">
         <label class="@label" asp-for="Input.ExtraArtifactGlobsText">Extra artifact globs (one per line, relative to the build dir)</label>
         <textarea class="@input font-mono text-xs" rows="2" asp-for="Input.ExtraArtifactGlobsText"></textarea>
     </div>
@@ -125,12 +141,22 @@
             const engineSelect = document.getElementById('Input_Engine');
             const repoField = document.getElementById('Input_GitRepoUrl');
 
-            // Switching engine swaps the repo URL too — unless it's been changed to a fork.
+            // Switching engine swaps the repo URL and ref too — unless they've been changed to a fork / own ref.
             if (engineSelect && repoField) {
+                const refField = document.getElementById('Input_GitRef');
                 const defaults = [...engineSelect.options].map(o => o.dataset.repo);
+                const refDefaults = [...engineSelect.options].map(o => o.dataset.ref);
+                const argsLabel = document.getElementById('args-label');
                 engineSelect.addEventListener('change', () => {
+                    const opt = engineSelect.selectedOptions[0];
                     if (!repoField.value.trim() || defaults.includes(repoField.value.trim()))
-                        repoField.value = engineSelect.selectedOptions[0].dataset.repo;
+                        repoField.value = opt.dataset.repo;
+                    if (refField && (!refField.value.trim() || refDefaults.includes(refField.value.trim())))
+                        refField.value = opt.dataset.ref;
+                    const isZig = opt.dataset.zig === 'true';
+                    document.querySelectorAll('[data-cmake-only]').forEach(el => el.classList.toggle('hidden', isZig));
+                    document.getElementById('zig-help')?.classList.toggle('hidden', !isZig);
+                    if (argsLabel) argsLabel.textContent = isZig ? argsLabel.dataset.zig : argsLabel.dataset.cmake;
                 });
             }
             const loadBtn = document.getElementById('ref-load');

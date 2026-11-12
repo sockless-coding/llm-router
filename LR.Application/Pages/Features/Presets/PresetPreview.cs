@@ -78,6 +78,9 @@ public static class PresetPreview
         if (engine == ServerEngine.Vllm)
             return BuildVllm(preset);
 
+        if (engine == ServerEngine.TensorFold)
+            return BuildTensorFold(preset);
+
         var args = new LlamaCppArgBuilder { Port = 8080 }.Build(preset);
         var commandLine = "llama-server " + string.Join(' ', args.Select(QuoteIfNeeded));
 
@@ -135,6 +138,35 @@ public static class PresetPreview
         args.AddRange(["--host", "127.0.0.1", "--port", "<port>"]);
         var exports = string.Concat(environment.Select(e => $"{e.Key}={QuoteIfNeeded(e.Value)} "));
         return new Result(exports + "vllm " + string.Join(' ', args.Select(QuoteIfNeeded)), args);
+    }
+
+    /// <summary>
+    /// A TensorFold preset: the pull a repo id gets first (on Linux and macOS), its environment, then the
+    /// <c>serve</c> launch (the port is assigned at start).
+    /// </summary>
+    private static Result BuildTensorFold(ModelPreset preset)
+    {
+        List<string> args;
+        Dictionary<string, string> environment;
+        try
+        {
+            args = TensorFoldPresetSettings.ServeArgs(preset);
+            environment = TensorFoldPresetSettings.EnvironmentOf(preset);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new Result(ex.Message, Array.Empty<string>());
+        }
+
+        args.AddRange(["--host", "127.0.0.1", "--port", "<port>"]);
+        var pull = TensorFoldPresetSettings.PullRef(preset) is { } pullRef
+            ? (TensorFoldPresetSettings.PullMode(preset) == TensorFoldPresetSettings.PullAlways
+                ? "# every start: fetch or check the model\n"
+                : "# first start (when it isn't in the Hugging Face cache): download the model\n")
+              + $"tensorfold-native pull {QuoteIfNeeded(pullRef)}\n"
+            : "";
+        var exports = string.Concat(environment.Select(e => $"{e.Key}={QuoteIfNeeded(e.Value)} "));
+        return new Result(pull + exports + "tensorfold-native " + string.Join(' ', args.Select(QuoteIfNeeded)), args);
     }
 
     /// <summary>A stable-diffusion.cpp preset: the <c>sd-server</c> launch (the port is assigned at start).</summary>

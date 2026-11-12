@@ -118,6 +118,14 @@ public class HuggingFaceClient : IHuggingFaceClient
         return resolvedSha ?? (IsCommitSha(revision) ? revision : null);
     }
 
+    public async Task<string?> GetFileTextAsync(string repoId, string filename, string revision = "main", CancellationToken ct = default)
+    {
+        var url = $"{BaseUrl}/{EscapeRepoId(repoId)}/resolve/{Uri.EscapeDataString(revision)}/{EscapeFilePath(filename)}";
+        using var request = await CreateRequestAsync(HttpMethod.Get, url, ct);
+        using var response = await _httpClient.SendAsync(request, ct);
+        return response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync(ct) : null;
+    }
+
     private async Task<HttpRequestMessage> CreateRequestAsync(HttpMethod method, string url, CancellationToken ct)
     {
         var request = new HttpRequestMessage(method, url);

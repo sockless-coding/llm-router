@@ -62,6 +62,7 @@ public class ModelDownloadService
                 Id = Guid.NewGuid(),
                 Name = name ?? DefaultName(repoId, filename),
                 FilePath = destinationPath,
+                Format = ModelLibraryManager.FormatOfFile(destinationPath),
                 Source = ModelSource.HuggingFace,
                 Status = ModelStatus.Downloading,
                 HfRepoId = repoId,
@@ -82,6 +83,52 @@ public class ModelDownloadService
     }
 
     /// <summary>
+    /// Downloads a whole Hugging Face checkpoint repo (config, tokenizer, safetensors shards) into one
+    /// folder under the library root, as one <see cref="ModelFormat.Checkpoint"/> entry. Checks up front
+    /// that the repo is a checkpoint. Returns the model's ID immediately.
+    /// </summary>
+    public async Task<Guid> StartCheckpointDownloadAsync(string repoId, string? name, CancellationToken ct = default)
+    {
+        var root = (await _settings.GetAsync()).RootFolder;
+        if (string.IsNullOrWhiteSpace(root))
+            throw new InvalidOperationException("Set a model library root folder before downloading models.");
+
+        var detail = await _hfClient.GetRepoDetailAsync(repoId, ct)
+            ?? throw new InvalidOperationException($"{repoId} wasn't found on Hugging Face (or is gated: add a token in the library settings).");
+        if (CheckpointDownload.Select(detail.Siblings) is null)
+            throw new InvalidOperationException($"{repoId} isn't a checkpoint: it needs a config.json and .safetensors weights at its top level.");
+
+        var folder = CheckpointDownload.FolderFor(root, repoId);
+        Guid modelId;
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
+            if (await context.LocalModels.AnyAsync(m => m.AgentId == null && m.FilePath == folder, ct))
+                throw new InvalidOperationException($"{repoId} is already in the library ({folder}). Use Check Update on it instead.");
+
+            var model = new LocalModel
+            {
+                Id = Guid.NewGuid(),
+                Name = string.IsNullOrWhiteSpace(name) ? repoId[(repoId.IndexOf('/') + 1)..] : name.Trim(),
+                FilePath = folder,
+                Format = ModelFormat.Checkpoint,
+                Source = ModelSource.HuggingFace,
+                Status = ModelStatus.Downloading,
+                HfRepoId = repoId,
+                HfRevision = detail.Sha,
+            };
+            context.LocalModels.Add(model);
+            await context.SaveChangesAsync(ct);
+            modelId = model.Id;
+        }
+
+        var cts = new CancellationTokenSource();
+        _activeDownloads[modelId] = cts;
+        _ = Task.Run(() => RunCheckpointDownloadAsync(modelId, repoId, folder, cts.Token));
+        return modelId;
+    }
+
+    /// <summary>
     /// Re-downloads a Hugging Face model's file to its existing <see cref="LocalModel.FilePath"/>,
     /// fetching the repo's current default-branch revision. Updates the same <see cref="LocalModel"/>
     /// row in place (same Id and path) rather than creating a new one, so presets that reference it
@@ -90,18 +137,20 @@ public class ModelDownloadService
     public async Task<Guid> StartUpdateAsync(Guid modelId)
     {
         string repoId, filename, destinationPath;
+        bool checkpoint;
         using (var scope = _scopeFactory.CreateScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
             var model = await context.LocalModels.FindAsync(modelId)
                 ?? throw new InvalidOperationException("Model not found.");
-            if (model.Source != ModelSource.HuggingFace || string.IsNullOrEmpty(model.HfRepoId) || string.IsNullOrEmpty(model.HfFilename))
+            checkpoint = model.Format == ModelFormat.Checkpoint;
+            if (model.Source != ModelSource.HuggingFace || string.IsNullOrEmpty(model.HfRepoId) || (!checkpoint && string.IsNullOrEmpty(model.HfFilename)))
                 throw new InvalidOperationException("Not a Hugging Face model.");
             if (model.Status == ModelStatus.Downloading)
                 throw new InvalidOperationException("Already downloading.");
 
             repoId = model.HfRepoId;
-            filename = model.HfFilename;
+            filename = model.HfFilename ?? "";
             destinationPath = model.FilePath;
 
             model.Status = ModelStatus.Downloading;
@@ -112,9 +161,85 @@ public class ModelDownloadService
         var cts = new CancellationTokenSource();
         _activeDownloads[modelId] = cts;
 
-        _ = Task.Run(() => RunDownloadAsync(modelId, repoId, filename, "main", destinationPath, cts.Token));
+        _ = checkpoint
+            ? Task.Run(() => RunCheckpointDownloadAsync(modelId, repoId, destinationPath, cts.Token))
+            : Task.Run(() => RunDownloadAsync(modelId, repoId, filename, "main", destinationPath, cts.Token));
 
         return modelId;
+    }
+
+    /// <summary>
+    /// Fetches every checkpoint file of the repo's current revision into <paramref name="folder"/>, skipping
+    /// files the folder's manifest says are already there unchanged, so a cancelled download resumes and an
+    /// update only fetches what changed. Every file is pinned to the revision the repo listing reported.
+    /// </summary>
+    private async Task RunCheckpointDownloadAsync(Guid modelId, string repoId, string folder, CancellationToken ct)
+    {
+        try
+        {
+            var detail = await _hfClient.GetRepoDetailAsync(repoId, ct)
+                ?? throw new InvalidOperationException($"{repoId} wasn't found on Hugging Face.");
+            var files = CheckpointDownload.Select(detail.Siblings)
+                ?? throw new InvalidOperationException($"{repoId} no longer looks like a checkpoint (no config.json and .safetensors weights).");
+            var revision = detail.Sha ?? "main";
+
+            Directory.CreateDirectory(folder);
+            var manifest = CheckpointDownload.ReadManifest(folder);
+            var pending = files.Where(f => !CheckpointDownload.IsCurrent(folder, f, manifest)).ToList();
+            long? total = files.All(f => f.SizeBytes is not null) ? files.Sum(f => f.SizeBytes!.Value) : null;
+            long done = files.Except(pending).Sum(f => f.SizeBytes ?? 0);
+
+            foreach (var file in pending)
+            {
+                long offset = done;
+                var progress = new Progress<DownloadProgress>(p =>
+                {
+                    p.ModelId = modelId;
+                    p.BytesReceived += offset;
+                    p.TotalBytes = total ?? p.TotalBytes;
+                    _ = _progressPublisher.PublishAsync(p);
+                });
+                var target = Path.GetFullPath(Path.Combine(folder, file.Filename));
+                if (!target.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"{repoId} lists a file outside its folder ({file.Filename}).");
+
+                await _hfClient.DownloadFileAsync(repoId, file.Filename, revision, target, progress, ct);
+                if (file.BlobId is not null)
+                {
+                    manifest[file.Filename] = file.BlobId;
+                    CheckpointDownload.WriteManifest(folder, manifest);
+                }
+                done += file.SizeBytes ?? new FileInfo(target).Length;
+            }
+
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<LRDbContext>();
+            var library = scope.ServiceProvider.GetRequiredService<IModelLibrary>();
+            if (await context.LocalModels.FindAsync(modelId) is { } model)
+            {
+                model.HfRevision = detail.Sha ?? model.HfRevision;
+                await context.SaveChangesAsync();
+            }
+
+            // Reads config.json, sizes the folder and flips Status -> Ready.
+            await library.RefreshMetadataAsync(modelId);
+            await _progressPublisher.PublishAsync(new DownloadProgress { ModelId = modelId, Status = "completed" });
+        }
+        catch (OperationCanceledException)
+        {
+            await MarkErrorAsync(modelId, "Download cancelled. Downloading again resumes where it stopped.");
+            await _progressPublisher.PublishAsync(new DownloadProgress { ModelId = modelId, Status = "error", ErrorMessage = "Cancelled" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to download checkpoint {RepoId}.", repoId);
+            await MarkErrorAsync(modelId, ex.Message);
+            await _progressPublisher.PublishAsync(new DownloadProgress { ModelId = modelId, Status = "error", ErrorMessage = ex.Message });
+        }
+        finally
+        {
+            _activeDownloads.TryRemove(modelId, out _);
+        }
     }
 
     /// <summary>

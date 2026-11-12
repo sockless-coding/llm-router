@@ -59,10 +59,27 @@ public class ModelsActionsModel : PageModel
             "refresh" => await HandleRefreshAsync(),
             "delete" => await HandleDeleteAsync(),
             "download" => await HandleDownloadAsync(),
+            "downloadcheckpoint" => await HandleDownloadCheckpointAsync(),
             "checkupdate" => await HandleCheckUpdateAsync(),
             "update" => await HandleUpdateAsync(),
             _ => BadRequest(new { success = false, message = $"Unknown command: {Command}" })
         };
+    }
+
+    /// <summary>Downloads a whole repo as a checkpoint folder (TensorFold, vLLM).</summary>
+    private async Task<IActionResult> HandleDownloadCheckpointAsync()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(RepoId))
+                return JsonResult(new { success = false, message = "A repo id is required." });
+            var id = await _downloadService.StartCheckpointDownloadAsync(RepoId.Trim(), string.IsNullOrWhiteSpace(Name) ? null : Name, HttpContext.RequestAborted);
+            return JsonResult(new { success = true, modelId = id, message = "Download started." });
+        }
+        catch (Exception ex)
+        {
+            return JsonResult(new { success = false, message = ex.Message });
+        }
     }
 
     private async Task<IActionResult> HandleImportAsync()

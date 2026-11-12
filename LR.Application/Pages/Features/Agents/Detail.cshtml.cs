@@ -62,12 +62,12 @@ public class AgentDetailModel : PageModel
         RouterLibrary = (await _context.LocalModels.AsNoTracking().Where(m => m.AgentId == null && m.Status == ModelStatus.Ready).ToListAsync())
             .OrderBy(m => m.Name).ToList();
         Recipes = await _context.LlamaCppBuildRecipes.AsNoTracking()
-            .Where(r => r.Engine == ServerEngine.LlamaCpp || r.Engine == ServerEngine.StableDiffusionCpp)
+            .Where(r => r.Engine == ServerEngine.LlamaCpp || r.Engine == ServerEngine.StableDiffusionCpp || r.Engine == ServerEngine.TensorFold)
             .OrderBy(r => r.Name).ToListAsync();
 
         var os = agent.IsWindows ? "win" : string.Equals(agent.Os, "macos", StringComparison.OrdinalIgnoreCase) ? "macos" : "ubuntu";
         var arch = agent.Arch?.ToLowerInvariant() is "arm64" ? "arm64" : "x64";
-        foreach (var engine in new[] { ServerEngine.LlamaCpp, ServerEngine.StableDiffusionCpp })
+        foreach (var engine in new[] { ServerEngine.LlamaCpp, ServerEngine.StableDiffusionCpp, ServerEngine.TensorFold })
         {
             var profile = EngineReleaseProfile.For(engine)!;
             ReleaseBackends[engine] = profile.CandidateBackends.Where(b => profile.PrimaryAssetPattern(b, os, arch) is not null).ToList();
@@ -82,6 +82,7 @@ public class AgentDetailModel : PageModel
         ServerEngine.LlamaCpp => "llama.cpp",
         ServerEngine.StableDiffusionCpp => "stable-diffusion.cpp",
         ServerEngine.Vllm => "vLLM",
+        ServerEngine.TensorFold => "TensorFold",
         _ => engine.ToString(),
     };
 }

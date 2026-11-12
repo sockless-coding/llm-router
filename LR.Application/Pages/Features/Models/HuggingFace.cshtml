@@ -4,6 +4,7 @@
 @{
     ViewData["Title"] = "Browse Hugging Face";
     var safetensors = Model.Format == HfModelFormat.Safetensors;
+    var checkpoint = Model.Format == HfModelFormat.Checkpoint;
 }
 
 <form id="csrf-form" hidden>@Html.AntiForgeryToken()</form>
@@ -11,7 +12,11 @@
 
 <div class="flex items-center justify-between mb-6">
     <p class="text-text-secondary">
-        @if (safetensors)
+        @if (checkpoint)
+        {
+            @:Search the Hugging Face hub for model checkpoints (config, tokenizer and safetensors weights) and download a whole repo into your library, for TensorFold and vLLM.
+        }
+        else if (safetensors)
         {
             @:Search the Hugging Face hub for safetensors diffusion checkpoints, VAEs and text encoders for stable-diffusion.cpp.
         }
@@ -38,7 +43,7 @@
 
 <div class="bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 mb-6">
     <div class="flex gap-3">
-        <input id="searchQuery" type="text" placeholder="@(safetensors ? "e.g. sdxl, flux, stable-diffusion-v1-5..." : "e.g. llama-3, qwen2.5, mistral...")" value="@Model.PrefillRepoId"
+        <input id="searchQuery" type="text" placeholder="@(checkpoint ? "e.g. Qwen3.8-27B-MLX-4bit, TensorFold/, NVFP4..." : safetensors ? "e.g. sdxl, flux, stable-diffusion-v1-5..." : "e.g. llama-3, qwen2.5, mistral...")" value="@Model.PrefillRepoId"
                class="flex-1 px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all" />
         <button id="searchBtn" type="button" class="px-6 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all font-medium text-sm">
             Search
@@ -54,6 +59,17 @@
         <p class="text-xs text-text-secondary mt-1">Untick to find standalone VAEs and text encoders, which are often untagged. Diffusers-layout repos list each component's files under their subfolders (<span class="font-mono">vae/</span>, <span class="font-mono">text_encoder/</span>, …); stable-diffusion.cpp needs single-file checkpoints or components, not sharded <span class="font-mono">-0000N-of-0000N</span> files.</p>
     }
 </div>
+
+@if (checkpoint)
+{
+    <p class="text-xs text-text-secondary -mt-3 mb-6">
+        Show Files on a repo describes the checkpoint — architecture, quantization, size — and which engines can serve it.
+        It downloads into <span class="font-mono">checkpoints\&lt;owner&gt;_&lt;name&gt;</span> under the library root, as one library entry;
+        a cancelled download resumes, and Check Update fetches only the files that changed.
+        TensorFold serves its own formats (MLX, GPTQ int4, NVFP4, FP8, EXL3…) for the model families in its
+        <a href="https://github.com/ashhart/TensorFold#models" target="_blank" rel="noopener" class="text-neon-cyan/80 hover:text-neon-cyan">model table</a>, and refuses others when the server starts.
+    </p>
+}
 
 <div id="results" class="space-y-3"></div>
 
@@ -149,6 +165,10 @@
             const data = await resp.json();
 
             container.innerHTML = '';
+            if (format === 'Checkpoint' && resp.ok && data.checkpoint) {
+                container.appendChild(buildCheckpoint(repoId, data.checkpoint));
+                return;
+            }
             if (!resp.ok || data.error) {
                 const p = document.createElement('p');
                 p.className = 'text-xs text-text-secondary';
@@ -208,6 +228,53 @@
                 }
                 container.appendChild(row);
             }
+        }
+
+        // A whole repo as one checkpoint: what it is, which engines serve it, and one Download button.
+        function buildCheckpoint(repoId, cp) {
+            const box = document.createElement('div');
+            box.className = 'border-t border-gray-700/30 pt-3 space-y-2';
+            box.innerHTML = `
+                <dl class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-sm">
+                    <dt class="text-text-secondary">Architecture</dt><dd class="text-text-primary font-mono cp-arch"></dd>
+                    <dt class="text-text-secondary">Quantization</dt><dd class="text-text-primary cp-quant"></dd>
+                    <dt class="text-text-secondary">Context</dt><dd class="text-text-primary cp-ctx"></dd>
+                    <dt class="text-text-secondary">Download</dt><dd class="text-text-primary cp-size"></dd>
+                </dl>
+                <div class="flex flex-wrap items-center gap-2 text-xs"><span class="text-text-secondary">Engines:</span><span class="cp-engines flex flex-wrap gap-1"></span></div>
+                <div class="flex items-center gap-2 pt-1">
+                    <span class="in-library hidden text-xs px-3 py-1 rounded-md bg-gray-700/30 text-text-secondary"></span>
+                    <button type="button" class="download-btn text-xs px-3 py-1 rounded-md bg-neon-green/10 text-neon-green hover:bg-neon-green/20 transition-all font-medium">Download checkpoint</button>
+                </div>`;
+            box.querySelector('.cp-arch').textContent = [cp.architecture, cp.className].filter(Boolean).join(' · ') || '—';
+            box.querySelector('.cp-quant').textContent = [cp.quantization, cp.parameters].filter(Boolean).join(', ') || '—';
+            box.querySelector('.cp-ctx').textContent = cp.contextLength ? cp.contextLength.toLocaleString() : '—';
+            box.querySelector('.cp-size').textContent = `${formatBytes(cp.sizeBytes)} in ${cp.fileCount} files`;
+            const engines = box.querySelector('.cp-engines');
+            for (const name of cp.engines || []) {
+                const badge = document.createElement('span');
+                badge.className = 'px-2 py-0.5 rounded border border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan';
+                badge.textContent = name;
+                engines.appendChild(badge);
+            }
+            if (cp.inLibrary) {
+                const tag = box.querySelector('.in-library');
+                tag.textContent = `In library as "${cp.inLibrary}"`;
+                tag.classList.remove('hidden');
+                box.querySelector('.download-btn').remove();
+            } else {
+                box.querySelector('.download-btn').addEventListener('click', async function () {
+                    this.disabled = true;
+                    const result = await postAction({ Command: 'DownloadCheckpoint', RepoId: repoId });
+                    if (result.success) {
+                        alert('Download started. Track progress on the Models page.');
+                    } else {
+                        this.disabled = false;
+                        alert(result.message || 'Failed to start download.');
+                    }
+                });
+            }
+            return box;
         }
 
         const ROLE_ORDER = ['Model', 'VAE', 'CLIP-L', 'CLIP-G', 'T5-XXL', 'LLM text encoder', 'Text encoder', 'TAESD', 'LoRA', 'Not loadable on its own'];

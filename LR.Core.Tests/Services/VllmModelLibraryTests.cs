@@ -218,6 +218,9 @@ public sealed class VllmModelLibraryTests : IDisposable
         public Task<IReadOnlyList<HfRepoFile>> ListModelFilesAsync(string repoId, HfModelFormat format, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<HfRepoFile>>([]);
 
+        public Task<string?> GetFileTextAsync(string repoId, string filename, string revision = "main", CancellationToken ct = default) => Task.FromResult<string?>(null);
+
+
         public Task<string?> DownloadFileAsync(string repoId, string filename, string revision, string destinationPath, IProgress<DownloadProgress>? progress, CancellationToken ct = default) =>
             throw new NotSupportedException();
     }

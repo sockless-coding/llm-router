@@ -13,6 +13,7 @@
     bool SdFlag(string key) => bool.TryParse(Sd(key), out var on) && on;
     string Vllm(string key) => Model.ViewModel.EngineSettings.GetValueOrDefault(key) ?? "";
     bool VllmFlag(string key) => bool.TryParse(Vllm(key), out var on) && on;
+    string Tf(string key) => Model.ViewModel.EngineSettings.GetValueOrDefault(key) ?? "";
     // What the model path means differs per engine (a GGUF for llama.cpp, a run config for Strata);
     // the help under the manual path follows the selected server.
     var modelPathHelpJson = System.Text.Json.JsonSerializer.Serialize(
@@ -20,6 +21,9 @@
     ).Replace("</", "<\\/");
     var agentByServerJson = System.Text.Json.JsonSerializer.Serialize(
         Model.Servers.ToDictionary(s => s.Id.ToString(), s => s.AgentId?.ToString() ?? ""));
+    // The library picker offers only models the selected server's engine can run (ModelEngineSupport).
+    var engineByServerJson = System.Text.Json.JsonSerializer.Serialize(
+        Model.Servers.ToDictionary(s => s.Id.ToString(), s => s.Engine.ToString()));
     var inpCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all placeholder-gray-500";
     var selCls = "w-full px-3 py-2 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-magenta focus:ring-1 focus:ring-neon-magenta/30 outline-none transition-all";
     var detectedVarsJson = System.Text.Json.JsonSerializer.Serialize(
@@ -136,6 +140,7 @@
                     {
                         <option value="@m.Id"
                                 data-agent="@(m.AgentId?.ToString() ?? "")"
+                                data-engines="@string.Join(',', LR.Core.Services.ModelEngineSupport.For(m))"
                                 data-arch="@m.Architecture"
                                 data-params="@m.ParameterSize"
                                 data-quant="@m.QuantizationLevel"
@@ -172,10 +177,15 @@
                     const helpByServer = @Html.Raw(modelPathHelpJson);
                     // A server on a remote agent can only use that agent's models (and a local one only local models).
                     const agentByServer = @Html.Raw(agentByServerJson);
+                    const engineByServer = @Html.Raw(engineByServerJson);
                     const filterModelsForServer = () => {
                         const agent = agentByServer[serverSelect.value] || '';
-                        document.querySelectorAll('#model-select option[data-agent], #spec-draft-model-select option[data-agent], #mmproj-select option[data-agent], #sd-model-files option[data-agent]').forEach(opt => {
-                            const foreign = (opt.dataset.agent || '') !== agent;
+                        const engine = engineByServer[serverSelect.value] || '';
+                        document.querySelectorAll('#model-select option[data-agent], #spec-draft-model-select option[data-agent], #mmproj-select option[data-agent], #sd-model-files option[data-agent], #tf-drafter-library option[data-agent]').forEach(opt => {
+                            // The main model must also be one the server's engine runs (a checkpoint for TensorFold, a GGUF for llama.cpp).
+                            // The preset's saved model always stays pickable, so opening it never drops the link.
+                            const wrongEngine = engine && opt.dataset.engines !== undefined && !opt.defaultSelected && !opt.dataset.engines.split(',').includes(engine);
+                            const foreign = (opt.dataset.agent || '') !== agent || wrongEngine;
                             opt.hidden = foreign;
                             opt.disabled = foreign;
                         });
@@ -199,19 +209,21 @@
                         document.querySelectorAll('[id^="section-"]').forEach(el => el.classList.toggle('hidden', !visible(el.id)));
                         document.querySelectorAll('.preset-nav-link').forEach(a => a.classList.toggle('hidden', !visible(a.dataset.section)));
 
-                        // A vLLM model is a Hugging Face id, not a file in the library, so the
-                        // library picker gives way to the plain model field.
+                        // A vLLM model is a Hugging Face id (filled in by a recipe), so its library picker gives way
+                        // to the plain model field. TensorFold takes either: a checkpoint from the library, or a repo id.
                         const isVllm = own === 'section-vllm';
+                        const isTensorFold = own === 'section-tensorfold';
+                        const byModelId = isVllm || isTensorFold;
                         const modelSelect = document.getElementById('model-select');
                         const pathInput = document.getElementById('ViewModel_ModelPath');
                         document.getElementById('model-library-field').classList.toggle('hidden', isVllm);
                         document.getElementById('model-path-summary').classList.toggle('hidden', isVllm);
-                        pathInput.placeholder = isVllm ? 'Qwen/Qwen3-8B, or a model folder (filled in by applying a recipe)' : '/path/to/model.gguf (overrides the model selected above)';
-                        if (isVllm) {
-                            if (modelSelect.value) { modelSelect.value = ''; modelSelect.dispatchEvent(new Event('change', { bubbles: true })); }
-                            document.getElementById('model-path-details').open = true;
-                            window.__vllmRecipesActivate?.();
-                        }
+                        pathInput.placeholder = isVllm ? 'Qwen/Qwen3-8B, or a model folder (filled in by applying a recipe)'
+                            : isTensorFold ? 'TensorFold/Qwen3.8-27B-MLX-4bit, owner/name@revision, or a checkpoint folder'
+                            : '/path/to/model.gguf (overrides the model selected above)';
+                        if (isVllm && modelSelect.value) { modelSelect.value = ''; modelSelect.dispatchEvent(new Event('change', { bubbles: true })); }
+                        if (byModelId && !modelSelect.value) document.getElementById('model-path-details').open = true;
+                        if (isVllm) window.__vllmRecipesActivate?.();
                     };
                     serverSelect.addEventListener('change', update);
                     // Called again once the rest of the form and the section nav exist (end of _PresetFormNav).
@@ -660,6 +672,139 @@
                     });
                 })();
             </script>
+        </div>
+
+        <!-- ==================== TENSORFOLD (TensorFold servers only) ==================== -->
+        <div id="section-tensorfold" class="hidden bg-cyber-card rounded-xl p-6 border border-neon-cyan/10 space-y-6 scroll-mt-24">
+            <div class="space-y-1">
+                <h2 class="text-lg font-semibold text-text-primary">TensorFold</h2>
+                <p class="text-xs text-text-secondary">
+                    How <span class="font-mono">tensorfold-native serve</span> runs this preset's model. Leave a setting blank for TensorFold's default.
+                    TensorFold serves its own checkpoint formats (MLX 4/6/8-bit, NVFP4, FP8, EXL3…) for the model families it supports —
+                    see its <a href="https://github.com/ashhart/TensorFold#models" target="_blank" rel="noopener" class="text-neon-cyan/80 hover:text-neon-cyan">model table</a>
+                    for the repo ids and the hardware each was checked on.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="tf-pull" class="block text-sm font-medium text-text-secondary mb-1">Download the model</label>
+                    <select id="tf-pull" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.Pull]" class="@selCls">
+                        <option value="">When it isn't in the Hugging Face cache yet</option>
+                        <option value="always" selected="@(Tf(TensorFoldPresetSettings.Pull) == "always")">At every start (resumes and checks it)</option>
+                        <option value="never" selected="@(Tf(TensorFoldPresetSettings.Pull) == "never")">Never (pulled by hand)</option>
+                    </select>
+                    <p class="text-xs text-text-secondary mt-1">Runs <span class="font-mono">tensorfold-native pull</span> for a repo id on the server's machine; a first start can take a long time. Not on Windows, where you pull it yourself.</p>
+                </div>
+                <div>
+                    <label for="tf-context" class="block text-sm font-medium text-text-secondary mb-1">Context length</label>
+                    <input id="tf-context" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.Context]" value="@Tf(TensorFoldPresetSettings.Context)"
+                           inputmode="numeric" placeholder="the model's default" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1"><span class="font-mono">--context</span>: prompt plus reply tokens. The model's window and memory checks still apply.</p>
+                </div>
+                <div>
+                    <label for="tf-parallel" class="block text-sm font-medium text-text-secondary mb-1">Parallel requests</label>
+                    <input id="tf-parallel" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.Parallel]" value="@Tf(TensorFoldPresetSettings.Parallel)"
+                           placeholder="auto (up to 8, as memory allows)" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1"><span class="font-mono">--parallel</span>. A number TensorFold can't fit is refused at start. The router sends at most this many at once.</p>
+                </div>
+                <div>
+                    <label for="tf-maxtokens" class="block text-sm font-medium text-text-secondary mb-1">Default reply limit</label>
+                    <input id="tf-maxtokens" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.MaxTokens]" value="@Tf(TensorFoldPresetSettings.MaxTokens)"
+                           type="number" min="1" placeholder="4096" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1"><span class="font-mono">--max-tokens</span>, for requests that set none.</p>
+                </div>
+                <div>
+                    <label for="tf-thinking" class="block text-sm font-medium text-text-secondary mb-1">Thinking</label>
+                    <select id="tf-thinking" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.Thinking]" class="@selCls">
+                        <option value="">The chat template's default</option>
+                        <option value="on" selected="@(Tf(TensorFoldPresetSettings.Thinking) == "on")">On (--thinking)</option>
+                        <option value="off" selected="@(Tf(TensorFoldPresetSettings.Thinking) == "off")">Off (--no-thinking)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="tf-effort" class="block text-sm font-medium text-text-secondary mb-1">Reasoning effort</label>
+                    <select id="tf-effort" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.ReasoningEffort]" class="@selCls">
+                        <option value="">The template's default</option>
+                        @foreach (var effort in TensorFoldPresetSettings.ReasoningEffortValues)
+                        {
+                            <option value="@effort" selected="@(Tf(TensorFoldPresetSettings.ReasoningEffort) == effort)">@effort</option>
+                        }
+                    </select>
+                    <p class="text-xs text-text-secondary mt-1"><span class="font-mono">--reasoning-effort</span>, for templates that take one.</p>
+                </div>
+                <div>
+                    <label for="tf-drafter-library" class="block text-sm font-medium text-text-secondary mb-1">Drafter</label>
+                    @{
+                        var drafterValue = Tf(TensorFoldPresetSettings.Drafter);
+                        var libraryCheckpoints = Model.Models.Where(m => m.Format == LR.Core.Models.ModelFormat.Checkpoint).ToList();
+                    }
+                    <select id="tf-drafter-library" class="@selCls mb-2" aria-label="Drafter from the model library">
+                        <option value="">— From the model library —</option>
+                        @foreach (var m in libraryCheckpoints)
+                        {
+                            <option value="@m.FilePath" data-agent="@(m.AgentId?.ToString() ?? "")"
+                                    selected="@(string.Equals(m.FilePath, drafterValue, StringComparison.OrdinalIgnoreCase))">@m.Name</option>
+                        }
+                    </select>
+                    <input id="tf-drafter" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.Drafter]" value="@drafterValue"
+                           placeholder="a library checkpoint (above), a folder, or a repo id in the Hugging Face cache" class="@inpCls font-mono text-sm" />
+                    <p class="text-xs text-text-secondary mt-1">
+                        <span class="font-mono">--drafter</span>: an external drafter for speculative decoding (e.g. z-lab/Qwen3.8-27B-DFlash2).
+                        Picking one from the library uses its folder; in the Intel XPU Docker image it's mounted read-only. A repo id is looked up in the Hugging Face cache and isn't downloaded.
+                    </p>
+                    <script>
+                        (() => {
+                            const pick = document.getElementById('tf-drafter-library');
+                            const field = document.getElementById('tf-drafter');
+                            pick.addEventListener('change', () => { if (pick.value) { field.value = pick.value; field.dispatchEvent(new Event('input', { bubbles: true })); } });
+                            field.addEventListener('input', () => { if (pick.value && pick.value !== field.value) pick.value = ''; });
+                        })();
+                    </script>
+                </div>
+                <div>
+                    <label for="tf-vram" class="block text-sm font-medium text-text-secondary mb-1">Memory needed (GB)</label>
+                    <input id="tf-vram" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.VramGb]" value="@Tf(TensorFoldPresetSettings.VramGb)"
+                           inputmode="decimal" placeholder="for memory groups" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1">What the model takes on the device, for memory-group budgeting. The model table lists most.</p>
+                </div>
+                <div>
+                    <label for="tf-prompt-cache" class="block text-sm font-medium text-text-secondary mb-1">Prompt cache (GiB)</label>
+                    <input id="tf-prompt-cache" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.PromptCacheGib]" value="@Tf(TensorFoldPresetSettings.PromptCacheGib)"
+                           inputmode="decimal" placeholder="2 (0 turns it off)" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1">
+                        <span class="font-mono">--prompt-cache-gib</span>: saved prompt states, so a follow-up turn skips re-reading the conversation.
+                        On Intel XPU it takes GPU memory from the context: lower it when a long context doesn't fit.
+                    </p>
+                </div>
+                <div>
+                    <label for="tf-wddm-chunk" class="block text-sm font-medium text-text-secondary mb-1">Intel WDDM chunk size (MB)</label>
+                    <input id="tf-wddm-chunk" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.WddmChunkMb]" value="@Tf(TensorFoldPresetSettings.WddmChunkMb)"
+                           type="number" min="1" placeholder="the driver's default" class="@inpCls" />
+                    <p class="text-xs text-text-secondary mt-1">
+                        Intel XPU under WSL/Docker only: sets <span class="font-mono">@TensorFoldPresetSettings.WddmChunkVariable</span>.
+                        Try 4096 if loading aborts in <span class="font-mono">wddm_memory_manager.cpp</span>.
+                    </p>
+                </div>
+            </div>
+
+            <label class="flex items-start gap-3 text-sm text-text-secondary">
+                <input type="checkbox" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.Vision]" value="true" checked="@(Tf(TensorFoldPresetSettings.Vision) == "true")" class="mt-1" />
+                <span><span class="font-medium">Images</span><span class="block text-xs"><span class="font-mono">--vision</span>, for models with a vision tower. On CUDA it needs NVIDIA's cuBLASLt runtime.</span></span>
+            </label>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="tf-extra" class="block text-sm font-medium text-text-secondary mb-1">Extra arguments</label>
+                    <textarea id="tf-extra" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.ExtraArgs]" rows="6" placeholder="--temperature&#10;0.6&#10;--compact-at&#10;0.9" class="@inpCls font-mono text-sm">@Tf(TensorFoldPresetSettings.ExtraArgs)</textarea>
+                    <p class="text-xs text-text-secondary mt-1">One token per line, no quoting needed. The router sets the host, port and served model name.</p>
+                </div>
+                <div>
+                    <label for="tf-env" class="block text-sm font-medium text-text-secondary mb-1">Environment variables</label>
+                    <textarea id="tf-env" name="ViewModel.EngineSettings[@TensorFoldPresetSettings.Environment]" rows="6" placeholder="HF_HOME=/data/huggingface" class="@inpCls font-mono text-sm">@Tf(TensorFoldPresetSettings.Environment)</textarea>
+                    <p class="text-xs text-text-secondary mt-1"><span class="font-mono">NAME=value</span> per line. The Hugging Face token from the model library settings is passed on for gated checkpoints.</p>
+                </div>
+            </div>
         </div>
 
         <!-- ==================== DIFFUSION (stable-diffusion.cpp servers only) ==================== -->

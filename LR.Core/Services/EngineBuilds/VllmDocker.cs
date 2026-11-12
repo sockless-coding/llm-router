@@ -1,6 +1,4 @@
-using System.ComponentModel;
 using System.Globalization;
-using System.Text.RegularExpressions;
 
 using LR.Core.Models;
 
@@ -18,7 +16,7 @@ namespace LR.Core.Services.EngineBuilds;
 /// <c>/usr/lib/wsl/lib</c>, which holds NVIDIA's libraries, so vLLM and Triton both see CUDA next to XPU.
 /// </para>
 /// </summary>
-public static partial class VllmDocker
+public static class VllmDocker
 {
     /// <summary>The vLLM in <see cref="BaseImage"/>; the version every install of this backend has.</summary>
     public const string PinnedVersion = "0.33.0";
@@ -28,23 +26,18 @@ public static partial class VllmDocker
     /// <summary>The image installs build. Fixed, so a server keeps working across an update of the install it's bound to.</summary>
     public const string ImageTag = "llm-router/vllm-xpu:managed";
 
-    public const string Executable = "docker.exe";
+    public const string Executable = DockerDesktop.Executable;
 
     /// <summary>Hugging Face's cache, kept across containers so a model is only downloaded once.</summary>
-    public const string HuggingFaceVolume = "llm-router-hf-cache";
+    public const string HuggingFaceVolume = DockerDesktop.HuggingFaceVolume;
 
     /// <summary>Where a preset's local model folder appears inside the container.</summary>
-    public const string ContainerModelPath = "/model";
+    public const string ContainerModelPath = DockerDesktop.ContainerModelPath;
 
     /// <summary>Tells a Docker install from a venv by name alone, since the router can't look inside a folder on an agent.</summary>
     private const string FolderSuffix = "-xpu-docker";
 
-    /// <summary>Only Docker Desktop's Linux engine exposes <c>/dev/dxg</c>, and a fresh install can leave the CLI on another context.</summary>
-    private static readonly string[] Context = ["--context", "desktop-linux"];
-
-    private const string DockerUnusable =
-        "vLLM on an Intel GPU runs in Docker Desktop, which isn't usable from this process: {0} Install Docker Desktop, select its Linux/WSL 2 engine and " +
-        "wait until it reports that it's running. The account running LLM Router (or the agent) must be able to use it, so not a service under LocalSystem.";
+    private static readonly string[] Context = DockerDesktop.Context;
 
     public static string FolderName => $"vllm-v{PinnedVersion}{FolderSuffix}";
 
@@ -66,16 +59,7 @@ public static partial class VllmDocker
     /// The host folder to mount for a model, or null for a Hugging Face id, which the container downloads.
     /// Throws for a network path, which Docker Desktop can't mount.
     /// </summary>
-    public static string? ModelFolder(string model)
-    {
-        var trimmed = model.Trim();
-        if (trimmed.StartsWith(@"\\", StringComparison.Ordinal) || trimmed.StartsWith("//", StringComparison.Ordinal))
-            throw new InvalidOperationException($"Docker Desktop can't mount the model folder '{trimmed}'. Use a folder on a local drive, like D:\\models\\qwen, or a Hugging Face id.");
-        if (!WindowsDriveRegex().IsMatch(trimmed))
-            return null;
-        var withoutSlash = trimmed.TrimEnd('/', '\\');
-        return withoutSlash.Length == 2 ? trimmed : withoutSlash;
-    }
+    public static string? ModelFolder(string model) => DockerDesktop.ModelFolder(model);
 
     /// <summary>One container per server, named after its port so a leftover can be found again after a crash.</summary>
     public static string ContainerName(int port) => "llm-router-vllm-" + port.ToString(CultureInfo.InvariantCulture);
@@ -164,13 +148,7 @@ public static partial class VllmDocker
         return reader.ReadToEnd().ReplaceLineEndings("\n");
     }
 
-    /// <summary>What the container needs to reach the GPU through WSL. No <c>--privileged</c>.</summary>
-    private static readonly string[] GpuArgs =
-    [
-        "--device", "/dev/dxg", "--shm-size", "16g",
-        "--volume", "/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro",
-        "--volume", "/usr/lib/wsl/drivers:/usr/lib/wsl/drivers:ro",
-    ];
+    private static readonly string[] GpuArgs = DockerDesktop.GpuArgs;
 
     /// <summary>Writes the build context, builds the image and checks it can use the GPU. Doing it again is how an install is updated.</summary>
     public static async Task<VllmInstallResult> InstallAsync(VllmInstallRequest request, BuildProgressSink sink, CancellationToken ct)
@@ -180,9 +158,7 @@ public static partial class VllmDocker
         ResolveTag(request.Version);
 
         await sink.PhaseAsync("docker", "Checking Docker Desktop…");
-        var (check, checkOutput) = await RunDockerAsync([.. Context, "info", "--format", "{{.ServerVersion}}"], null, ct);
-        if (check.ExitCode != 0)
-            throw new InvalidOperationException(string.Format(CultureInfo.InvariantCulture, DockerUnusable, Summary(checkOutput)));
+        await DockerDesktop.EnsureUsableAsync("vLLM", ct);
 
         Directory.CreateDirectory(request.OutputDir);
         await File.WriteAllTextAsync(Path.Combine(request.OutputDir, "Dockerfile"), Dockerfile, ct);
@@ -234,35 +210,12 @@ public static partial class VllmDocker
         return args;
     }
 
-    private static async Task<long?> ImageSizeAsync(CancellationToken ct)
-    {
-        var (result, output) = await RunDockerAsync([.. Context, "image", "inspect", "--format", "{{.Size}}", ImageTag], null, ct);
-        return result.ExitCode == 0 && long.TryParse(output.LastOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var size) ? size : null;
-    }
+    private static Task<long?> ImageSizeAsync(CancellationToken ct) => DockerDesktop.ImageSizeAsync("vLLM", ImageTag, ct);
 
-    private static async Task<(ProcessRunner.Result Result, List<string> Output)> RunDockerAsync(IReadOnlyList<string> args, Func<string, Task>? onLine, CancellationToken ct)
-    {
-        var output = new List<string>();
-        ProcessRunner.Result result;
-        try
-        {
-            result = await ProcessRunner.RunAsync(Executable, args, Path.GetTempPath(), null, async line =>
-            {
-                if (string.IsNullOrWhiteSpace(line)) return;
-                output.Add(line);
-                if (onLine is not null) await onLine(line);
-            }, ct);
-        }
-        catch (Win32Exception ex)
-        {
-            throw new InvalidOperationException(string.Format(CultureInfo.InvariantCulture, DockerUnusable, $"{Executable} couldn't be started ({ex.Message})."));
-        }
+    private static Task<(ProcessRunner.Result Result, List<string> Output)> RunDockerAsync(IReadOnlyList<string> args, Func<string, Task>? onLine, CancellationToken ct) =>
+        DockerDesktop.RunAsync("vLLM", args, onLine, ct);
 
-        if (result.Cancelled) throw new OperationCanceledException(ct);
-        return (result, output);
-    }
-
-    private static string Summary(List<string> output) => output.Count == 0 ? "it reported nothing." : string.Join(" | ", output.TakeLast(6));
+    private static string Summary(List<string> output) => DockerDesktop.Summary(output);
 
     /// <summary>
     /// The image. The fixes go in at build time, so one that no longer fits fails the install rather than a
@@ -376,7 +329,4 @@ public static partial class VllmDocker
         print("LR_VLLM_VERSION=" + importlib.metadata.version("vllm").split("+")[0])
 
         """.ReplaceLineEndings("\n");
-
-    [GeneratedRegex(@"^[A-Za-z]:[\\/]")]
-    private static partial Regex WindowsDriveRegex();
 }
