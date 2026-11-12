@@ -2,9 +2,25 @@
 
 A lightweight .NET-based routing layer for managing and load-balancing across multiple local LLM and image-generation inference servers.
 
+![Dashboard](docs/screenshots/dashboard-home.png)
+
+## Supported engines
+
+One OpenAI / Claude / Ollama-compatible endpoint in front of five inference engines, mixed freely across GPUs and machines. Each one is installed, updated and supervised from the dashboard's **Engines** page, so there's no separate setup per engine.
+
+| Engine | Serves | Models | Hardware | Installed from |
+|---|---|---|---|---|
+| [**llama.cpp**](https://github.com/ggml-org/llama.cpp) | Chat, embeddings, [System One](#system-one-decision-models-jev) decisions (Jev) | GGUF | CPU, CUDA, Vulkan, SYCL, OpenVINO, HIP/ROCm, Metal, CANN, MUSA | Official releases, or compiled from built-in recipes |
+| [**Strata**](https://github.com/Niko1221/Strata) | Chat (large MoE models on consumer GPUs) | Qwen3.8-Flash-Next GGUF | NVIDIA CUDA / CUDA 12, AMD | Releases, cloned with their own Python venv |
+| [**vLLM**](https://github.com/vllm-project/vllm) | Chat, with vLLM's own batching | Hugging Face checkpoints, presets from [recipes.vllm.ai](https://recipes.vllm.ai) | NVIDIA CUDA (Linux, or WSL on Windows), Intel XPU (Docker Desktop) | Self-contained `uv` venv per version, or a managed Docker image |
+| [**TensorFold**](https://github.com/ashhart/TensorFold) | Chat, with speculative decoding and prompt cache | Hugging Face checkpoints (MLX, NVFP4/FP8, EXL3, …) | NVIDIA CUDA, Apple Metal, AMD HIP, Intel XPU (Linux, or Docker Desktop on Windows) | Official releases (Linux, macOS), compiled from recipes (Windows), or a managed Docker image |
+| [**stable-diffusion.cpp**](https://github.com/leejet/stable-diffusion.cpp) | Images and video | GGUF / safetensors (SD 1.x–SDXL, SD3, Flux, Qwen-Image, Wan, …) | CPU, CUDA, Vulkan, ROCm, Metal, SYCL | Official releases, or compiled from built-in recipes |
+
+Per-engine setup: [llama.cpp](#using-the-dashboard) · [Strata](#strata-servers) · [vLLM](#vllm-servers) · [TensorFold](#tensorfold-servers) · [stable-diffusion.cpp](#image-generation-stable-diffusioncpp). Adding another engine is a matter of implementing a few interfaces; see [Adding another engine](#adding-another-engine).
+
 ## Overview
 
-LLM Router provides a unified interface to route requests across heterogeneous backend inference engines — [llama.cpp](https://github.com/ggml-org/llama.cpp) builds (CPU, CUDA, Vulkan, SYCL, ...) [Strata](https://github.com/Niko1221/Strata) and [vLLM](https://github.com/vllm-project/vllm) for text, [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) for images — running on different machines or GPUs. It features:
+LLM Router provides a unified interface to route requests across these heterogeneous backends, running on different machines or GPUs. It features:
 
 - **Multi-protocol API gateway** — Exposes OpenAI-compatible (`/v1/chat/completions`, `/v1/responses`, `/v1/models`), Claude-compatible (`/v1/messages`), and Ollama-compatible (`/api/chat`, `/api/generate`, `/api/tags`, ...) endpoints in front of your backend servers.
 - **Tool / function calling** — Passes OpenAI-style `tools`/`tool_choice` through to llama.cpp backends and translates the resulting tool calls back into Chat Completions or Responses API shapes.
@@ -14,11 +30,13 @@ LLM Router provides a unified interface to route requests across heterogeneous b
 - **Memory groups & idle unload** — Servers sharing a GPU form a group with a VRAM budget. Before a model loads, the least-recently-used idle servers in the group are stopped until its estimated footprint fits. Servers can also unload after N idle minutes.
 - **Image generation** — OpenAI `/v1/images/generations`, served by stable-diffusion.cpp presets with the same routing, fallbacks, memory groups, idle unload and queueing as chat. See [Image generation](#image-generation-stable-diffusioncpp).
 - **Embeddings** — OpenAI `/v1/embeddings` and Ollama `/api/embed` / `/api/embeddings`, served by presets launched with embeddings enabled.
+- **System One decisions (Jev)** — `POST /v1/systemone`, the TypeSafe/Jev-compatible decision API: native decision models (OpenJev, Laya, Kev, …) score typed questions about a state in one forward pass instead of generating text. Routed, queued and logged like chat, with a **Decide** page in the Playground. See [System One](#system-one-decision-models-jev).
 - **Health monitoring & auto-restart** — Background health checks detect failed or crashed backends and route around them.
-- **Model library with Hugging Face integration** — A local registry of GGUF models with metadata inspection, folder scanning, and search/download directly from the Hugging Face Hub (with live progress).
-- **Model presets** — Reusable llama.cpp launch configurations (sampling, context, GPU/threading, speculative decoding, LoRA, multimodal, etc.), optionally linked to a model-library entry so paths and metadata stay in sync.
+- **Model library with Hugging Face integration** — A local registry of GGUF files, safetensors files and checkpoint folders, with metadata inspection, folder scanning, and search/download directly from the Hugging Face Hub (with live progress). Each model shows which engines can run it.
+- **Device overview** — The Devices page lists the GPUs/NPUs on the machine, their VRAM and the compute APIs that likely work on them, and can enable or disable them in Windows.
+- **Model presets** — Reusable per-engine launch configurations (sampling, context, GPU/threading, speculative decoding, LoRA, multimodal, etc.), optionally linked to a model-library entry so paths and metadata stay in sync.
 - **Remote agents** — Run servers on other machines (Windows, Linux x64 and arm64). A one-line install command sets up an agent that connects back to the router, installs engines and models on its own disk when told to, supervises its backends, and updates itself whenever the router ships a new version. See [Remote agents](#remote-agents).
-- **Resilient backend supervision** — A separate wrapper process supervises each `llama-server` child process, so the router can restart without killing (or losing track of) running backends, and can live-swap models.
+- **Resilient backend supervision** — A separate wrapper process supervises each backend process, so the router can restart without killing (or losing track of) running backends, and can live-swap models.
 - **Request logging & stats dashboard** — Per-request API log with filtering, plus charts for throughput, latency, and context usage.
 - **Playground** — Chat with any preset from the dashboard, with per-reply time to first token, prompt/generation speed, cache hits and speculative-decoding acceptance; every reply can be recorded with a snapshot of the preset's launch settings, so runs under different settings can be compared side by side and exported as CSV.
 - **Razor Pages UI** — Web dashboard for managing servers, presets, the model library, request logs, and stats.
@@ -27,16 +45,20 @@ LLM Router provides a unified interface to route requests across heterogeneous b
 
 | | |
 |---|---|
-| **Dashboard** — live server status, slot usage, 24h traffic | **Servers** — llama.cpp and Strata instances, status, port |
-| ![Dashboard](docs/screenshots/dashboard-home.png) | ![Servers](docs/screenshots/servers.png) |
-| **Engines** — installed llama.cpp builds and source recipes | **Strata** — installs, prepared models, update/rollback |
-| ![Engines](docs/screenshots/engines.png) | ![Strata](docs/screenshots/strata.png) |
-| **Presets** — launch configurations per server | **Model Library** — local and Hugging Face GGUFs with quant/size/status |
-| ![Presets](docs/screenshots/presets.png) | ![Model Library](docs/screenshots/model-library.png) |
-| **Playground** — run history comparing TTFT and speeds per configuration | **API Keys** — model-scoped keys, enable/disable, regenerate |
-| ![Playground](docs/screenshots/playground.png) | ![API Keys](docs/screenshots/api-keys.png) |
+| **Servers** — llama.cpp, Strata, vLLM, TensorFold and stable-diffusion.cpp instances side by side | **Model Library** — GGUFs, safetensors and checkpoints, with the engines that can run each |
+| ![Servers](docs/screenshots/servers.png) | ![Model Library](docs/screenshots/model-library.png) |
+| **Engines: llama.cpp** — installed builds per backend and source recipes | **Engines: Strata** — installs, prepared models, update/rollback |
+| ![llama.cpp engines](docs/screenshots/engines.png) | ![Strata engines](docs/screenshots/strata.png) |
+| **Engines: vLLM** — WSL and Intel XPU Docker installs | **Engines: TensorFold** — releases, the Intel XPU Docker image and CUDA/HIP/XPU recipes |
+| ![vLLM engines](docs/screenshots/vllm.png) | ![TensorFold engines](docs/screenshots/tensorfold.png) |
+| **Engines: stable-diffusion.cpp** — release and compiled builds for image generation | **Devices** — GPUs on the machine, VRAM and likely compute APIs |
+| ![stable-diffusion.cpp engines](docs/screenshots/stable-diffusion-cpp.png) | ![Devices](docs/screenshots/devices.png) |
+| **Presets** — launch configurations per server | **Playground** — run history comparing TTFT and speeds per configuration |
+| ![Presets](docs/screenshots/presets.png) | ![Playground](docs/screenshots/playground.png) |
 | **Statistics** — throughput, latency, context usage | **Request Log** — per-request history with filtering |
 | ![Statistics](docs/screenshots/stats.png) | ![Request Log](docs/screenshots/request-log.png) |
+| **API Keys** — model-scoped keys, enable/disable, regenerate | |
+| ![API Keys](docs/screenshots/api-keys.png) | |
 
 ## Architecture
 
@@ -47,9 +69,9 @@ flowchart TB
     Routing["Routing Engine"]
     ServerMgr["Server Manager<br/>health monitoring + registry"]
     PresetMgr["Preset Manager / Model Library"]
-    Providers["Providers<br/>LlamaCppProvider (CPU/CUDA/Vulkan/SYCL) · StrataProvider"]
-    Wrapper["LR.Wrapper<br/>per-server process supervisor,<br/>survives router restarts, live model swap"]
-    Backend["llama-server / Strata serve/server.py"]
+    Providers["Providers<br/>llama.cpp · Strata · vLLM · TensorFold · stable-diffusion.cpp"]
+    Wrapper["LR.Wrapper / LR.Agent<br/>per-server process supervisor (local or remote),<br/>survives router restarts, live model swap"]
+    Backend["llama-server · Strata server.py · vllm serve ·<br/>tensorfold-native serve · sd-server"]
 
     UI --> Gateway
     Gateway --> Routing
@@ -66,8 +88,8 @@ flowchart TB
 |---|---|
 | **LR.Application** | ASP.NET Core web app — Razor Pages UI, API endpoint mappings (OpenAI/Claude/Ollama/Responses), SignalR hubs, background services, Windows Service hosting |
 | **LR.Core** | Core interfaces, EF Core models/migrations (SQLite), and services — routing engine, server/preset/model-library managers, Hugging Face client, request logging, wrapper protocol |
-| **LR.Providers** | Backend engine providers: a shared base (`ManagedServerProviderBase` — wrapper process management, health, OpenAI/Anthropic request + SSE handling) with one folder per engine (`LlamaCpp/`, `Strata/`, `Vllm/`) |
-| **LR.Wrapper** | Standalone process that launches and supervises a `llama-server` child process over a named-pipe protocol, so a router restart doesn't kill the backend (the supervisor itself lives in `LR.Core/Wrapper`) |
+| **LR.Providers** | Backend engine providers: a shared base (`ManagedServerProviderBase` — wrapper process management, health, OpenAI/Anthropic request + SSE handling) with one folder per engine (`LlamaCpp/`, `Strata/`, `Vllm/`, `TensorFold/`, `StableDiffusionCpp/`) |
+| **LR.Wrapper** | Standalone process that launches and supervises a backend server process over a named-pipe protocol, so a router restart doesn't kill the backend (the supervisor itself lives in `LR.Core/Wrapper`) |
 | **LR.Agent** | Self-contained service for remote machines: connects out to the router over a WebSocket, relays the wrapper protocol to per-server wrapper processes it launches (`LR.Agent wrapper …`), runs engine-install and model-download jobs locally, and updates itself from the router |
 
 ## API
@@ -75,12 +97,13 @@ flowchart TB
 | Protocol | Endpoints |
 |---|---|
 | OpenAI | `POST /v1/chat/completions` (streaming + non-streaming, tool calling), `POST /v1/embeddings`, `POST /v1/images/generations`, `GET /v1/models` |
+| System One (TypeSafe/Jev) | `POST /v1/systemone` (decision models; non-streaming) |
 | OpenAI Responses | `POST /v1/responses`, `GET /v1/responses/{id}`, `DELETE /v1/responses/{id}`, `POST /v1/responses/{id}/cancel` |
 | Claude | `POST /v1/messages` |
 | Ollama | `POST /api/chat`, `POST /api/generate`, `GET /api/tags`, `POST /api/show`, `POST /api/embed`, `POST /api/embeddings`, `GET /api/ps`, `GET /api/version` |
 | Misc | `GET /health`; SignalR hubs `/serverHub` and `/modelDownloadHub` for live UI updates |
 
-Protocols are toggled via `Gateway:EnabledProtocols` in configuration. Only `"function"`-type tools are supported for tool calling and the Responses API — OpenAI's built-in tools (web search, file search, code interpreter, computer use, image generation, MCP) and the Conversations API are not implemented.
+Protocols are toggled via `Gateway:EnabledProtocols` in configuration (`/v1/systemone` is served with the OpenAI endpoints). Only `"function"`-type tools are supported for tool calling and the Responses API — OpenAI's built-in tools (web search, file search, code interpreter, computer use, image generation, MCP) and the Conversations API are not implemented.
 
 ## Getting Started
 
@@ -90,6 +113,8 @@ Protocols are toggled via `Gateway:EnabledProtocols` in configuration. Only `"fu
 - Node.js/npm (to build the Tailwind CSS bundle — see below)
 - For llama.cpp servers: `llama-server`/`llama-server.exe` binaries for whichever backend(s) you plan to run (CPU/CUDA/Vulkan/SYCL) — downloaded/compiled from the Engines page or your own builds
 - For Strata servers: Git and Python 3.10+, plus a C++ toolchain (Visual Studio Build Tools on Windows, `build-essential` on Linux) when Strata has to compile its engine — always on Linux, and on Windows only if no ready-made engine fits the PC. The Strata releases page checks these and refuses an install until they're found (installed from the Engines page — see [Strata servers](#strata-servers))
+- For vLLM servers: Linux, or WSL on Windows (NVIDIA); Docker Desktop for Intel GPUs. See [vLLM servers](#vllm-servers)
+- For TensorFold servers: nothing on Linux x86_64/aarch64 (NVIDIA driver R580+) or Apple-silicon macOS, where releases install as-is. On Windows, the CUDA Toolkit 13 or ROCm plus the Visual Studio C++ build tools to compile from a recipe, or Docker Desktop for Intel GPUs. See [TensorFold servers](#tensorfold-servers)
 
 ### Building the frontend assets
 
@@ -173,11 +198,35 @@ updates, but you install them by replacing the files yourself.
 
 ## Using the dashboard
 
-- **Servers** — register backend server instances, pick their engine (llama.cpp, Strata, vLLM or stable-diffusion.cpp), point them at a build / Strata folder, start/stop/restart them, and view live logs and status.
+- **Servers** — register backend server instances, pick their engine (llama.cpp, Strata, vLLM, TensorFold or stable-diffusion.cpp), bind them to an install from the Engines page, start/stop/restart them, and view live logs and status.
 - **Presets** — define launch configurations (model path, context size, sampling parameters, GPU/threading, speculative decoding, LoRA, multimodal settings, etc.), optionally linked to a model-library entry so the model path and GGUF metadata stay in sync automatically.
-- **Model Library** — import existing `.gguf` (and, for diffusion models, `.safetensors`) files, scan a folder for unregistered models, or search and download models from the Hugging Face Hub with live progress; inspect GGUF metadata per model.
+- **Engines** — install official releases of each engine, compile llama.cpp / stable-diffusion.cpp / TensorFold from built-in or custom recipes, check for updates and update in place. Servers bind to an install, so they always know which version they run.
+- **Model Library** — import existing `.gguf` and `.safetensors` files or Hugging Face checkpoint folders (`config.json`, tokenizer and safetensors shards), scan a folder for unregistered models, or search and download models from the Hugging Face Hub with live progress; inspect metadata per model. Models are classified from their GGUF metadata as chat, embedding, reranker, decision, image or a companion file (projector, VAE, text encoder…), filterable by tab, and badged with the engines that can run them; a preset's model picker only offers fitting ones.
+- **Devices** — GPUs/NPUs on this machine with VRAM and likely compute APIs (CUDA, SYCL, Vulkan, HIP, OpenVINO), to help pick a preset's backend; devices can be disabled in Windows when they shouldn't be used for AI work.
 - **Stats** — throughput, latency, and context-usage charts.
-- **Playground** — chat with a preset and see per-reply performance stats (TTFT, prompt/generation tok/s, cached tokens, draft acceptance). Tag runs with a label (e.g. `fa=on ub=1024`), use *Repeat ×N* to average out noise, and compare configurations on the **Run history** page — runs are grouped by preset, label and a hash of the preset's generated command line, so editing a preset automatically starts a new group. Runs aren't subject to request-log retention.
+- **Playground** — chat with a preset and see per-reply performance stats (TTFT, prompt/generation tok/s, cached tokens, draft acceptance). Tag runs with a label (e.g. `fa=on ub=1024`), use *Repeat ×N* to average out noise, and compare configurations on the **Run history** page — runs are grouped by preset, label and a hash of the preset's generated command line, so editing a preset automatically starts a new group. Runs aren't subject to request-log retention. Decision presets open the **Decide** page and image/video presets the **Generate** page instead.
+
+### System One decision models (Jev)
+
+Decision models don't write an answer: given a **state** (a customer message, a document, a transcript, chat messages…) they score a set of typed **questions** in a single forward pass and return probabilities. llama.cpp serves them through its TypeSafe/Jev-compatible System One API, and the router puts that behind `POST /v1/systemone` with the same routing, auto-start, fallback, memory groups, queueing, API-key scoping and request logging as chat.
+
+- **Models.** A GGUF with `{arch}.decision.type` in its metadata (e.g. `openjev`, `laya`, `kev`) is classified as a decision model on import, and the type follows it into presets linked to it. Decision-only models are left out of chat model listings (`/v1/models`, `/api/tags`), so chat clients never pick one; `granite-switch` models also generate text, so they're offered for both.
+- **Questions.** Each question has a type: `choice` picks one of several options, `score` rates on a scale of 2–10 levels (lowest first), and `noul` gives the probability that the answer is yes.
+- **Requests.** The body is llama-server's own shape and is forwarded as is, and the response (`answers`, `usage`) comes back unchanged. Streaming isn't supported. llama-server's endpoint takes no `model`, so a Jev client may not send one; the router then uses the only decision preset that the API key can reach, and asks for `model` when there's more than one.
+
+```bash
+curl http://localhost:5053/v1/systemone -H "Content-Type: application/json" -d '{
+  "model": "openjev",
+  "state": "Customer message: I was charged twice for my order last week and nobody has replied.",
+  "questions": {
+    "route":   { "type": "choice", "instructions": "Which team should handle this?", "criteria": { "billing": null, "shipping": null, "technical": null } },
+    "angry":   { "type": "noul",   "instructions": "Is the customer angry?" },
+    "urgency": { "type": "score",  "instructions": "How urgent is this?", "criteria": ["can wait", "this week", "today", "right now"] }
+  }
+}'
+```
+
+**Playground → Decide** builds the same requests interactively: write the state (as text, or as JSON with *State is JSON*), add questions, or load the example above, and see each answer's probabilities. You can also edit the request as raw JSON.
 - **Request Log** — browse and filter logged API requests by protocol and time range.
 - **Settings** — app-level configuration, including the model library's root folder and Hugging Face API token.
 
@@ -229,6 +278,25 @@ A first start downloads the model into the Hugging Face cache of the machine the
 
 **WSL limitations.** WSL distros belong to a Windows user, so the router or agent has to run under that user's account, not as a service under LocalSystem (the default for both installers); otherwise it sees no distros. On a remote Windows agent the router also has to reach the server over the network, and WSL's default NAT networking only forwards to the Windows machine itself: use `networkingMode=mirrored` in that account's `.wslconfig` and allow the port through the Hyper-V firewall. Alternatively, a server can point at a native venv of the community [vllm-windows](https://github.com/SystemPanic/vllm-windows) fork (`.venv\Scripts\vllm.exe`), which needs no WSL but isn't installed or updated by the router.
 
+### TensorFold servers
+
+[TensorFold](https://github.com/ashhart/TensorFold) is a native inference server (`tensorfold-native serve`) for Hugging Face checkpoints in its own formats (MLX, NVFP4/FP8, EXL3, …), with external-drafter speculative decoding and a prompt cache. It serves OpenAI-compatible `/v1/chat/completions` and Anthropic-compatible `/v1/messages` itself, and the router reads token counts from its streamed usage events.
+
+1. **Engines → TensorFold**, one of:
+   - **Install a release**: official builds for Linux x86_64 / aarch64 (CUDA 13, NVIDIA driver R580+) and Apple-silicon macOS (Metal), checked for updates and updated in place like llama.cpp builds. Works on [agents](#remote-agents) too.
+   - **Compile from a recipe**: there's no Windows release, so built-in recipes build one with `zig build`: CUDA per GPU architecture (`sm_120` RTX 50 / RTX PRO Blackwell, `sm_121` GB10 / DGX Spark, `sm_80` A100, …), HIP per AMD architecture (`gfx1151` Strix Halo, …) and Intel XPU (Linux only, Level Zero). The pipeline fetches Zig and the other pinned build tools itself. CUDA needs the CUDA Toolkit 13 and, on Windows, the Visual Studio C++ build tools.
+   - **Intel GPU (XPU) in Docker** (Windows): builds the image `llm-router/tensorfold-xpu:managed`, which compiles TensorFold over a pinned Intel compute runtime (checked by SHA-256), then verifies it computes correctly on the GPU. Needs Docker Desktop on its WSL 2 engine, under an account that can use Docker (not a LocalSystem service). Not available on agents.
+2. **Models** (optional): download a checkpoint folder from the Hugging Face browser (`config.json`, tokenizer and safetensors shards). The Models page badges checkpoints as runnable by TensorFold (and by vLLM, unless they're MLX-quantized).
+3. **Servers**: create a server with engine **TensorFold**, bound to the install.
+4. **Presets**: set the model to a Hugging Face repo id (e.g. `TensorFold/Qwen3.8-27B-MLX-4bit`, optionally pinned with `@revision`), a library checkpoint, or a checkpoint folder on the server's machine. In the **TensorFold** section, set context, parallel requests, max tokens, thinking on/off, reasoning effort, vision, an optional **drafter** for speculative decoding (e.g. `z-lab/Qwen3.8-27B-DFlash2`, picked from the library or given as a folder / cached repo id), prompt cache size, extra arguments and environment variables.
+
+How it runs:
+
+- **Models are pulled on first start.** `serve` never downloads, so on Linux and macOS the router pulls a repo id into the Hugging Face cache of the server's machine first: when it's missing (the default), always, or never, per preset. A first start can download a whole checkpoint, so the startup timeout is hours. On a Windows source build the server launches directly, so pull the repo id first. Gated models use the Hugging Face token from the model library settings.
+- **Fixed served name.** Every server runs as `router-model` and the router rewrites each request's `model` to it, so clients keep using the preset's name or aliases.
+- **Capacity and memory groups.** TensorFold has no `/props` or `/slots`; the router reads the resolved context window from `/v1/models` and limits in-flight requests to the preset's parallel count (default 8). Checkpoints aren't single files to measure, so set **Memory needed (GB)** for memory-group budgeting.
+- **Intel XPU in Docker.** Each server is a container named after its port, removed when the server stops. A model folder on a local drive is mounted read-only; repo ids go into the `llm-router-hf-cache` volume, shared with vLLM's Intel image. The image sets `NEOReadDebugKeys=1` and `AllowUnrestrictedSize=1`, without which loading fails through WSL with `ZE_RESULT_ERROR_UNSUPPORTED_SIZE`. If loading aborts in `wddm_memory_manager.cpp`, set the preset's **Intel WDDM chunk size** to 4096. On XPU the prompt cache uses GPU memory, so lower it if a long context doesn't fit. Tested on an Arc Pro B70 with Qwen3.8-27B GPTQ int4.
+
 ### Image generation (stable-diffusion.cpp)
 
 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) servers generate images and follow the same server → engine → model → preset flow as the LLM engines:
@@ -253,7 +321,7 @@ Image presets are kept apart from chat: they don't appear in `/api/tags` or `/v1
 ### Remote agents
 
 An agent is a small service on another machine that runs servers for this router. Everything is
-controlled from the router: the agent installs llama.cpp / stable-diffusion.cpp / vLLM builds and models
+controlled from the router: the agent installs llama.cpp / stable-diffusion.cpp / vLLM / TensorFold builds and models
 on its own disk, starts and stops backends, and updates itself.
 
 **Adding a machine.** Open **Agents**, check the router URL (it must be reachable from the other
@@ -304,7 +372,7 @@ logs are live there too.
   dev version, so connected agents pick the build up right away. Use `-Rids linux-x64` to build only one.
 
 Limitations: Strata servers can't run on agents yet (its model preparation runs Python against local
-files). Agent traffic uses the admin port. With a separate routing port, agents connect to `Gateway:Port`.
+files), and neither can TensorFold's Intel XPU Docker image. Agent traffic uses the admin port. With a separate routing port, agents connect to `Gateway:Port`.
 The backends' HTTP port has no authentication of its own, so keep agents on a trusted network.
 
 ### Adding another engine
