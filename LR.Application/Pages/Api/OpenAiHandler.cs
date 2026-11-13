@@ -87,15 +87,20 @@ public class OpenAiHandler : IProtocolHandler
     public async Task<object> HandleListModelCapabilitiesAsync()
     {
         // Chat models only — the capabilities shape (context, tools, vision) is meaningless for image models.
-        var presets = (await _presetManager.GetAllPresetsAsync())
-            .ForChat(await _serverManager.GetAllInstancesAsync(), _engines);
-        var models = _apiKeyContext.FilterAllowed(presets).Select(BuildCapabilities).ToList();
+        var instances = await _serverManager.GetAllInstancesAsync();
+        var presets = (await _presetManager.GetAllPresetsAsync()).ForChat(instances, _engines);
+        var instancesById = instances.ToDictionary(i => i.Id);
+        var models = _apiKeyContext.FilterAllowed(presets)
+            .Select(p => BuildCapabilities(p, instancesById.GetValueOrDefault(p.ServerInstanceId)))
+            .ToList();
 
         return new { data = models };
     }
 
-    private ModelCapabilitiesInfo BuildCapabilities(ModelPreset preset)
+    private ModelCapabilitiesInfo BuildCapabilities(ModelPreset preset, ServerInstance? instance)
     {
+        var loadState = PresetLoadState.Of(instance, preset.Id);
+
         // When the preset's server is running, its live /props modalities are the most accurate
         // source for vision/audio support — fall back to preset data otherwise.
         var props = (_serverManager.GetProvider(preset.ServerInstanceId) as IServerCapacityProvider)?.ServerProps;
@@ -131,7 +136,9 @@ public class OpenAiHandler : IProtocolHandler
             Quantization = preset.GgufQuantizationLevel,
             SupportsReasoningEffort = ReasoningCapabilityDetector.SupportsReasoningEffort(preset.GgufChatTemplate, _templateVariableExtractor),
             ReasoningEffort = preset.ReasoningEffort,
-            ReasoningEffortOptions = ReasoningCapabilityDetector.GetReasoningEffortOptions(preset.GgufChatTemplate, _templateVariableExtractor)
+            ReasoningEffortOptions = ReasoningCapabilityDetector.GetReasoningEffortOptions(preset.GgufChatTemplate, _templateVariableExtractor),
+            Loaded = loadState == PresetLoadState.Loaded,
+            LoadState = loadState
         };
     }
 
