@@ -73,4 +73,18 @@ public class ModelCapabilitiesInfo
     /// </summary>
     [JsonPropertyName("reasoning_effort_options")]
     public IReadOnlyList<string> ReasoningEffortOptions { get; set; } = [];
+
+    /// <summary>
+    /// True when the preset's server is running, healthy and serving this preset, i.e. a request
+    /// is answered without first loading the model. Shorthand for <see cref="LoadState"/> == "loaded".
+    /// </summary>
+    [JsonPropertyName("loaded")]
+    public bool Loaded { get; set; }
+
+    /// <summary>
+    /// "loaded", "loading" (starting, or not yet healthy), "unloaded" (stopped, or the server has
+    /// another preset loaded — a request would load this one first), or "error".
+    /// </summary>
+    [JsonPropertyName("load_state")]
+    public string LoadState { get; set; } = "unloaded";
 }

@@ -97,7 +97,7 @@ flowchart TB
 
 | Protocol | Endpoints |
 |---|---|
-| OpenAI | `POST /v1/chat/completions` (streaming + non-streaming, tool calling), `POST /v1/embeddings`, `POST /v1/images/generations`, `GET /v1/models` |
+| OpenAI | `POST /v1/chat/completions` (streaming + non-streaming, tool calling), `POST /v1/embeddings`, `POST /v1/images/generations`, `GET /v1/models`, `GET /v1/models/capabilities` (router extension: per chat preset, context size, output budget, tool/vision/reasoning support, and whether the model is loaded right now — `loaded` plus `load_state`: `loaded`, `loading`, `unloaded` or `error`) |
 | System One (TypeSafe/Jev) | `POST /v1/systemone` (decision models; non-streaming) |
 | OpenAI Responses | `POST /v1/responses`, `GET /v1/responses/{id}`, `DELETE /v1/responses/{id}`, `POST /v1/responses/{id}/cancel` |
 | Claude | `POST /v1/messages` |
