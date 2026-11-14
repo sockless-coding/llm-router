@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text.Json;
 
 using LR.Core.Interfaces;
 using LR.Core.Models;
@@ -13,7 +16,7 @@ public enum SyclKeepAliveState
     /// <summary>Off, or nothing on this machine needs it.</summary>
     Idle,
     Running,
-    /// <summary>A keep-alive the router didn't start (e.g. a server's companion app) is already running.</summary>
+    /// <summary>A keep-alive this router can't manage is running (e.g. a server's companion app).</summary>
     RunningExternally,
     Failed,
     /// <summary>Stopped from the Devices page; not restarted until started again (or the router restarts).</summary>
@@ -33,38 +36,50 @@ public sealed record SyclKeepAliveStatus(
 /// in or removing a monitor (or enabling a card) starts or stops it. Windows only.
 ///
 /// The process is deliberately left running when the router shuts down — servers keep their
-/// models loaded across router restarts, so their VRAM still needs keeping alive — and a
-/// keep-alive found running from the same executable at startup is adopted rather than doubled.
-/// One running from anywhere else (e.g. an existing per-server companion app) is respected and
-/// never killed.
+/// models loaded across router restarts, so their VRAM still needs keeping alive. Whichever router
+/// started it is recorded machine-wide under <c>%ProgramData%\LLM Router</c>, so the next router to
+/// run takes it over (to keep, retarget or stop it) even if it's a different install, such as a
+/// <c>dotnet run</c> build after the service. Only one router runs at a time, so there is no
+/// arbitration between live instances. A keep-alive no router started (e.g. a per-server companion
+/// app) is respected and never killed.
 /// </summary>
 public sealed class SyclKeepAliveService : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan StartupCheck = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan EnableSettleDelay = TimeSpan.FromSeconds(5);
     private const int LogTailLines = 15;
+
+    private static readonly string SharedDirectory =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LLM Router");
 
     private readonly ISyclKeepAliveSettingsService _settings;
     private readonly IComputeDeviceService _devices;
     private readonly ILogger<SyclKeepAliveService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly string _logPath = Path.Combine(AppContext.BaseDirectory, "data", "sycl-keepalive.log");
-    // What the running keep-alive was started with, so one adopted after a router restart is
-    // only kept when it still matches (e.g. the same --device cards).
-    private readonly string _configPath = Path.Combine(AppContext.BaseDirectory, "data", "sycl-keepalive.config");
+    private readonly string _logPath = Path.Combine(SharedDirectory, "sycl-keepalive.log");
+    private readonly string _recordPath = Path.Combine(SharedDirectory, "sycl-keepalive.json");
 
-    // The process we own: cmd.exe wrapping the keep-alive when we started it, or the keep-alive
-    // itself when adopted from a previous router run.
+    // The process we manage: cmd.exe wrapping the keep-alive (started by us, or by an earlier
+    // router run and taken over from the shared record), or a bare keep-alive found by path.
     private Process? _process;
+    // What _process was started with; null when unknown, which forces a restart with ours.
     private string? _processConfig;
     private DateTimeOffset _lastStartAttempt = DateTimeOffset.MinValue;
+
+    // Manual stop from the Devices page. In memory on purpose: Mode = Off is the persistent switch,
+    // so a router restart goes back to what the Mode says.
+    private volatile bool _stopped;
 
     public SyclKeepAliveStatus Status { get; private set; } = new(SyclKeepAliveState.Idle, "Not checked yet.");
 
     public SyclKeepAlivePlan? LastPlan { get; private set; }
 
     public string BundledExecutablePath { get; } = SyclKeepAlivePlanner.BundledExecutablePath(AppContext.BaseDirectory);
+
+    /// <summary>Which router started a keep-alive, and with what — shared by every install on the machine.</summary>
+    private sealed record OwnerRecord(int Pid, DateTime StartTimeUtc, string Config, string StartedBy);
 
     public SyclKeepAliveService(ISyclKeepAliveSettingsService settings, IComputeDeviceService devices, ILogger<SyclKeepAliveService> logger)
     {
@@ -80,13 +95,9 @@ public sealed class SyclKeepAliveService : BackgroundService
         return Status;
     }
 
-    // Manual stop from the Devices page. In memory on purpose: Mode = Off is the persistent switch,
-    // so a router restart goes back to what the Mode says.
-    private volatile bool _stopped;
-
     /// <summary>
     /// Stops the keep-alive the router runs and keeps the periodic check from starting it again
-    /// until <see cref="StartKeepAliveAsync"/>. A keep-alive the router didn't start is left alone.
+    /// until <see cref="StartKeepAliveAsync"/>. A keep-alive no router started is left alone.
     /// </summary>
     public async Task<SyclKeepAliveStatus> StopKeepAliveAsync(CancellationToken ct = default)
     {
@@ -94,8 +105,10 @@ public sealed class SyclKeepAliveService : BackgroundService
         try
         {
             _stopped = true;
-            StopOwned();
-            Status = StoppedStatus();
+            if (TakeOverRecorded() is { } blocked)
+                Status = blocked;
+            else
+                Status = StopOwned() ? StoppedStatus() : CannotStopStatus();
         }
         finally
         {
@@ -112,8 +125,6 @@ public sealed class SyclKeepAliveService : BackgroundService
         return ReevaluateAsync(ct);
     }
 
-    private static readonly TimeSpan EnableSettleDelay = TimeSpan.FromSeconds(5);
-
     /// <summary>
     /// Runs a device enable/disable and then re-checks, so the keep-alive follows the change
     /// immediately instead of on the next minute tick. With <paramref name="releaseGpu"/> (disabling
@@ -128,8 +139,8 @@ public sealed class SyclKeepAliveService : BackgroundService
         await _gate.WaitAsync(ct);
         try
         {
-            if (releaseGpu)
-                StopOwned();
+            if (releaseGpu && TakeOverRecorded() is null && !StopOwned())
+                _logger.LogWarning("Couldn't release the GPU from the SYCL keep-alive before disabling it; continuing.");
             result = await change();
         }
         finally
@@ -157,6 +168,10 @@ public sealed class SyclKeepAliveService : BackgroundService
 
     private static SyclKeepAliveStatus StoppedStatus() => new(SyclKeepAliveState.Stopped,
         "Stopped manually. The router won't start it again until you press Start, or until the router restarts.");
+
+    private SyclKeepAliveStatus CannotStopStatus() => new(SyclKeepAliveState.Failed,
+        $"Couldn't stop the keep-alive (PID {SafeId(_process)}). It was likely started by the router service as " +
+        "another user — run this router elevated, or stop it from the instance that started it.", SafeId(_process));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -195,17 +210,19 @@ public sealed class SyclKeepAliveService : BackgroundService
             var plan = SyclKeepAlivePlanner.Evaluate(settings.Mode, devices);
             LastPlan = plan;
 
-            if (_stopped)
+            // First take over a keep-alive an earlier router run (possibly another install) left
+            // running, so the decisions below — including stopping it — apply to it too.
+            if (TakeOverRecorded() is { } blocked)
             {
-                StopOwned();
-                Status = StoppedStatus();
+                Status = blocked;
                 return;
             }
 
-            if (!plan.ShouldRun)
+            if (_stopped || !plan.ShouldRun)
             {
-                StopOwned();
-                Status = new(SyclKeepAliveState.Idle, plan.Reason);
+                Status = !StopOwned() ? CannotStopStatus()
+                    : _stopped ? StoppedStatus()
+                    : new(SyclKeepAliveState.Idle, plan.Reason);
                 return;
             }
 
@@ -216,7 +233,9 @@ public sealed class SyclKeepAliveService : BackgroundService
             {
                 if (!HasExited(_process) && _processConfig == config)
                 {
-                    Status = Status with { State = SyclKeepAliveState.Running, Message = plan.Reason };
+                    Status = Status.State == SyclKeepAliveState.Running
+                        ? Status with { Message = plan.Reason }
+                        : new(SyclKeepAliveState.Running, plan.Reason, _process.Id, SafeStartTime(_process), ReadLogTail());
                     return;
                 }
 
@@ -228,27 +247,31 @@ public sealed class SyclKeepAliveService : BackgroundService
                         $"Keep-alive stopped: {(exit is { } code ? SyclKeepAlivePlanner.DescribeExit(code) : "unknown exit code")}.",
                         LogTail: ReadLogTail());
                 }
-                StopOwned();
+
+                // Exited, or running with other cards/settings (e.g. taken over from another install).
+                if (!StopOwned())
+                {
+                    Status = CannotStopStatus();
+                    return;
+                }
             }
 
-            // A keep-alive already running elsewhere covers every Intel card, so don't add a second.
+            // No record, but one running from our own executable is ours too (e.g. the record was
+            // lost); its arguments are unknown, so it gets restarted with ours.
             var existing = FindRunningKeepAlives(exePath);
-            var adopted = existing.Own;
-            if (adopted is not null && ReadConfigFile() != config)
+            if (existing.Own is { } stray)
             {
-                // Ours from a previous run, but started for different cards or settings.
-                _process = adopted;
-                StopOwned();
-                adopted = null;
+                _process = stray;
+                _processConfig = null;
+                if (!StopOwned())
+                {
+                    DisposeAll(existing.External);
+                    Status = CannotStopStatus();
+                    return;
+                }
             }
-            if (adopted is not null)
-            {
-                _process = adopted;
-                _processConfig = config;
-                Status = new(SyclKeepAliveState.Running, plan.Reason + " (adopted from a previous run)", adopted.Id, SafeStartTime(adopted), ReadLogTail());
-                DisposeAll(existing.External);
-                return;
-            }
+
+            // A keep-alive no router started covers every Intel card already, so don't add a second.
             if (existing.External.Count > 0)
             {
                 var other = existing.External[0];
@@ -281,7 +304,7 @@ public sealed class SyclKeepAliveService : BackgroundService
     private async Task StartAsync(string exePath, IReadOnlyList<string> arguments, string environmentSetupCommand, string config, string reason, CancellationToken ct)
     {
         _lastStartAttempt = DateTimeOffset.UtcNow;
-        Directory.CreateDirectory(Path.GetDirectoryName(_logPath)!);
+        EnsureSharedDirectory();
 
         var startInfo = new ProcessStartInfo
         {
@@ -321,15 +344,19 @@ public sealed class SyclKeepAliveService : BackgroundService
 
         _process = process;
         _processConfig = config;
-        try { File.WriteAllText(_configPath, config); } catch { /* only used to adopt it later */ }
+        WriteRecord(new OwnerRecord(process.Id, process.StartTime.ToUniversalTime(), config, AppContext.BaseDirectory));
         _logger.LogInformation("Started SYCL keep-alive (PID {Pid}): {Reason}", process.Id, reason);
         Status = new(SyclKeepAliveState.Running, reason, process.Id, DateTimeOffset.Now, ReadLogTail());
     }
 
-    private void StopOwned()
+    /// <summary>
+    /// Kills the managed keep-alive (if any) and clears the shared record. Returns false when it's
+    /// still running because it couldn't be killed — then it stays managed, so no second one starts.
+    /// </summary>
+    private bool StopOwned()
     {
         if (_process is null)
-            return;
+            return true;
 
         try
         {
@@ -346,14 +373,66 @@ public sealed class SyclKeepAliveService : BackgroundService
             _logger.LogWarning(ex, "Failed to stop the SYCL keep-alive.");
         }
 
+        if (StillRunning(_process))
+            return false;
+
         _process.Dispose();
         _process = null;
         _processConfig = null;
+        DeleteRecord();
+        return true;
+    }
+
+    /// <summary>
+    /// When nothing is managed yet, takes over the keep-alive recorded in the shared record if that
+    /// exact process (PID and start time) is still running. Returns a status to show instead of
+    /// continuing when the recorded process exists but can't be inspected — typically started by
+    /// the router service as SYSTEM while this instance runs unelevated.
+    /// </summary>
+    private SyclKeepAliveStatus? TakeOverRecorded()
+    {
+        if (_process is not null || ReadRecord() is not { } record)
+            return null;
+
+        Process process;
+        try
+        {
+            process = Process.GetProcessById(record.Pid);
+        }
+        catch (ArgumentException)
+        {
+            DeleteRecord(); // that process is gone
+            return null;
+        }
+
+        try
+        {
+            if (!process.HasExited && Math.Abs((process.StartTime.ToUniversalTime() - record.StartTimeUtc).TotalSeconds) < 2)
+            {
+                _process = process;
+                _processConfig = record.Config;
+                if (!string.Equals(record.StartedBy, AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase))
+                    _logger.LogInformation("Took over the SYCL keep-alive (PID {Pid}) started by the router at {Other}.", record.Pid, record.StartedBy);
+                return null;
+            }
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or UnauthorizedAccessException)
+        {
+            process.Dispose();
+            return new(SyclKeepAliveState.RunningExternally,
+                $"The keep-alive started by the router at {record.StartedBy} (PID {record.Pid}) is running as another user, " +
+                "so this instance can't manage it. Run this router elevated to take it over.", record.Pid);
+        }
+
+        // Same PID, different process: the recorded keep-alive is gone and the PID was reused.
+        process.Dispose();
+        DeleteRecord();
+        return null;
     }
 
     /// <summary>
     /// Running keep-alives by process name — the configured executable's name plus the bundled
-    /// one's. <c>Own</c> is one started from <paramref name="exePath"/> (a previous router run's).
+    /// one's. <c>Own</c> is one started from <paramref name="exePath"/>.
     /// </summary>
     private static (Process? Own, List<Process> External) FindRunningKeepAlives(string exePath)
     {
@@ -379,10 +458,53 @@ public sealed class SyclKeepAliveService : BackgroundService
         return (own, external);
     }
 
-    private string? ReadConfigFile()
+    // --- Shared record (%ProgramData%\LLM Router) ---
+
+    /// <summary>
+    /// Creates the shared folder so every account a router may run as — the service as SYSTEM, a
+    /// dev build as the signed-in user — can replace the record and log the other one wrote.
+    /// </summary>
+    private void EnsureSharedDirectory()
     {
-        try { return File.Exists(_configPath) ? File.ReadAllText(_configPath) : null; }
+        if (Directory.Exists(SharedDirectory))
+            return;
+
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+                throw new PlatformNotSupportedException();
+            var security = new DirectorySecurity();
+            security.AddAccessRule(new FileSystemAccessRule(
+                new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
+                FileSystemRights.Modify,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            new DirectoryInfo(SharedDirectory).Create(security);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Couldn't create {Dir} with shared permissions; using the defaults.", SharedDirectory);
+            Directory.CreateDirectory(SharedDirectory);
+        }
+    }
+
+    private OwnerRecord? ReadRecord()
+    {
+        try { return File.Exists(_recordPath) ? JsonSerializer.Deserialize<OwnerRecord>(File.ReadAllText(_recordPath)) : null; }
         catch { return null; }
+    }
+
+    private void WriteRecord(OwnerRecord record)
+    {
+        try { File.WriteAllText(_recordPath, JsonSerializer.Serialize(record)); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Couldn't write {Path}; another router install won't be able to take this keep-alive over.", _recordPath); }
+    }
+
+    private void DeleteRecord()
+    {
+        try { File.Delete(_recordPath); }
+        catch { /* best effort — a stale record is rejected by its start time anyway */ }
     }
 
     private IReadOnlyList<string>? ReadLogTail()
@@ -416,9 +538,30 @@ public sealed class SyclKeepAliveService : BackgroundService
         catch { return true; }
     }
 
+    /// <summary>
+    /// Stricter than <see cref="HasExited"/>: when the process can't be queried (access denied),
+    /// it counts as running as long as its PID still exists, so a keep-alive this instance isn't
+    /// allowed to kill is never mistaken for stopped (which would start a second one).
+    /// </summary>
+    private static bool StillRunning(Process process)
+    {
+        try { return !process.HasExited; }
+        catch
+        {
+            try { using var _ = Process.GetProcessById(process.Id); return true; }
+            catch { return false; }
+        }
+    }
+
     private static int? SafeExitCode(Process process)
     {
         try { return process.ExitCode; }
+        catch { return null; }
+    }
+
+    private static int? SafeId(Process? process)
+    {
+        try { return process?.Id; }
         catch { return null; }
     }
 
