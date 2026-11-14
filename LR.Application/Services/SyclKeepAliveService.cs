@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
@@ -60,6 +61,9 @@ public sealed class SyclKeepAliveService : BackgroundService
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _logPath = Path.Combine(SharedDirectory, "sycl-keepalive.log");
     private readonly string _recordPath = Path.Combine(SharedDirectory, "sycl-keepalive.json");
+    private static readonly string StagingRoot = Path.Combine(SharedDirectory, "sycl-keepalive");
+    // Content hash of the bundled executable, naming its staged copy's folder.
+    private string? _bundledHash;
 
     // The process we manage: cmd.exe wrapping the keep-alive (started by us, or by an earlier
     // router run and taken over from the shared record), or a bare keep-alive found by path.
@@ -226,7 +230,7 @@ public sealed class SyclKeepAliveService : BackgroundService
                 return;
             }
 
-            var exePath = Path.GetFullPath(settings.ExecutablePath ?? BundledExecutablePath);
+            var exePath = settings.ExecutablePath is { } custom ? Path.GetFullPath(custom) : StageBundledExecutable();
             var config = string.Join("\n", new[] { exePath, settings.EnvironmentSetupCommand }.Concat(plan.Arguments));
 
             if (_process is not null)
@@ -258,7 +262,7 @@ public sealed class SyclKeepAliveService : BackgroundService
 
             // No record, but one running from our own executable is ours too (e.g. the record was
             // lost); its arguments are unknown, so it gets restarted with ours.
-            var existing = FindRunningKeepAlives(exePath);
+            var existing = FindRunningKeepAlives(exePath, BundledExecutablePath);
             if (existing.Own is { } stray)
             {
                 _process = stray;
@@ -346,6 +350,7 @@ public sealed class SyclKeepAliveService : BackgroundService
         _processConfig = config;
         WriteRecord(new OwnerRecord(process.Id, process.StartTime.ToUniversalTime(), config, AppContext.BaseDirectory));
         _logger.LogInformation("Started SYCL keep-alive (PID {Pid}): {Reason}", process.Id, reason);
+        RemoveStaleStagedCopies(exePath);
         Status = new(SyclKeepAliveState.Running, reason, process.Id, DateTimeOffset.Now, ReadLogTail());
     }
 
@@ -432,9 +437,10 @@ public sealed class SyclKeepAliveService : BackgroundService
 
     /// <summary>
     /// Running keep-alives by process name — the configured executable's name plus the bundled
-    /// one's. <c>Own</c> is one started from <paramref name="exePath"/>.
+    /// one's. <c>Own</c> is one started from <paramref name="exePath"/>, or from the install folder's
+    /// bundled copy (where earlier versions ran it).
     /// </summary>
-    private static (Process? Own, List<Process> External) FindRunningKeepAlives(string exePath)
+    private static (Process? Own, List<Process> External) FindRunningKeepAlives(string exePath, string bundledPath)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -450,12 +456,69 @@ public sealed class SyclKeepAliveService : BackgroundService
             try { path = process.MainModule?.FileName; }
             catch { /* another user's process when not elevated — treat it as external */ }
 
-            if (own is null && path is not null && string.Equals(Path.GetFullPath(path), exePath, StringComparison.OrdinalIgnoreCase))
+            if (own is null && path is not null && (string.Equals(Path.GetFullPath(path), exePath, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(Path.GetFullPath(path), Path.GetFullPath(bundledPath), StringComparison.OrdinalIgnoreCase)))
                 own = process;
             else
                 external.Add(process);
         }
         return (own, external);
+    }
+
+    // --- Staged copy of the bundled executable ---
+
+    /// <summary>
+    /// Returns the path to run the bundled keep-alive from: a copy under the shared folder, not the
+    /// install folder. The keep-alive outlives the router on purpose, and running it from
+    /// <c>bin\</c> locks the file so the next build (or an update of the install) can't replace it.
+    /// The copy's folder is named by content hash, so a new keep-alive build gets a new path; its
+    /// config then differs and the running one is replaced. Falls back to the install folder's copy.
+    /// </summary>
+    private string StageBundledExecutable()
+    {
+        if (!File.Exists(BundledExecutablePath))
+            return BundledExecutablePath; // reported as not found by the caller
+
+        try
+        {
+            _bundledHash ??= Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(BundledExecutablePath)))[..12].ToLowerInvariant();
+            var directory = Path.Combine(StagingRoot, _bundledHash);
+            var staged = Path.Combine(directory, SyclKeepAlivePlanner.BundledExecutableName);
+            if (!File.Exists(staged))
+            {
+                EnsureSharedDirectory();
+                Directory.CreateDirectory(directory);
+                var temp = staged + ".tmp";
+                File.Copy(BundledExecutablePath, temp, overwrite: true);
+                File.Move(temp, staged, overwrite: true);
+            }
+            return staged;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Couldn't copy the bundled SYCL keep-alive to {Dir}; running it from the install folder.", StagingRoot);
+            return BundledExecutablePath;
+        }
+    }
+
+    /// <summary>Best effort: deletes staged copies other than the one now running (one still in use just stays).</summary>
+    private static void RemoveStaleStagedCopies(string exePath)
+    {
+        var current = Path.GetDirectoryName(exePath);
+        if (current is null || !string.Equals(Path.GetDirectoryName(current), StagingRoot, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        try
+        {
+            foreach (var directory in Directory.EnumerateDirectories(StagingRoot))
+            {
+                if (string.Equals(directory, current, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                try { Directory.Delete(directory, recursive: true); }
+                catch { /* in use or not ours to delete */ }
+            }
+        }
+        catch { /* best effort */ }
     }
 
     // --- Shared record (%ProgramData%\LLM Router) ---
