@@ -41,9 +41,13 @@ public class DecideModel : PageModel
     [BindProperty(SupportsGet = true)]
     public Guid? PresetId { get; set; }
 
+    /// <summary>Presets whose model is running right now; the picker defaults to one of these so a send doesn't swap models unnoticed.</summary>
+    public IReadOnlySet<Guid> LoadedPresetIds { get; set; } = new HashSet<Guid>();
+
     public IActionResult OnGet()
     {
         var servers = _serverManager.GetAllInstances();
+        LoadedPresetIds = servers.Where(s => s.Status == ServerStatus.Running && s.ActivePresetId is not null).Select(s => s.ActivePresetId!.Value).ToHashSet();
         var all = _presetManager.GetAllPresets().OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
         Presets = all.ForDecisions(servers, _engines).ToList();
         ChatPresets = all.ForChat(servers, _engines).ToList();

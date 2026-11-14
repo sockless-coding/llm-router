@@ -37,6 +37,9 @@ public class GenerateModel : PageModel
     [BindProperty(SupportsGet = true)]
     public Guid? PresetId { get; set; }
 
+    /// <summary>Presets whose model is running right now; the picker defaults to one of these so a send doesn't swap models unnoticed.</summary>
+    public IReadOnlySet<Guid> LoadedPresetIds { get; set; } = new HashSet<Guid>();
+
     /// <summary>Sampler/scheduler suggestions until the loaded model reports its own lists.</summary>
     public IReadOnlyList<string> SamplingMethods => StableDiffusionPresetSettings.SuggestedSamplingMethods;
     public IReadOnlyList<string> Schedulers => StableDiffusionPresetSettings.SuggestedSchedulers;
@@ -44,6 +47,7 @@ public class GenerateModel : PageModel
     public IActionResult OnGet()
     {
         var servers = _serverManager.GetAllInstances();
+        LoadedPresetIds = servers.Where(s => s.Status == ServerStatus.Running && s.ActivePresetId is not null).Select(s => s.ActivePresetId!.Value).ToHashSet();
         var all = _presetManager.GetAllPresets().OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
         Presets = all.OfModality(servers, _engines, EngineModality.Image).ToList();
         ChatPresets = all.ForChat(servers, _engines).ToList();

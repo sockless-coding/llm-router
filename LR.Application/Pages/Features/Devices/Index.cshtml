@@ -217,7 +217,7 @@
                     <input id="KeepAliveExecutablePath" name="KeepAliveExecutablePath" value="@Model.KeepAliveSettings.ExecutablePath"
                            placeholder="@Model.BundledKeepAlivePath"
                            class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all text-sm font-mono" />
-                    <p class="text-xs text-text-secondary mt-1">Leave empty to use the bundled build. If a keep-alive is already running (e.g. as a server's companion app), the router won't start a second one, so you can drop those companion apps once this is on.</p>
+                    <p class="text-xs text-text-secondary mt-1">Leave empty to use the bundled build (run from a copy under <code>%ProgramData%\LLM Router</code>, so it doesn't lock the install folder). If a keep-alive is already running (e.g. as a server's companion app), the router won't start a second one, so you can drop those companion apps once this is on.</p>
                 </div>
                 <div class="flex gap-3">
                     <button type="submit"

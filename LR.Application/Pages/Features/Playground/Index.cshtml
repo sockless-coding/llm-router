@@ -27,7 +27,7 @@
                         <optgroup label="Chat">
                             @foreach (var preset in Model.Presets)
                             {
-                                <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
+                                <option value="@preset.Id" data-name="@preset.Name" data-loaded="@(Model.LoadedPresetIds.Contains(preset.Id) ? "true" : null)" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
                             }
                         </optgroup>
                         <!-- Picking one of these switches to the Generate or Decide page -->
@@ -54,7 +54,7 @@
                     {
                         @foreach (var preset in Model.Presets)
                         {
-                            <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
+                            <option value="@preset.Id" data-name="@preset.Name" data-loaded="@(Model.LoadedPresetIds.Contains(preset.Id) ? "true" : null)" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
                         }
                     }
                 </select>
@@ -203,13 +203,19 @@ function saveSettings() {
     paramInputs.forEach(el => s.params[el.id] = el.value);
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { }
 }
+// The initial preset: an explicit ?presetId= wins; otherwise one whose model is already loaded, so
+// the first send doesn't quietly swap models. The remembered preset wins when it's loaded or nothing is.
+function pickInitialPreset(select, remembered) {
+    if (new URLSearchParams(location.search).has('presetId')) return;
+    const own = select.querySelector(`option[value="${remembered}"]:not([data-switch])`);
+    const pick = own?.dataset.loaded ? own : select.querySelector('option[data-loaded]:not([data-switch])') ?? own;
+    if (pick) select.value = pick.value;
+}
 function loadSettings() {
     let s;
     try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch { }
+    pickInitialPreset(presetSelect, s?.preset);
     if (!s) return;
-    // An explicit ?presetId= wins over the remembered preset.
-    if (s.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${s.preset}"]:not([data-switch])`))
-        presetSelect.value = s.preset;
     $('pgLabel').value = s.label ?? '';
     $('pgRecord').checked = s.record ?? true;
     $('pgSystem').value = s.system ?? '';

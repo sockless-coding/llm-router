@@ -24,7 +24,7 @@
                         <optgroup label="Decision">
                             @foreach (var preset in Model.Presets)
                             {
-                                <option value="@preset.Id" data-name="@preset.Name" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
+                                <option value="@preset.Id" data-name="@preset.Name" data-loaded="@(Model.LoadedPresetIds.Contains(preset.Id) ? "true" : null)" selected="@(preset.Id == Model.PresetId ? "selected" : null)">@preset.Name</option>
                             }
                         </optgroup>
                         <!-- Picking one of these switches to the chat Playground or the Generate page -->
@@ -268,11 +268,18 @@ function setJsonDirty(dirty) {
 function saveDraft() {
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ preset: presetSelect.value, state: stateEl.value, stateJson: stateJsonEl.checked, questions })); } catch { }
 }
+// The initial preset: an explicit ?presetId= wins; otherwise one whose model is already loaded, so
+// the first ask doesn't quietly swap models. The remembered preset wins when it's loaded or nothing is.
+function pickInitialPreset(select, remembered) {
+    if (new URLSearchParams(location.search).has('presetId')) return;
+    const own = select.querySelector(`option[value="${remembered}"]:not([data-switch])`);
+    const pick = own?.dataset.loaded ? own : select.querySelector('option[data-loaded]:not([data-switch])') ?? own;
+    if (pick) select.value = pick.value;
+}
 function loadDraft() {
     let d = null;
     try { d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { }
-    if (d?.preset && !new URLSearchParams(location.search).has('presetId') && presetSelect.querySelector(`option[value="${d.preset}"]:not([data-switch])`))
-        presetSelect.value = d.preset;
+    pickInitialPreset(presetSelect, d?.preset);
     if (Array.isArray(d?.questions) && d.questions.length) {
         stateEl.value = d.state ?? '';
         stateJsonEl.checked = !!d.stateJson;

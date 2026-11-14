@@ -32,10 +32,14 @@ public class IndexModel : PageModel
     [BindProperty(SupportsGet = true)]
     public Guid? PresetId { get; set; }
 
+    /// <summary>Presets whose model is running right now; the picker defaults to one of these so a send doesn't swap models unnoticed.</summary>
+    public IReadOnlySet<Guid> LoadedPresetIds { get; set; } = new HashSet<Guid>();
+
     public IActionResult OnGet()
     {
         // This page chats; image and video presets have their own Generate page.
         var servers = _serverManager.GetAllInstances();
+        LoadedPresetIds = servers.Where(s => s.Status == ServerStatus.Running && s.ActivePresetId is not null).Select(s => s.ActivePresetId!.Value).ToHashSet();
         var all = _presetManager.GetAllPresets().OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
         Presets = all.ForChat(servers, _engines).ToList();
         ImagePresets = all.OfModality(servers, _engines, EngineModality.Image).ToList();
