@@ -13,10 +13,16 @@
             <h1 class="text-3xl font-bold text-neon-cyan"><span aria-hidden="true">🔑</span> API Keys</h1>
             <p class="text-text-secondary mt-1">Manage keys that authenticate clients against the OpenAI, Responses, Claude, and Ollama endpoints.</p>
         </div>
+        <div class="flex items-center gap-2">
+        <a href="/Features/ApiKeys/Usage" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/20 transition-all text-sm font-medium">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+            Usage
+        </a>
         <a href="/Features/ApiKeys/Create" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-magenta/10 text-neon-magenta border border-neon-magenta/30 hover:bg-neon-magenta/20 transition-all text-sm font-medium">
             <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
             New API Key
         </a>
+        </div>
     </div>
 
     <div class="mb-6 rounded-xl p-4 border border-neon-cyan/20 bg-neon-cyan/5">
@@ -66,6 +72,10 @@
                                 </button>
                             </td>
                             <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                                <a href="/Features/ApiKeys/Usage?apiKeyId=@key.Id"
+                                   class="text-xs px-3 py-1.5 rounded-md bg-neon-green/10 text-neon-green hover:bg-neon-green/20 transition-all font-medium">
+                                    Usage
+                                </a>
                                 <a href="/Features/ApiKeys/Edit?id=@key.Id"
                                    class="text-xs px-3 py-1.5 rounded-md bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta/20 transition-all font-medium">
                                     Edit

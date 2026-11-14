@@ -20,6 +20,7 @@ public class LRDbContext : DbContext
     public DbSet<Models.ModelLibrarySettings> ModelLibrarySettings => Set<Models.ModelLibrarySettings>();
     public DbSet<Models.ApiKey> ApiKeys => Set<Models.ApiKey>();
     public DbSet<Models.ApiKeyModelPreset> ApiKeyModelPresets => Set<Models.ApiKeyModelPreset>();
+    public DbSet<Models.ApiKeyUsageHourly> ApiKeyUsageHourly => Set<Models.ApiKeyUsageHourly>();
     public DbSet<Models.EngineBuild> EngineBuilds => Set<Models.EngineBuild>();
     public DbSet<Models.LlamaCppBuildRecipe> LlamaCppBuildRecipes => Set<Models.LlamaCppBuildRecipe>();
     public DbSet<Models.EngineBuildSettings> EngineBuildSettings => Set<Models.EngineBuildSettings>();
@@ -352,6 +353,25 @@ public class LRDbContext : DbContext
         {
             entity.ToTable("ApiKeys");
             entity.HasIndex(e => e.KeyHash).IsUnique();
+        });
+
+        // ApiKeyUsageHourly: per key × model × UTC hour usage rollup for usage reports.
+        modelBuilder.Entity<Models.ApiKeyUsageHourly>(entity =>
+        {
+            entity.ToTable("ApiKeyUsageHourly");
+
+            // The composite key doubles as the ON CONFLICT target of the recording upsert
+            // (see ApiKeyUsageService.RecordAsync). ApiKeyId is Guid.Empty, not NULL, for
+            // keyless requests because SQLite never treats NULLs as conflicting.
+            entity.HasKey(e => new { e.HourStart, e.ApiKeyId, e.ModelName });
+
+            // Round-trip UTC TEXT, matching ModelStatistics, so range filters run in SQL.
+            entity.Property(e => e.HourStart).HasConversion(
+                v => v.UtcDateTime.ToString("O"),
+                v => DateTimeOffset.Parse(v));
+
+            // Per-key report filter over a time range.
+            entity.HasIndex(e => new { e.ApiKeyId, e.HourStart });
         });
 
         // ApiKeyModelPreset configurations (many-to-many join: key <-> allowed preset)

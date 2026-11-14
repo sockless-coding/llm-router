@@ -29,6 +29,7 @@ public abstract class PassthroughGateway
     private readonly IRequestQueueService _queue;
     private readonly IApiRequestLogger _requestLogger;
     private readonly GatewaySettings _gatewaySettings;
+    private readonly IApiKeyUsageService _usage;
 
     protected PassthroughGateway(
         ILogger logger,
@@ -38,7 +39,8 @@ public abstract class PassthroughGateway
         IRequestQueueService queue,
         IApiRequestLogger requestLogger,
         GatewaySettings gatewaySettings,
-        IApiKeyRequestContext apiKeyContext)
+        IApiKeyRequestContext apiKeyContext,
+        IApiKeyUsageService usage)
     {
         _logger = logger;
         _serverManager = serverManager;
@@ -48,6 +50,7 @@ public abstract class PassthroughGateway
         _requestLogger = requestLogger;
         _gatewaySettings = gatewaySettings;
         ApiKeyContext = apiKeyContext;
+        _usage = usage;
     }
 
     protected IPresetManager PresetManager { get; }
@@ -140,6 +143,13 @@ public abstract class PassthroughGateway
                 }
                 catch { /* Logging failure shouldn't block the response */ }
             }
+
+            try
+            {
+                await _usage.RecordAsync(routeRequest.ApiKeyId, preset.Name, preset.Id,
+                    response.PromptTokensProcessed, response.GeneratedTokenCount);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to record API key usage for {Endpoint}", endpointPath); }
 
             return new PassthroughResult(response, 200, null);
         }

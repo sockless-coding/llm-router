@@ -92,6 +92,46 @@ namespace LR.Core.Migrations
                     b.ToTable("ApiKeyModelPresets", (string)null);
                 });
 
+            modelBuilder.Entity("LR.Core.Models.ApiKeyUsageHourly", b =>
+                {
+                    b.Property<string>("HourStart")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ApiKeyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelName")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ApiKeyName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ApiKeyPrefix")
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("GeneratedTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("PresetId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PromptTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("RequestCount")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("HourStart", "ApiKeyId", "ModelName");
+
+                    b.HasIndex("ApiKeyId", "HourStart");
+
+                    b.ToTable("ApiKeyUsageHourly", (string)null);
+                });
+
             modelBuilder.Entity("LR.Core.Models.ApiRequestLog", b =>
                 {
                     b.Property<Guid>("Id")

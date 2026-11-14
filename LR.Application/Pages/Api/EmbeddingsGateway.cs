@@ -20,8 +20,9 @@ public class EmbeddingsGateway(
     IRequestQueueService queue,
     IApiRequestLogger requestLogger,
     GatewaySettings gatewaySettings,
-    IApiKeyRequestContext apiKeyContext)
-    : PassthroughGateway(logger, serverManager, presetManager, routingEngine, queue, requestLogger, gatewaySettings, apiKeyContext)
+    IApiKeyRequestContext apiKeyContext,
+    IApiKeyUsageService usage)
+    : PassthroughGateway(logger, serverManager, presetManager, routingEngine, queue, requestLogger, gatewaySettings, apiKeyContext, usage)
 {
     private const string BackendEndpoint = "/v1/embeddings";
 

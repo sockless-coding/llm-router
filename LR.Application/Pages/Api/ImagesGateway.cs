@@ -31,6 +31,7 @@ public class ImagesGateway
     private readonly GatewaySettings _gatewaySettings;
     private readonly IApiKeyRequestContext _apiKeyContext;
     private readonly IEngineCatalog _engines;
+    private readonly IApiKeyUsageService _usage;
 
     public ImagesGateway(
         ILogger<ImagesGateway> logger,
@@ -41,7 +42,8 @@ public class ImagesGateway
         IApiRequestLogger requestLogger,
         GatewaySettings gatewaySettings,
         IApiKeyRequestContext apiKeyContext,
-        IEngineCatalog engines)
+        IEngineCatalog engines,
+        IApiKeyUsageService usage)
     {
         _logger = logger;
         _serverManager = serverManager;
@@ -52,6 +54,7 @@ public class ImagesGateway
         _gatewaySettings = gatewaySettings;
         _apiKeyContext = apiKeyContext;
         _engines = engines;
+        _usage = usage;
     }
 
     public async Task<IResult> HandleGenerationsAsync(HttpRequest httpRequest, CancellationToken cancellationToken)
@@ -144,6 +147,13 @@ public class ImagesGateway
                 }
                 catch { /* Logging failure shouldn't block the response */ }
             }
+
+            try
+            {
+                await _usage.RecordAsync(routeRequest.ApiKeyId, preset.Name, preset.Id,
+                    response.PromptTokensProcessed, response.GeneratedTokenCount);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to record API key usage for image generation"); }
 
             return Results.Content(response.Payload, "application/json");
         }

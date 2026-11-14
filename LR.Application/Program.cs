@@ -66,6 +66,7 @@ builder.Services.AddSingleton<ProviderRegistry>();
 builder.Services.AddScoped<IServerManager, ServerManager>();
 builder.Services.AddScoped<IPresetManager, PresetManager>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
+builder.Services.AddScoped<IApiKeyUsageService, ApiKeyUsageService>();
 builder.Services.AddScoped<IRoutingEngine, RoutingEngine>();
 
 // API key authentication (Scoped — need DbContext for validation, and per-request state for scoping)
