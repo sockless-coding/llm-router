@@ -1650,6 +1650,28 @@ namespace LR.Core.Migrations
                     b.ToTable("StoredResponses", (string)null);
                 });
 
+            modelBuilder.Entity("LR.Core.Models.SyclKeepAliveSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnvironmentSetupCommand")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExecutablePath")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SyclKeepAliveSettings", (string)null);
+                });
+
             modelBuilder.Entity("LR.Core.Models.VllmModel", b =>
                 {
                     b.Property<Guid>("Id")

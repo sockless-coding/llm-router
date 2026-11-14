@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Management;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 
@@ -81,6 +82,10 @@ public partial class ComputeDeviceService : IComputeDeviceService
                     VramBytes = kind == ComputeDeviceKind.Gpu ? TryGetVramBytes(deviceId) : null,
                     SupportedBackends = GetSupportedBackends(vendor, kind.Value),
                     OtherCapabilities = GetOtherCapabilities(vendor),
+                    HasDisplayAttached = kind == ComputeDeviceKind.Gpu && errorCode != CM_PROB_DISABLED
+                        ? TryHasDisplayAttached(deviceId)
+                        : null,
+                    PciAddress = kind == ComputeDeviceKind.Gpu ? TryGetPciAddress(deviceId) : null,
                 });
             }
         }
@@ -216,6 +221,114 @@ public partial class ComputeDeviceService : IComputeDeviceService
         }
 
         return null;
+    }
+
+    // --- Attached-monitor detection (cfgmgr32 device tree) ---
+
+    private const int CR_SUCCESS = 0;
+
+    // GUID_DEVCLASS_MONITOR — the setup class every real (or dummy-plug) monitor devnode has.
+    private static readonly Guid MonitorClassGuid = new("4d36e96e-e325-11ce-bfc1-08002be10318");
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    private static extern int CM_Locate_DevNodeW(out uint devInst, string deviceId, uint flags);
+
+    [DllImport("cfgmgr32.dll")]
+    private static extern int CM_Get_Child(out uint child, uint devInst, uint flags);
+
+    [DllImport("cfgmgr32.dll")]
+    private static extern int CM_Get_Sibling(out uint sibling, uint devInst, uint flags);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DEVPROPKEY
+    {
+        public Guid fmtid;
+        public uint pid;
+    }
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    private static extern int CM_Get_DevNode_PropertyW(uint devInst, ref DEVPROPKEY key, out uint propertyType, out uint buffer, ref uint bufferSize, uint flags);
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, EntryPoint = "CM_Get_DevNode_PropertyW")]
+    private static extern int CM_Get_DevNode_PropertyGuid(uint devInst, ref DEVPROPKEY key, out uint propertyType, out Guid buffer, ref uint bufferSize, uint flags);
+
+    // Property set holding DEVPKEY_Device_ClassGuid (10, DEVPROP_TYPE_GUID), DEVPKEY_Device_BusNumber
+    // (23) and DEVPKEY_Device_Address (30), the last two DEVPROP_TYPE_UINT32.
+    private static readonly Guid DevicePropertyGuid = new("a45c254e-df1c-4efd-8020-67d146a850e0");
+
+    private static Guid? TryGetClassGuid(uint devInst)
+    {
+        var key = new DEVPROPKEY { fmtid = DevicePropertyGuid, pid = 10 };
+        uint size = 16;
+        return CM_Get_DevNode_PropertyGuid(devInst, ref key, out _, out var value, ref size, 0) == CR_SUCCESS ? value : null;
+    }
+
+    private static uint? TryGetUInt32Property(uint devInst, uint pid)
+    {
+        var key = new DEVPROPKEY { fmtid = DevicePropertyGuid, pid = pid };
+        uint size = sizeof(uint);
+        return CM_Get_DevNode_PropertyW(devInst, ref key, out _, out var value, ref size, 0) == CR_SUCCESS ? value : null;
+    }
+
+    /// <summary>
+    /// The GPU's PCI location as <c>bb:dd.f</c> (lowercase hex, no domain) — the form the bundled
+    /// keep-alive's <c>--device</c> accepts and matches against SYCL's own PCI address, so
+    /// two identical cards can still be told apart. For PCI devices, DEVPKEY_Device_Address
+    /// packs the device number in the high word and the function in the low word.
+    /// </summary>
+    private static string? TryGetPciAddress(string instanceId)
+    {
+        if (!instanceId.StartsWith(@"PCI\", StringComparison.OrdinalIgnoreCase))
+            return null;
+        try
+        {
+            if (CM_Locate_DevNodeW(out var devInst, instanceId, 0) != CR_SUCCESS)
+                return null;
+            if (TryGetUInt32Property(devInst, 23) is not { } bus || TryGetUInt32Property(devInst, 30) is not { } address)
+                return null;
+            return $"{bus:x2}:{address >> 16:x2}.{address & 0xFFFF:x1}";
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A display adapter enumerates each connected monitor as a child devnode of the Monitor setup
+    /// class; unplugging the monitor removes it from the (present-devices-only) device tree.
+    /// Walking the GPU's children therefore answers "is a screen attached to this card" without
+    /// needing an interactive desktop session, so it also works when the router runs as a service
+    /// in session 0. A dummy HDMI/DP plug shows up as a monitor too, which is correct — it also
+    /// keeps the driver from dropping VRAM.
+    ///
+    /// Matching on the class rather than the <c>DISPLAY\</c> instance-ID prefix matters: Intel Arc
+    /// drivers also enumerate non-monitor children under that prefix (<c>DISPLAY\INTC_HECI_2</c>,
+    /// the firmware interface, and <c>DISPLAY\INTC_PMT</c>, telemetry), both of class System.
+    /// </summary>
+    private static bool? TryHasDisplayAttached(string instanceId)
+    {
+        try
+        {
+            if (CM_Locate_DevNodeW(out var adapter, instanceId, 0) != CR_SUCCESS)
+                return null;
+
+            if (CM_Get_Child(out var child, adapter, 0) != CR_SUCCESS)
+                return false;
+
+            do
+            {
+                if (TryGetClassGuid(child) == MonitorClassGuid)
+                    return true;
+            }
+            while (CM_Get_Sibling(out child, child, 0) == CR_SUCCESS);
+
+            return false;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
     }
 
     private static bool RuntimeDllInstalled(string fileName) =>

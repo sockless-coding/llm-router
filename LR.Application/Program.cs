@@ -226,6 +226,12 @@ builder.Services.AddHostedService<LR.Application.Services.RequestDispatcherServi
 builder.Services.AddHostedService<LR.Application.Services.ServerLoadBroadcastService>();
 builder.Services.AddHostedService<LR.Application.Services.IdleUnloadService>();
 
+// Router-wide SYCL keep-alive for headless Intel GPUs on Windows (opt-in, from the Devices page).
+// Singleton + hosted so the Devices page can read its status and trigger a re-check.
+builder.Services.AddSingleton<ISyclKeepAliveSettingsService, SyclKeepAliveSettingsService>();
+builder.Services.AddSingleton<LR.Application.Services.SyclKeepAliveService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<LR.Application.Services.SyclKeepAliveService>());
+
 // Self-update from the router's GitHub releases (Singleton — holds check/download state)
 builder.Services.AddSingleton<AppUpdateService>();
 
