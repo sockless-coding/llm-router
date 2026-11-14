@@ -64,6 +64,7 @@ public sealed class SyclKeepAliveService : BackgroundService
     private static readonly string StagingRoot = Path.Combine(SharedDirectory, "sycl-keepalive");
     // Content hash of the bundled executable, naming its staged copy's folder.
     private string? _bundledHash;
+    private bool _sharedDirectoryChecked;
 
     // The process we manage: cmd.exe wrapping the keep-alive (started by us, or by an earlier
     // router run and taken over from the shared record), or a bare keep-alive found by path.
@@ -309,6 +310,15 @@ public sealed class SyclKeepAliveService : BackgroundService
     {
         _lastStartAttempt = DateTimeOffset.UtcNow;
         EnsureSharedDirectory();
+        if (!CanWriteLog())
+        {
+            Status = new(SyclKeepAliveState.Failed,
+                $"Can't write the keep-alive log {_logPath} as {Environment.UserName}. The folder was likely created by a " +
+                $"router running as another account; grant access with: icacls \"{SharedDirectory}\" /reset /T, " +
+                "or delete the folder so it's recreated.");
+            _logger.LogWarning("SYCL keep-alive not started: {Message}", Status.Message);
+            return;
+        }
 
         var startInfo = new ProcessStartInfo
         {
@@ -527,28 +537,65 @@ public sealed class SyclKeepAliveService : BackgroundService
     /// Creates the shared folder so every account a router may run as — the service as SYSTEM, a
     /// dev build as the signed-in user — can replace the record and log the other one wrote.
     /// </summary>
+    /// <remarks>
+    /// Created plainly first, so it inherits %ProgramData%'s SYSTEM and Administrators rights, and
+    /// only then granted Users: Modify. (Passing a DACL at creation replaces the inherited one, which
+    /// earlier versions did — leaving a folder SYSTEM can't write, so the service's keep-alive failed
+    /// to start. Such a folder is repaired here when this account is allowed to.)
+    /// </remarks>
     private void EnsureSharedDirectory()
     {
-        if (Directory.Exists(SharedDirectory))
+        Directory.CreateDirectory(SharedDirectory);
+        if (_sharedDirectoryChecked || !OperatingSystem.IsWindows())
             return;
 
         try
         {
-            if (!OperatingSystem.IsWindows())
-                throw new PlatformNotSupportedException();
-            var security = new DirectorySecurity();
+            var directory = new DirectoryInfo(SharedDirectory);
+            var security = directory.GetAccessControl();
+            var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+            var usersCanModify = security.GetAccessRules(true, false, typeof(SecurityIdentifier))
+                .OfType<FileSystemAccessRule>()
+                .Any(r => r.IdentityReference.Equals(users) && r.AccessControlType == AccessControlType.Allow
+                    && (r.FileSystemRights & FileSystemRights.Modify) == FileSystemRights.Modify
+                    && r.InheritanceFlags == (InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit));
+
+            if (!security.AreAccessRulesProtected && usersCanModify)
+            {
+                _sharedDirectoryChecked = true;
+                return;
+            }
+
+            security.SetAccessRuleProtection(isProtected: false, preserveInheritance: true);
             security.AddAccessRule(new FileSystemAccessRule(
-                new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
+                users,
                 FileSystemRights.Modify,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None,
                 AccessControlType.Allow));
-            new DirectoryInfo(SharedDirectory).Create(security);
+            directory.SetAccessControl(security);
+            _sharedDirectoryChecked = true;
+            _logger.LogInformation("Set shared permissions on {Dir}.", SharedDirectory);
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Couldn't create {Dir} with shared permissions; using the defaults.", SharedDirectory);
-            Directory.CreateDirectory(SharedDirectory);
+            _sharedDirectoryChecked = true; // don't retry (and log) on every start attempt
+            _logger.LogWarning(ex, "Couldn't set shared permissions on {Dir}; a router running as another account (e.g. the service) " +
+                "may not be able to use it.", SharedDirectory);
+        }
+    }
+
+    /// <summary>Whether the keep-alive's output can be appended to the log; cmd exits with code 1 if it can't.</summary>
+    private bool CanWriteLog()
+    {
+        try
+        {
+            using var _ = new FileStream(_logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return false;
         }
     }
 
