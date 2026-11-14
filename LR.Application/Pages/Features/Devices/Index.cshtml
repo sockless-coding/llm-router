@@ -1,8 +1,21 @@
 @page
 @using LR.Application.Pages.Features.Devices
+@using LR.Application.Services
 @model DevicesListModel
 @{
     ViewData["Title"] = "Devices";
+    var status = Model.KeepAliveStatus;
+    var keepAliveRunning = status.State is SyclKeepAliveState.Running or SyclKeepAliveState.RunningExternally;
+    var hasSyclGpu = Model.Devices.Any(d => d.IsSyclGpu);
+    var (stateLabel, stateClass) = status.State switch
+    {
+        SyclKeepAliveState.Running => ("Running", "bg-neon-green/10 text-neon-green border-neon-green/30"),
+        SyclKeepAliveState.RunningExternally => ("Running (external)", "bg-neon-green/10 text-neon-green border-neon-green/30"),
+        SyclKeepAliveState.Failed => ("Failed", "bg-red-500/10 text-neon-red border-red-500/30"),
+        SyclKeepAliveState.Unsupported => ("Unsupported", "bg-gray-700/30 text-text-secondary border-gray-600/30"),
+        SyclKeepAliveState.Stopped => ("Stopped", "bg-gray-700/30 text-text-secondary border-gray-600/30"),
+        _ => ("Not running", "bg-gray-700/30 text-text-secondary border-gray-600/30"),
+    };
 }
 
 <div class="max-w-5xl mx-auto px-4 py-6">
@@ -51,6 +64,7 @@
                         <th class="text-left px-4 py-3 text-text-secondary font-medium">Name</th>
                         <th class="text-left px-4 py-3 text-text-secondary font-medium">VRAM</th>
                         <th class="text-left px-4 py-3 text-text-secondary font-medium">Likely APIs</th>
+                        <th class="text-left px-4 py-3 text-text-secondary font-medium">Display</th>
                         <th class="text-left px-4 py-3 text-text-secondary font-medium">OS Status</th>
                         <th class="text-left px-4 py-3 text-text-secondary font-medium">State</th>
                         <th class="text-right px-4 py-3 text-text-secondary font-medium">Actions</th>
@@ -87,6 +101,17 @@
                                     <span class="text-text-secondary">—</span>
                                 }
                             </td>
+                            <td class="px-4 py-3 text-text-secondary">
+                                @(device.HasDisplayAttached switch { true => "Monitor", false => "Headless", null => "—" })
+                                @if (device.PciAddress is { } pci)
+                                {
+                                    <div class="text-xs text-text-secondary font-mono">PCI @pci</div>
+                                }
+                                @if (device.IsSyclGpu && keepAliveRunning)
+                                {
+                                    <div class="text-xs text-neon-green">kept alive</div>
+                                }
+                            </td>
                             <td class="px-4 py-3 text-text-secondary">@(device.StatusText ?? "—")</td>
                             <td class="px-4 py-3">
                                 <span class="text-xs px-2.5 py-1 rounded-full border font-medium
@@ -107,6 +132,105 @@
                 </tbody>
             </table>
         </div>
+    }
+
+    @if (OperatingSystem.IsWindows())
+    {
+        <section class="mt-6 bg-cyber-card rounded-xl border border-gray-700/30 p-5" aria-labelledby="keepalive-heading">
+            <div class="flex items-start justify-between gap-4 mb-3">
+                <div>
+                    <h2 id="keepalive-heading" class="text-lg font-semibold text-text-primary">SYCL keep-alive</h2>
+                    <p class="text-xs text-text-secondary mt-1">
+                        On Windows, an Intel GPU without a monitor attached drops its VRAM after about a minute idle, so a loaded
+                        model is lost. The router can run one small keep-alive that submits a no-op SYCL kernel every 10 seconds;
+                        one process covers every Intel card. It needs the oneAPI runtime, loaded by the setup command below.
+                        <a class="text-neon-cyan hover:underline" href="https://www.sockless.tech/articles/keeping-intel-gpu-vram-alive-a-sycl-keepalive-solution-for-local-ai-on-windows/" target="_blank" rel="noopener">Background</a>
+                    </p>
+                </div>
+                <span class="shrink-0 text-xs px-2.5 py-1 rounded-full border font-medium @stateClass">@stateLabel</span>
+            </div>
+
+            <p class="text-sm text-text-primary mb-1">
+                @status.Message
+                @if (status.ProcessId is { } pid)
+                {
+                    <span class="text-text-secondary">· PID @pid</span>
+                }
+            </p>
+            @* Stop only what the router runs itself; Start appears once there's something to (re)start. *@
+            @if (status.State is SyclKeepAliveState.Running or SyclKeepAliveState.Stopped or SyclKeepAliveState.Failed)
+            {
+                <form method="post" class="flex items-center gap-3 my-3">
+                    @if (status.State == SyclKeepAliveState.Running)
+                    {
+                        <button type="submit" asp-page-handler="KeepAliveStop"
+                                class="text-xs px-3 py-1.5 rounded-md transition-all font-medium bg-red-500/10 text-neon-red hover:bg-red-500/20">
+                            Stop
+                        </button>
+                        <span class="text-xs text-text-secondary">Stops it until you start it again or the router restarts. Set Mode to Off to turn it off for good.</span>
+                    }
+                    else
+                    {
+                        <button type="submit" asp-page-handler="KeepAliveStart"
+                                class="text-xs px-3 py-1.5 rounded-md transition-all font-medium bg-neon-green/10 text-neon-green hover:bg-neon-green/20">
+                            @(status.State == SyclKeepAliveState.Failed ? "Retry" : "Start")
+                        </button>
+                        @if (Model.KeepAliveSettings.Mode == SyclKeepAliveMode.Off)
+                        {
+                            <span class="text-xs text-text-secondary">Mode is Off, so Start won't run anything. Pick a mode below first.</span>
+                        }
+                    }
+                </form>
+            }
+            @if (!hasSyclGpu)
+            {
+                <p class="text-xs text-text-secondary mb-3">No enabled SYCL-capable Intel GPU is detected on this machine, so the keep-alive won't run in any mode.</p>
+            }
+            @if (status.LogTail is { Count: > 0 } tail)
+            {
+                <details class="mb-4" open="@(status.State == SyclKeepAliveState.Failed)">
+                    <summary class="text-xs text-text-secondary cursor-pointer">Keep-alive output</summary>
+                    <pre class="mt-2 text-xs font-mono text-text-secondary bg-cyber-bg-dark rounded-lg p-3 overflow-x-auto">@string.Join("\n", tail)</pre>
+                </details>
+            }
+
+            <form method="post" asp-page-handler="KeepAlive" class="space-y-4 mt-4">
+                <div>
+                    <label for="KeepAliveMode" class="block text-sm text-text-primary font-medium mb-1">Mode</label>
+                    <select id="KeepAliveMode" name="KeepAliveMode"
+                            class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all text-sm">
+                        <option value="Off" selected="@(Model.KeepAliveSettings.Mode == SyclKeepAliveMode.Off)">Off</option>
+                        <option value="Headless" selected="@(Model.KeepAliveSettings.Mode == SyclKeepAliveMode.Headless)">When a SYCL GPU has no monitor attached (recommended)</option>
+                        <option value="Always" selected="@(Model.KeepAliveSettings.Mode == SyclKeepAliveMode.Always)">Always, whenever a SYCL GPU is present</option>
+                    </select>
+                    <p class="text-xs text-text-secondary mt-1">Re-checked every minute, so plugging in or removing a monitor starts or stops it. A dummy display plug counts as a monitor.</p>
+                </div>
+                <div>
+                    <label for="KeepAliveEnvironmentSetupCommand" class="block text-sm text-text-primary font-medium mb-1">oneAPI setup command</label>
+                    <input id="KeepAliveEnvironmentSetupCommand" name="KeepAliveEnvironmentSetupCommand" value="@Model.KeepAliveSettings.EnvironmentSetupCommand"
+                           placeholder="@SyclKeepAliveSettings.DefaultEnvironmentSetupCommand"
+                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all text-sm font-mono" />
+                    <p class="text-xs text-text-secondary mt-1">Runs before the keep-alive so <code class="text-neon-cyan">sycl9.dll</code> is found. Leave empty if the oneAPI runtime is already on PATH.</p>
+                </div>
+                <div>
+                    <label for="KeepAliveExecutablePath" class="block text-sm text-text-primary font-medium mb-1">Executable <span class="text-text-secondary font-normal">(optional)</span></label>
+                    <input id="KeepAliveExecutablePath" name="KeepAliveExecutablePath" value="@Model.KeepAliveSettings.ExecutablePath"
+                           placeholder="@Model.BundledKeepAlivePath"
+                           class="w-full px-4 py-2.5 rounded-lg bg-cyber-bg-dark border border-gray-600/30 text-text-primary focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan/30 outline-none transition-all text-sm font-mono" />
+                    <p class="text-xs text-text-secondary mt-1">Leave empty to use the bundled build. If a keep-alive is already running (e.g. as a server's companion app), the router won't start a second one, so you can drop those companion apps once this is on.</p>
+                </div>
+                <div class="flex gap-3">
+                    <button type="submit"
+                            class="bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan shadow-neon-cyan px-6 py-2.5 rounded-lg font-medium transition-colors">
+                        Save
+                    </button>
+                    <button type="submit" asp-page-handler="KeepAliveRecheck"
+                            class="bg-gray-700/50 hover:bg-gray-700/80 text-text-secondary border border-gray-600 px-6 py-2.5 rounded-lg font-medium transition-colors">
+                        Re-check now
+                    </button>
+                </div>
+            </form>
+        </section>
     }
 </div>
 

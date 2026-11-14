@@ -15,6 +15,12 @@
     <ProjectReference Include="..\LR.Wrapper\LR.Wrapper.csproj" />
   </ItemGroup>
 
+  <!-- Prebuilt SYCL keep-alive (see Tools/sycl-keepalive/keepalive.cpp) the router runs for headless Intel GPUs. -->
+  <ItemGroup>
+    <None Include="Tools\sycl-keepalive\sycl-keepalive.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="Tools\sycl-keepalive\keepalive.cpp" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>

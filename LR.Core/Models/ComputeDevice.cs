@@ -35,4 +35,17 @@ public class ComputeDevice
     /// Purely informational.
     /// </summary>
     public IReadOnlyList<string> OtherCapabilities { get; set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Whether a monitor (a child device of the Monitor setup class) is currently connected to this GPU.
+    /// Null for NPUs, disabled devices, or when the device tree couldn't be read. A headless Intel
+    /// GPU is what the SYCL keep-alive exists for.
+    /// </summary>
+    public bool? HasDisplayAttached { get; set; }
+
+    /// <summary>PCI location as <c>bb:dd.f</c> (lowercase hex), when the OS reports one. Used to aim the SYCL keep-alive at specific cards.</summary>
+    public string? PciAddress { get; set; }
+
+    /// <summary>An enabled GPU that can likely run SYCL (an Intel card with Level Zero installed).</summary>
+    public bool IsSyclGpu => Kind == ComputeDeviceKind.Gpu && IsEnabled && SupportedBackends.Contains(BackendType.Sycl);
 }

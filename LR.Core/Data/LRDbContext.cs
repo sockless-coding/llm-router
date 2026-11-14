@@ -30,6 +30,7 @@ public class LRDbContext : DbContext
     public DbSet<Models.VllmModel> VllmModels => Set<Models.VllmModel>();
     public DbSet<Models.VllmRecipe> VllmRecipes => Set<Models.VllmRecipe>();
     public DbSet<Models.DiscoveryExclusion> DiscoveryExclusions => Set<Models.DiscoveryExclusion>();
+    public DbSet<Models.SyclKeepAliveSettings> SyclKeepAliveSettings => Set<Models.SyclKeepAliveSettings>();
 
     public LRDbContext(DbContextOptions<LRDbContext> options) : base(options)
     {
@@ -141,6 +142,12 @@ public class LRDbContext : DbContext
         modelBuilder.Entity<Models.EngineBuildSettings>(entity =>
         {
             entity.ToTable("EngineBuildSettings");
+        });
+
+        modelBuilder.Entity<Models.SyclKeepAliveSettings>(entity =>
+        {
+            entity.ToTable("SyclKeepAliveSettings");
+            entity.Property(e => e.Id).ValueGeneratedNever();
         });
 
         // ModelPreset configurations
