@@ -24,8 +24,9 @@ public class SystemOneGateway(
     IRequestQueueService queue,
     IApiRequestLogger requestLogger,
     GatewaySettings gatewaySettings,
-    IApiKeyRequestContext apiKeyContext)
-    : PassthroughGateway(logger, serverManager, presetManager, routingEngine, queue, requestLogger, gatewaySettings, apiKeyContext)
+    IApiKeyRequestContext apiKeyContext,
+    IApiKeyUsageService usage)
+    : PassthroughGateway(logger, serverManager, presetManager, routingEngine, queue, requestLogger, gatewaySettings, apiKeyContext, usage)
 {
     public const string Path = "/v1/systemone";
 

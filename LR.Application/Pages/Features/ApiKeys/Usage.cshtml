@@ -1,0 +1,474 @@
+@page
+@using LR.Application.Pages.Features.ApiKeys
+@model ApiKeyUsageModel
+@{
+    ViewData["Title"] = "API Key Usage";
+    var selectClasses = "bg-cyber-surface text-text-primary border border-gray-600 rounded-lg px-3 py-1.5 text-sm";
+}
+
+<div class="max-w-7xl mx-auto px-4 py-6">
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+        <div>
+            <a href="/Features/ApiKeys/Index" class="text-sm text-text-secondary hover:text-neon-cyan">← API Keys</a>
+            <h1 class="text-3xl font-bold text-neon-cyan mt-1"><span aria-hidden="true">📈</span> API Key Usage</h1>
+            <p class="text-text-secondary mt-1">Requests and tokens per API key and model, by day, week, month or year.</p>
+        </div>
+        <a id="usageCsvLink" href="/api/stats/usage-report?format=csv" hx-boost="false" download
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-neon-green/10 text-neon-green border border-neon-green/30 hover:bg-neon-green/20 transition-all text-sm font-medium">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" /></svg>
+            Download CSV
+        </a>
+    </div>
+
+    <!-- Controls -->
+    <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 mb-6 space-y-4">
+        <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Report period">
+            <span class="text-sm text-text-secondary w-16">Period</span>
+            @foreach (var (value, label) in new[] { ("day", "Day"), ("week", "Week"), ("month", "Month"), ("year", "Year"), ("total", "Total") })
+            {
+                <button type="button" data-period="@value" aria-pressed="false"
+                        class="usage-period-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors border bg-gray-800/50 text-text-secondary border-transparent hover:bg-neon-cyan/10 hover:text-neon-cyan">
+                    @label
+                </button>
+            }
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Quick date ranges">
+            <span class="text-sm text-text-secondary w-16">Range</span>
+            @foreach (var (value, label) in new[] { ("7d", "Last 7 days"), ("30d", "Last 30 days"), ("thisMonth", "This month"), ("lastMonth", "Last month"), ("12m", "Last 12 months"), ("thisYear", "This year") })
+            {
+                <button type="button" data-range="@value"
+                        class="usage-range-btn px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border bg-gray-800/50 text-text-secondary border-transparent hover:bg-neon-cyan/10 hover:text-neon-cyan">
+                    @label
+                </button>
+            }
+        </div>
+
+        <div class="flex flex-wrap items-end gap-4">
+            <label class="text-sm text-text-secondary flex flex-col gap-1">
+                From
+                <input id="usageFrom" type="date" class="@selectClasses" />
+            </label>
+            <label class="text-sm text-text-secondary flex flex-col gap-1">
+                To
+                <input id="usageTo" type="date" class="@selectClasses" />
+            </label>
+            <label class="text-sm text-text-secondary flex flex-col gap-1">
+                API key
+                <select id="usageKey" class="@selectClasses">
+                    <option value="">All keys</option>
+                    @foreach (var key in Model.Keys)
+                    {
+                        <option value="@key.Id" selected="@(string.Equals(Model.ApiKeyId, key.Id.ToString(), StringComparison.OrdinalIgnoreCase))">@key.Name (@(key.KeyPrefix)…)</option>
+                    }
+                    <option value="none" selected="@(string.Equals(Model.ApiKeyId, "none", StringComparison.OrdinalIgnoreCase))">No key</option>
+                </select>
+            </label>
+            <label class="text-sm text-text-secondary flex flex-col gap-1">
+                Model
+                <select id="usageModel" class="@selectClasses">
+                    <option value="">All models</option>
+                </select>
+            </label>
+            <label class="text-sm text-text-secondary flex flex-col gap-1">
+                Group by
+                <select id="usageGroup" class="@selectClasses">
+                    <option value="keymodel">Key × model</option>
+                    <option value="key">Key</option>
+                    <option value="model">Model</option>
+                </select>
+            </label>
+            <p id="usageTz" class="text-xs text-text-secondary pb-2"></p>
+        </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
+            <p class="text-sm text-text-secondary">Requests</p>
+            <p id="sumRequests" class="text-3xl font-bold mt-1 text-neon-cyan tabular-nums">–</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-green">
+            <p class="text-sm text-text-secondary">Input tokens</p>
+            <p id="sumInput" class="text-3xl font-bold mt-1 text-neon-green tabular-nums">–</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-magenta">
+            <p class="text-sm text-text-secondary">Output tokens</p>
+            <p id="sumOutput" class="text-3xl font-bold mt-1 text-neon-magenta tabular-nums">–</p>
+        </div>
+        <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan">
+            <p class="text-sm text-text-secondary">Total tokens</p>
+            <p id="sumTotal" class="text-3xl font-bold mt-1 text-neon-cyan tabular-nums">–</p>
+        </div>
+    </div>
+
+    <!-- Chart -->
+    <div id="usageChartCard" class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan mb-6">
+        <h2 id="usageChartTitle" class="text-lg font-semibold mb-4 text-neon-cyan">Total tokens per period</h2>
+        <div class="relative h-80"><canvas id="usageChart"></canvas></div>
+    </div>
+
+    <!-- Totals for the range -->
+    <div class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan mb-6">
+        <h2 class="text-lg font-semibold mb-4 text-neon-cyan">Totals for range</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-text-secondary border-b border-gray-700/40">
+                        <th class="py-2 pr-4 font-medium" id="totalsGroupHeader">Key · Model</th>
+                        <th class="py-2 px-4 font-medium text-right">Requests</th>
+                        <th class="py-2 px-4 font-medium text-right">Input tokens</th>
+                        <th class="py-2 px-4 font-medium text-right">Output tokens</th>
+                        <th class="py-2 px-4 font-medium text-right">Total tokens</th>
+                        <th class="py-2 pl-4 font-medium text-right">Share</th>
+                    </tr>
+                </thead>
+                <tbody id="usageTotalsBody">
+                    <tr><td colspan="6" class="py-4 text-text-secondary italic">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Per period -->
+    <div id="usagePeriodCard" class="bg-cyber-card rounded-xl p-5 border border-gray-700/30 shadow-neon-cyan mb-8">
+        <h2 class="text-lg font-semibold mb-4 text-neon-cyan">By period</h2>
+        <div class="overflow-x-auto max-h-[36rem] overflow-y-auto">
+            <table class="w-full text-sm">
+                <thead class="sticky top-0 bg-cyber-card">
+                    <tr class="text-left text-text-secondary border-b border-gray-700/40">
+                        <th class="py-2 pr-4 font-medium">Period</th>
+                        <th class="py-2 px-4 font-medium" id="periodGroupHeader">Key · Model</th>
+                        <th class="py-2 px-4 font-medium text-right">Requests</th>
+                        <th class="py-2 px-4 font-medium text-right">Input tokens</th>
+                        <th class="py-2 px-4 font-medium text-right">Output tokens</th>
+                        <th class="py-2 pl-4 font-medium text-right">Total tokens</th>
+                    </tr>
+                </thead>
+                <tbody id="usagePeriodBody">
+                    <tr><td colspan="6" class="py-4 text-text-secondary italic">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+// IIFE: under hx-boost this script re-runs on every navigation to the page, and top-level
+// let/const would throw "already declared" on the second visit.
+(function () {
+const rootStyle = getComputedStyle(document.documentElement);
+const cssVar = name => rootStyle.getPropertyValue(name).trim();
+const isDarkTheme = document.documentElement.classList.contains('dark');
+Chart.defaults.color = cssVar('--text-secondary');
+Chart.defaults.borderColor = isDarkTheme ? 'rgba(75,85,99,0.2)' : 'rgba(107,114,128,0.25)';
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const numberFmt = new Intl.NumberFormat();
+const compactFmt = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+const MAX_SERIES = 7; // the rest stack into "Other" so the chart stays readable
+
+const el = id => document.getElementById(id);
+const state = { period: 'day', from: null, to: null, apiKeyId: '', model: '', group: 'keymodel' };
+let rows = [];
+
+// ── Dates (local calendar, yyyy-MM-dd) ──
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+
+function rangeFor(key) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    switch (key) {
+        case '7d': return [addDays(today, -6), today];
+        case '30d': return [addDays(today, -29), today];
+        case 'thisMonth': return [new Date(today.getFullYear(), today.getMonth(), 1), today];
+        case 'lastMonth': return [new Date(today.getFullYear(), today.getMonth() - 1, 1), new Date(today.getFullYear(), today.getMonth(), 0)];
+        case '12m': return [new Date(today.getFullYear(), today.getMonth() - 11, 1), today];
+        case 'thisYear': return [new Date(today.getFullYear(), 0, 1), today];
+    }
+}
+
+// Mirrors ApiKeyUsageService.PeriodStart so the chart axis has every period, including empty ones.
+function periodStart(d, period, rangeStart) {
+    switch (period) {
+        case 'week': return addDays(d, -((d.getDay() + 6) % 7));
+        case 'month': return new Date(d.getFullYear(), d.getMonth(), 1);
+        case 'year': return new Date(d.getFullYear(), 0, 1);
+        case 'total': return rangeStart;
+        default: return d;
+    }
+}
+
+function allPeriods() {
+    const from = parseYmd(state.from), to = parseYmd(state.to);
+    const seen = new Set(), out = [];
+    for (let d = from; d <= to; d = addDays(d, 1)) {
+        const key = ymd(periodStart(d, state.period, from));
+        if (!seen.has(key)) { seen.add(key); out.push(key); }
+        if (state.period === 'total') break;
+    }
+    return out;
+}
+
+const monthFmt = new Intl.DateTimeFormat(undefined, { month: 'short', year: 'numeric' });
+const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+const dateFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+function periodLabel(start) {
+    const d = parseYmd(start);
+    switch (state.period) {
+        case 'week': return `Week of ${dateFmt.format(d)}`;
+        case 'month': return monthFmt.format(d);
+        case 'year': return String(d.getFullYear());
+        case 'total': return `${dateFmt.format(parseYmd(state.from))} – ${dateFmt.format(parseYmd(state.to))}`;
+        default: return dayFmt.format(d);
+    }
+}
+
+// ── Grouping ──
+const keyId = r => r.apiKeyId || 'none';
+function keyLabel(r) {
+    return r.apiKeyName + (r.keyDeleted ? ' (deleted)' : '');
+}
+function groupOf(r) {
+    switch (state.group) {
+        case 'key': return { id: keyId(r), label: keyLabel(r), prefix: r.apiKeyPrefix, keyless: !r.apiKeyId };
+        case 'model': return { id: r.model, label: r.model };
+        default: return { id: keyId(r) + '|' + r.model, label: `${keyLabel(r)} · ${r.model}`, prefix: r.apiKeyPrefix, keyless: !r.apiKeyId };
+    }
+}
+// The chart stacks by key unless grouping is by model only (key × model is too many series).
+const seriesOf = r => state.group === 'model' ? { id: r.model, label: r.model } : { id: keyId(r), label: keyLabel(r) };
+
+function visibleRows() {
+    return state.model ? rows.filter(r => r.model === state.model) : rows;
+}
+
+function aggregate(list, keyFn) {
+    const map = new Map();
+    for (const r of list) {
+        const g = keyFn(r);
+        let acc = map.get(g.id);
+        if (!acc) map.set(g.id, acc = { ...g, requestCount: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+        acc.requestCount += r.requestCount;
+        acc.inputTokens += r.inputTokens;
+        acc.outputTokens += r.outputTokens;
+        acc.totalTokens += r.totalTokens;
+    }
+    return [...map.values()].sort((a, b) => b.totalTokens - a.totalTokens);
+}
+
+// ── Rendering ──
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function groupCell(g) {
+    const label = g.keyless ? `<span class="text-text-secondary italic">${escapeHtml(g.label)}</span>` : escapeHtml(g.label);
+    const prefix = g.prefix && state.group !== 'model'
+        ? ` <span class="text-text-secondary font-mono text-xs">${escapeHtml(g.prefix)}…</span>` : '';
+    return label + prefix;
+}
+const num = n => `<td class="py-2 px-4 text-right tabular-nums">${numberFmt.format(n)}</td>`;
+
+function render() {
+    const list = visibleRows();
+    const header = { key: 'Key', model: 'Model', keymodel: 'Key · Model' }[state.group];
+    el('totalsGroupHeader').textContent = header;
+    el('periodGroupHeader').textContent = header;
+
+    const totals = aggregate(list, () => ({ id: 'all' }))[0] || { requestCount: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    el('sumRequests').textContent = numberFmt.format(totals.requestCount);
+    el('sumInput').textContent = numberFmt.format(totals.inputTokens);
+    el('sumOutput').textContent = numberFmt.format(totals.outputTokens);
+    el('sumTotal').textContent = numberFmt.format(totals.totalTokens);
+
+    const empty = '<tr><td colspan="6" class="py-4 text-text-secondary italic">No usage in this range.</td></tr>';
+
+    const groups = aggregate(list, groupOf);
+    el('usageTotalsBody').innerHTML = groups.length ? groups.map(g => `<tr class="border-b border-gray-800/60">
+            <td class="py-2 pr-4">${groupCell(g)}</td>
+            ${num(g.requestCount)}${num(g.inputTokens)}${num(g.outputTokens)}
+            <td class="py-2 px-4 text-right tabular-nums font-medium">${numberFmt.format(g.totalTokens)}</td>
+            <td class="py-2 pl-4 text-right tabular-nums text-text-secondary">${totals.totalTokens ? (g.totalTokens * 100 / totals.totalTokens).toFixed(1) : '0.0'}%</td>
+        </tr>`).join('') : empty;
+
+    // Per period: newest first, groups by tokens within each period.
+    const byPeriod = new Map();
+    for (const r of list) (byPeriod.get(r.periodStart) || byPeriod.set(r.periodStart, []).get(r.periodStart)).push(r);
+    const periodKeys = [...byPeriod.keys()].sort().reverse();
+    el('usagePeriodCard').classList.toggle('hidden', state.period === 'total');
+    el('usagePeriodBody').innerHTML = periodKeys.length ? periodKeys.map(p => aggregate(byPeriod.get(p), groupOf).map((g, i) => `<tr class="border-b border-gray-800/60${i === 0 ? ' border-t border-gray-700/40' : ''}">
+            <td class="py-2 pr-4 whitespace-nowrap">${i === 0 ? escapeHtml(periodLabel(p)) : ''}</td>
+            <td class="py-2 px-4">${groupCell(g)}</td>
+            ${num(g.requestCount)}${num(g.inputTokens)}${num(g.outputTokens)}
+            <td class="py-2 pl-4 text-right tabular-nums font-medium">${numberFmt.format(g.totalTokens)}</td>
+        </tr>`).join('')).join('') : empty;
+
+    renderChart(list);
+}
+
+function seriesColors(n) {
+    const base = ['--neon-cyan', '--neon-green', '--neon-magenta', '--neon-red'].map(cssVar);
+    // Beyond four, reuse the accents at reduced opacity so neighbouring stacks stay distinct.
+    return Array.from({ length: n }, (_, i) => {
+        const hex = base[i % base.length].replace('#', '');
+        const [r, g, b] = [0, 2, 4].map(o => parseInt(hex.substring(o, o + 2), 16));
+        const alpha = [0.85, 0.5, 0.3][Math.floor(i / base.length) % 3];
+        return `rgba(${r},${g},${b},${alpha})`;
+    });
+}
+
+function renderChart(list) {
+    const periods = allPeriods();
+    const ranked = aggregate(list, seriesOf);
+    const top = ranked.slice(0, MAX_SERIES);
+    const topIds = new Set(top.map(s => s.id));
+    const series = top.map(s => ({ id: s.id, label: s.label }));
+    if (ranked.length > MAX_SERIES) series.push({ id: '__other', label: `Other (${ranked.length - MAX_SERIES})` });
+
+    const values = new Map(series.map(s => [s.id, new Map()]));
+    for (const r of list) {
+        const id = topIds.has(seriesOf(r).id) ? seriesOf(r).id : '__other';
+        const m = values.get(id);
+        m.set(r.periodStart, (m.get(r.periodStart) || 0) + r.totalTokens);
+    }
+
+    const colors = seriesColors(series.length);
+    el('usageChartTitle').textContent = `Total tokens per ${state.period === 'total' ? 'range' : state.period}, by ${state.group === 'model' ? 'model' : 'key'}`;
+
+    if (window.__usageChart) window.__usageChart.destroy();
+    window.__usageChart = new Chart(el('usageChart'), {
+        type: 'bar',
+        data: {
+            labels: periods.map(periodLabel),
+            datasets: series.map((s, i) => ({
+                label: s.label,
+                data: periods.map(p => values.get(s.id).get(p) || 0),
+                backgroundColor: colors[i],
+                borderWidth: 0,
+                borderRadius: 2,
+                maxBarThickness: 48,
+            })),
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+                x: { stacked: true, grid: { display: false } },
+                y: { stacked: true, beginAtZero: true, ticks: { callback: v => compactFmt.format(v) } },
+            },
+            plugins: {
+                legend: { position: 'top', labels: { usePointStyle: true } },
+                tooltip: {
+                    mode: 'index', intersect: false,
+                    filter: item => item.raw > 0,
+                    callbacks: { label: item => `${item.dataset.label}: ${numberFmt.format(item.raw)} tokens` },
+                },
+            },
+        },
+    });
+}
+
+// ── Data ──
+function query(format) {
+    const p = new URLSearchParams({ period: state.period, from: state.from, to: state.to, tz });
+    if (state.apiKeyId) p.set('apiKeyId', state.apiKeyId);
+    if (state.model) p.set('model', state.model);
+    if (format) p.set('format', format);
+    return p;
+}
+
+function syncUrl() {
+    const p = new URLSearchParams({ period: state.period, from: state.from, to: state.to, group: state.group });
+    if (state.apiKeyId) p.set('apiKeyId', state.apiKeyId);
+    if (state.model) p.set('model', state.model);
+    history.replaceState(history.state, '', `${location.pathname}?${p}`);
+}
+
+function syncControls() {
+    document.querySelectorAll('.usage-period-btn').forEach(b => {
+        const on = b.dataset.period === state.period;
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        b.classList.toggle('bg-neon-cyan/20', on);
+        b.classList.toggle('text-neon-cyan', on);
+        b.classList.toggle('border-neon-cyan', on);
+        b.classList.toggle('bg-gray-800/50', !on);
+        b.classList.toggle('text-text-secondary', !on);
+        b.classList.toggle('border-transparent', !on);
+    });
+    el('usageFrom').value = state.from;
+    el('usageTo').value = state.to;
+    el('usageKey').value = state.apiKeyId;
+    el('usageGroup').value = state.group;
+    el('usageCsvLink').href = `/api/stats/usage-report?${query('csv')}`;
+}
+
+function refreshModelOptions() {
+    // Model list comes from the unfiltered-by-model rows, so switching model keeps the others listed.
+    const models = [...new Set(rows.map(r => r.model))].sort((a, b) => a.localeCompare(b));
+    if (state.model && !models.includes(state.model)) models.unshift(state.model);
+    el('usageModel').innerHTML = '<option value="">All models</option>' +
+        models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+    el('usageModel').value = state.model;
+}
+
+let loadSeq = 0;
+async function load() {
+    syncControls();
+    syncUrl();
+    const seq = ++loadSeq;
+    try {
+        // Model filtering is applied client-side so the model dropdown can list every model.
+        const p = query(); p.delete('model');
+        const resp = await fetch(`/api/stats/usage-report?${p}`);
+        if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || resp.statusText);
+        const data = await resp.json();
+        if (seq !== loadSeq) return; // a newer request superseded this one
+        rows = data.rows;
+        el('usageTz').textContent = `Dates in ${data.timeZone}`;
+        refreshModelOptions();
+        render();
+    } catch (e) {
+        console.error('Failed to load usage report:', e);
+        const msg = `<tr><td colspan="6" class="py-4 text-neon-red">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
+        el('usageTotalsBody').innerHTML = msg;
+        el('usagePeriodBody').innerHTML = msg;
+    }
+}
+
+// ── Wiring ──
+document.querySelectorAll('.usage-period-btn').forEach(b => b.addEventListener('click', () => {
+    state.period = b.dataset.period;
+    // A day-by-day view of a year is unreadable; widen the range when switching to coarse periods.
+    const days = (parseYmd(state.to) - parseYmd(state.from)) / 86400000;
+    if (state.period === 'month' && days < 60) [state.from, state.to] = rangeFor('12m').map(ymd);
+    if (state.period === 'year' && days < 366) state.from = `${parseYmd(state.to).getFullYear() - 2}-01-01`;
+    load();
+}));
+document.querySelectorAll('.usage-range-btn').forEach(b => b.addEventListener('click', () => {
+    [state.from, state.to] = rangeFor(b.dataset.range).map(ymd);
+    load();
+}));
+el('usageFrom').addEventListener('change', e => { if (e.target.value) { state.from = e.target.value; load(); } });
+el('usageTo').addEventListener('change', e => { if (e.target.value) { state.to = e.target.value; load(); } });
+el('usageKey').addEventListener('change', e => { state.apiKeyId = e.target.value; load(); });
+el('usageModel').addEventListener('change', e => { state.model = e.target.value; syncControls(); syncUrl(); render(); });
+el('usageGroup').addEventListener('change', e => { state.group = e.target.value; syncUrl(); render(); });
+
+// Initial state from the URL (so a report view can be bookmarked or shared).
+const params = new URLSearchParams(location.search);
+const validDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || '');
+const [defFrom, defTo] = rangeFor('30d').map(ymd);
+state.period = ['day', 'week', 'month', 'year', 'total'].includes(params.get('period')) ? params.get('period') : 'day';
+state.from = validDate(params.get('from')) ? params.get('from') : defFrom;
+state.to = validDate(params.get('to')) ? params.get('to') : defTo;
+state.apiKeyId = params.get('apiKeyId') || '';
+state.model = params.get('model') || '';
+state.group = ['key', 'model', 'keymodel'].includes(params.get('group')) ? params.get('group') : 'keymodel';
+if (state.apiKeyId && ![...el('usageKey').options].some(o => o.value === state.apiKeyId)) state.apiKeyId = '';
+load();
+})();
+</script>

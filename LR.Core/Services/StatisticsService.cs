@@ -13,11 +13,13 @@ public class StatisticsService : IStatisticsService
 {
     private readonly LRDbContext _context;
     private readonly IStatHubPublisher _hubPublisher;
+    private readonly IApiKeyUsageService _usage;
 
-    public StatisticsService(LRDbContext context, IStatHubPublisher hubPublisher)
+    public StatisticsService(LRDbContext context, IStatHubPublisher hubPublisher, IApiKeyUsageService usage)
     {
         _context = context;
         _hubPublisher = hubPublisher;
+        _usage = usage;
     }
 
     /// <inheritdoc />
@@ -49,6 +51,10 @@ public class StatisticsService : IStatisticsService
         await _context.SaveChangesAsync();
 
         await _hubPublisher.PublishAsync(stat);
+
+        // Per-key, per-model hourly rollup for usage reports (see ApiKeyUsageService).
+        await _usage.RecordAsync(apiKeyId, preset?.Name ?? ApiKeyUsageService.UnknownModelName, preset?.Id,
+            response.PromptTokensProcessed, response.GeneratedTokenCount, stat.Timestamp);
     }
 
     /// <inheritdoc />

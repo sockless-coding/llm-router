@@ -447,7 +447,7 @@ public class OllamaHandler : IProtocolHandler
         {
             var presetId = routeRequest.PresetId ?? server.ActivePresetId;
             var preset = presetId.HasValue ? _presetManager.GetById(presetId.Value) : null;
-            await _statisticsService.RecordRequestAsync(server, preset, response);
+            await _statisticsService.RecordRequestAsync(server, preset, response, routeRequest.ApiKeyId);
         }
         catch { /* Stats recording failure shouldn't block the response */ }
 
